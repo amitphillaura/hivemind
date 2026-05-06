@@ -1,15 +1,31 @@
 # Per-agent SessionStart delivery channels
 
-Source of truth for what each per-agent adapter in `src/notifications/delivery/` does (or doesn't) emit. Records the post-deep-read findings from each agent's harness source — config-shape inspection alone was misleading and is no longer trusted.
+Research notes on each agent's harness behavior — what stdout / stderr / JSON shapes get rendered to the user vs the model. The findings below come from source-level reading + multi-channel probes (`probe/probe-*.js`), not just config-shape inspection.
 
-## TL;DR
+## Current implementation status
 
-| Agent | Multi-hook → distinct context blocks? | Stderr → user? | v1 delivery |
+**Only Claude Code has a real delivery adapter.** Other agents will be added one at a time as we expand based on usage:
+
+| Agent | Adapter shipped? | Roadmap order |
+|---|---|---|
+| Claude Code | ✅ `delivery/claude-code.ts` (dual-channel: `systemMessage` + `additionalContext`) | shipped |
+| openclaw | ❌ — | next |
+| Codex | ❌ — | TBD |
+| Cursor | ❌ — | TBD |
+| Hermes | ❌ — | TBD |
+| Pi | ❌ — no SessionStart hook upstream | TBD |
+
+When a new adapter lands: add the agent string to the `Agent` union in `types.ts`, create `delivery/<agent>.ts`, wire it into the dispatch table in `delivery/index.ts`. The notes below tell you exactly what shape each agent's harness needs.
+
+## TL;DR — per-agent harness behavior
+
+| Agent | Multi-hook → distinct context blocks? | Stderr → user? | Recommended delivery shape |
 |---|---|---|---|
-| **Claude Code** | ✅ YES — additionalContext from each hook is delivered (collected into an array) | ❌ stderr captured but NOT rendered as of CC 2.1.131 — use `systemMessage` instead | **REAL**: dual-channel JSON — top-level `systemMessage` (user-visible: renders as `SessionStart:startup says: <text>`) + nested `hookSpecificOutput.additionalContext` (model-visible). |
-| **Codex** | ❌ NO — flattened `Vec<String>`, joined with `\n\n` downstream | ❌ NO — discarded | **STUB**: no-op + TODO (defer inline-append) |
-| **Hermes** | ❌ NO — `on_session_start` return value DISCARDED entirely | ❌ NO — captured to `logger.debug` only | **STUB**: no-op + TODO (defer to `pre_llm_call` + dedup) |
-| **Cursor** | ⚠️ Unknown (closed-source GUI; docs imply concat) | ⚠️ Unknown | **STUB**: no-op + TODO |
+| **Claude Code** | ✅ YES — additionalContext from each hook collected into an array | ❌ stderr captured but NOT rendered as of CC 2.1.131 — use `systemMessage` instead | dual-channel JSON: top-level `systemMessage` (user-visible: renders as `SessionStart:startup says: <text>`) + nested `hookSpecificOutput.additionalContext` (model-visible) |
+| **Codex** | ❌ NO — flattened `Vec<String>`, joined with `\n\n` downstream | ❌ NO — discarded | inline-append into existing session-start.js with a clear divider section |
+| **Hermes** | ❌ NO — `on_session_start` return value DISCARDED entirely at `run_agent.py:9777-9786` | ❌ NO — captured to `logger.debug` only | register a `pre_llm_call` hook with framework-side per-`session_id` dedup (fire only on first turn) |
+| **Cursor** | ⚠️ Unknown (closed-source GUI; docs imply concat) | ⚠️ Unknown | run `probe-cursor.js` first to verify; expected to follow the Codex inline-append pattern |
+| **openclaw** | TBD — research before implementing | TBD | TBD |
 
 ## Findings (source-level)
 
@@ -49,16 +65,18 @@ Empirical evidence preserved in the session JSONL captured by the probe — see 
 
 - `~/.cursor/hooks.json` accepts an array of commands per `sessionStart` — config shape supports multiple hooks.
 - Cursor 1.7+ docs describe `additional_context` as a single string field. Docs are silent on multi-hook merging behavior and stderr handling. No source available to verify.
-- **v1 implication:** behavior unknown; ship a stub. Verify via the runnable probe in `probe/probe-cursor.js` when prioritized.
+- **Implementation note:** behavior unknown; verify via the runnable probe in `probe/probe-cursor.js` before implementing.
 
 ## v1 delivery summary
 
-The only agent that can deliver a notification as a *separate* context block (per the user's "but not DEEPLAKE MEMORY, HIVEMIND" requirement) is **Claude Code**. v1 ships:
+The only agent shipped today is **Claude Code**, via a dual-channel JSON emit:
 
-- Real Claude Code adapter — second hook command. Dual-channel emit:
-  - **stderr** — rendered text printed verbatim (user-visible above the system-reminder, same path as the existing autoupdate banner). Required because notifications are user-facing announcements; the model is not allowed to silently swallow them.
-  - **stdout JSON** — same text in `additionalContext`. The model receives it so it can reason on follow-up turns (e.g. "you have a balance reminder, avoid expensive ops?").
-- No-op stubs for Codex, Cursor, Hermes — framework is wired, but `emit()` does nothing for those agents. Each stub file documents the constraint that blocks real delivery and the deferred design (inline-append for Codex/Cursor; `pre_llm_call`+dedup for Hermes).
+- **`systemMessage` at the top level** of the JSON output — renders verbatim in the terminal as `SessionStart:startup says: <text>`. User-visible.
+- **`hookSpecificOutput.additionalContext`** (nested) — delivered to the model as a `<system-reminder>` block. Lets the model reason on follow-up turns ("you have a balance reminder, avoid expensive ops?").
+
+Both fields carry the same rendered text. The user definitely sees it; the model also receives it.
+
+Other agents (Codex, Cursor, Hermes, Pi, openclaw) are not yet wired. The findings above are the forward reference for what each adapter needs to do when it's prioritized.
 
 ## Probes
 

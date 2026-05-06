@@ -194,13 +194,6 @@ describe("drainSessionStart with welcome rule registered", () => {
     expect(occurrences).toBe(1);
   });
 
-  it("no-op for the codex/cursor/hermes stub adapters (writes nothing to stdout)", async () => {
-    for (const agent of ["codex", "cursor", "hermes"] as const) {
-      writes.length = 0;
-      await drainSessionStart({ agent, creds: FRESH_CREDS });
-      expect(writes.length).toBe(0);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------

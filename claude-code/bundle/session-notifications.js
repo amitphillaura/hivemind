@@ -181,24 +181,9 @@ function emitClaudeCode(rendered) {
   }));
 }
 
-// dist/src/notifications/delivery/codex.js
-function emitCodex(_rendered) {
-}
-
-// dist/src/notifications/delivery/cursor.js
-function emitCursor(_rendered) {
-}
-
-// dist/src/notifications/delivery/hermes.js
-function emitHermes(_rendered) {
-}
-
 // dist/src/notifications/delivery/index.js
 var ADAPTERS = {
-  "claude-code": emitClaudeCode,
-  codex: emitCodex,
-  cursor: emitCursor,
-  hermes: emitHermes
+  "claude-code": emitClaudeCode
 };
 function emit(agent, rendered) {
   if (!rendered)

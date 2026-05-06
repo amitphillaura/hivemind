@@ -12,8 +12,6 @@ import {
   _resetRulesForTest,
 } from "../../src/notifications/rules/registry.js";
 import { emit } from "../../src/notifications/delivery/index.js";
-import { emitCursor } from "../../src/notifications/delivery/cursor.js";
-import { emitHermes } from "../../src/notifications/delivery/hermes.js";
 import { readState, writeState, statePath } from "../../src/notifications/state.js";
 import { readQueue, writeQueue, enqueueNotification, queuePath } from "../../src/notifications/queue.js";
 import { drainSessionStart } from "../../src/notifications/index.js";
@@ -180,58 +178,6 @@ describe("delivery dispatch — empty rendered short-circuit", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// delivery/cursor.ts and delivery/hermes.ts: stub adapters
-// ---------------------------------------------------------------------------
-
-describe("stub delivery adapters — no-op behavior", () => {
-  it("emitCursor writes nothing to stdout (intentional v1 stub)", () => {
-    const writes: string[] = [];
-    const stderr: string[] = [];
-    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
-      writes.push(typeof c === "string" ? c : c.toString());
-      return true;
-    });
-    vi.spyOn(process.stderr, "write").mockImplementation((c: any) => {
-      stderr.push(typeof c === "string" ? c : c.toString());
-      return true;
-    });
-    emitCursor("notification text that should NOT be delivered");
-    expect(writes).toEqual([]);
-    expect(stderr).toEqual([]);
-    vi.restoreAllMocks();
-  });
-
-  it("emitHermes writes nothing to stdout (intentional v1 stub)", () => {
-    const writes: string[] = [];
-    const stderr: string[] = [];
-    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
-      writes.push(typeof c === "string" ? c : c.toString());
-      return true;
-    });
-    vi.spyOn(process.stderr, "write").mockImplementation((c: any) => {
-      stderr.push(typeof c === "string" ? c : c.toString());
-      return true;
-    });
-    emitHermes("notification text that should NOT be delivered");
-    expect(writes).toEqual([]);
-    expect(stderr).toEqual([]);
-    vi.restoreAllMocks();
-  });
-
-  it("delivery dispatch routes to the per-agent stubs (codex / cursor / hermes all no-op)", () => {
-    const writes: string[] = [];
-    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
-      writes.push(typeof c === "string" ? c : c.toString());
-      return true;
-    });
-    emit("codex", "x");
-    emit("cursor", "x");
-    emit("hermes", "x");
-    expect(writes).toEqual([]);
-    vi.restoreAllMocks();
-  });
-});
 
 // ---------------------------------------------------------------------------
 // state.ts: shape-mismatch malformed JSON branches

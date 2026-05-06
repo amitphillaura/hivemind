@@ -1,25 +1,27 @@
 /**
- * Per-agent delivery dispatch. The framework hands each adapter a rendered
- * plain-text notification block. The adapter writes it (or doesn't) in
- * whatever shape that agent's harness will surface to the user without
- * concatenating it into the existing memory/hivemind block.
+ * Per-agent delivery dispatch. Each adapter receives a rendered plain-text
+ * notification block and writes it in whatever shape that agent's harness
+ * surfaces to the user without concatenating into the existing memory/hivemind
+ * block.
  *
- * See AGENT_CHANNELS.md for which adapters are real vs no-op stubs and why.
+ * Today only Claude Code has a real adapter. Other agents (Codex, Cursor,
+ * Hermes, Pi, openclaw) will be added one at a time — each addition is:
+ *   1. New file `src/notifications/delivery/<agent>.ts` exporting an emit
+ *   2. Add the agent string to the `Agent` union in `../types.ts`
+ *   3. Wire it into the ADAPTERS map below
+ *
+ * See `../AGENT_CHANNELS.md` for the research on per-agent harness
+ * behavior — that's the forward reference for what each new adapter
+ * needs to do.
  */
 
 import type { Agent } from "../types.js";
 import { emitClaudeCode } from "./claude-code.js";
-import { emitCodex } from "./codex.js";
-import { emitCursor } from "./cursor.js";
-import { emitHermes } from "./hermes.js";
 
 export type EmitFn = (rendered: string) => void;
 
 const ADAPTERS: Record<Agent, EmitFn> = {
   "claude-code": emitClaudeCode,
-  codex: emitCodex,
-  cursor: emitCursor,
-  hermes: emitHermes,
 };
 
 export function emit(agent: Agent, rendered: string): void {

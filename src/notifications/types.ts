@@ -42,7 +42,12 @@ export interface Rule {
   evaluate(ctx: NotificationContext): Notification | null;
 }
 
-export type Agent = "claude-code" | "codex" | "cursor" | "hermes";
+// Today the framework only delivers to Claude Code. Other agents (Codex,
+// Cursor, Hermes, Pi, openclaw) will be added one at a time as we wire
+// real per-agent adapters — the union grows + a new file lands in
+// src/notifications/delivery/. AGENT_CHANNELS.md preserves the research
+// on each agent's harness behavior as a forward reference.
+export type Agent = "claude-code";
 
 export interface NotificationsState {
   /** id → { dedupKey JSON, ISO timestamp shown }. */
