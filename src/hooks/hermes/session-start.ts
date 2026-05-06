@@ -21,8 +21,8 @@ import { getInstalledVersion } from "../../utils/version-check.js";
 const log = (msg: string) => _log("hermes-session-start", msg);
 
 const __bundleDir = dirname(fileURLToPath(import.meta.url));
-const AUTH_CMD = join(__bundleDir, "commands", "auth-login.js");
-const HIVEMIND_CLI = join(__bundleDir, "..", "..", "bundle", "cli.js");
+// Hivemind requires its npm bin (`hivemind` from @deeplake/hivemind) on PATH.
+// Inject text uses bare `hivemind <sub>` form — no per-agent path resolution needed.
 
 const context = `DEEPLAKE MEMORY: Persistent memory at ~/.deeplake/memory/ shared across sessions, users, and agents.
 
@@ -32,19 +32,30 @@ You also have hivemind MCP tools registered: hivemind_search, hivemind_read, hiv
 IMPORTANT: Only use these bash builtins to interact with ~/.deeplake/memory/: cat, ls, grep, echo, jq, head, tail, sed, awk, wc, sort, find. Do NOT use rg/ripgrep, python, python3, node, curl, or other interpreters.
 Do NOT spawn subagents to read deeplake memory.
 
+Organization management — each argument is SEPARATE (do NOT quote subcommands together):
+- hivemind login                              — SSO login
+- hivemind whoami                             — show current user/org
+- hivemind org list                           — list organizations
+- hivemind org switch <name-or-id>            — switch organization
+- hivemind workspaces                         — list workspaces
+- hivemind workspace <id>                     — switch workspace
+- hivemind invite <email> <ADMIN|WRITE|READ>  — invite member (ALWAYS ask user which role before inviting)
+- hivemind members                            — list members
+- hivemind remove <user-id>                   — remove member
+
 SKILLS (skilify) — mine + share reusable skills across the org:
-- node "HIVEMIND_CLI" skilify                         — show scope/team/install + per-project state
-- node "HIVEMIND_CLI" skilify pull                    — sync project skills from the org table
-- node "HIVEMIND_CLI" skilify pull --user <email>     — only that author's skills
-- node "HIVEMIND_CLI" skilify pull --users a,b,c      — multiple authors (CSV)
-- node "HIVEMIND_CLI" skilify pull --all-users        — explicit "no author filter"
-- node "HIVEMIND_CLI" skilify pull --to project|global  — install location
-- node "HIVEMIND_CLI" skilify pull --dry-run          — preview only
-- node "HIVEMIND_CLI" skilify pull --force            — overwrite local (creates .bak)
-- node "HIVEMIND_CLI" skilify pull <skill-name>       — pull only that skill (combines with --user)
-- node "HIVEMIND_CLI" skilify scope <me|team|org>     — sharing scope for new skills
-- node "HIVEMIND_CLI" skilify install <project|global>  — default install location
-- node "HIVEMIND_CLI" skilify team add|remove|list <name>  — manage team list`;
+- hivemind skilify                         — show scope/team/install + per-project state
+- hivemind skilify pull                    — sync project skills from the org table
+- hivemind skilify pull --user <email>     — only that author's skills
+- hivemind skilify pull --users a,b,c      — multiple authors (CSV)
+- hivemind skilify pull --all-users        — explicit "no author filter"
+- hivemind skilify pull --to project|global  — install location
+- hivemind skilify pull --dry-run          — preview only
+- hivemind skilify pull --force            — overwrite local (creates .bak)
+- hivemind skilify pull <skill-name>       — pull only that skill (combines with --user)
+- hivemind skilify scope <me|team|org>     — sharing scope for new skills
+- hivemind skilify install <project|global>  — default install location
+- hivemind skilify team add|remove|list <name>  — manage team list`;
 
 interface HermesSessionStartInput {
   hook_event_name?: string;
@@ -116,10 +127,10 @@ async function main(): Promise<void> {
   const current = getInstalledVersion(__bundleDir, ".claude-plugin");
   if (current) versionNotice = `\nHivemind v${current}`;
 
-  const resolvedContext = context.replace(/HIVEMIND_CLI/g, HIVEMIND_CLI);
+  // No placeholder substitution — inject already uses bare `hivemind <sub>` form.
   const additional = creds?.token
-    ? `${resolvedContext}\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${versionNotice}`
-    : `${resolvedContext}\nNot logged in to Deeplake. Run: node "${AUTH_CMD}" login${versionNotice}`;
+    ? `${context}\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${versionNotice}`
+    : `${context}\nNot logged in to Deeplake. Run: hivemind login${versionNotice}`;
 
   // Hermes expects { context: "..." } on stdout
   console.log(JSON.stringify({ context: additional }));

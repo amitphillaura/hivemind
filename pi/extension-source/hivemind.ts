@@ -646,6 +646,17 @@ Three hivemind tools are registered:
 
 Prefer these tools — one call returns ranked hits across all summaries and sessions in a single SQL query. Different paths under /summaries/<username>/ are different users; do NOT merge or alias them. Fall back to grep on ~/.deeplake/memory/ only if tools are unavailable.
 
+Organization management — each argument is SEPARATE (do NOT quote subcommands together):
+- hivemind login                              — SSO login
+- hivemind whoami                             — show current user/org
+- hivemind org list                           — list organizations
+- hivemind org switch <name-or-id>            — switch organization
+- hivemind workspaces                         — list workspaces
+- hivemind workspace <id>                     — switch workspace
+- hivemind invite <email> <ADMIN|WRITE|READ>  — invite member (ALWAYS ask user which role before inviting)
+- hivemind members                            — list members
+- hivemind remove <user-id>                   — remove member
+
 SKILLS (skilify) — mine + share reusable skills across the org. Run these in a terminal (or via shell if available):
 - hivemind skilify                         — show scope/team/install + per-project state
 - hivemind skilify pull                    — sync project skills from the org table

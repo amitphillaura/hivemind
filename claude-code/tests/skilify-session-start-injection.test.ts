@@ -68,21 +68,35 @@ describe("skilify SessionStart injection (per-agent bundles)", () => {
   );
 
   it.each(SESSION_START_BUNDLES)(
-    "%s bundle resolves HIVEMIND_CLI placeholder (no literal placeholder leaks at runtime)",
+    "%s bundle uses bare `hivemind <sub>` form (no HIVEMIND_CLI placeholder leak)",
     (_label, p) => {
       const text = readFileSync(p, "utf-8");
-      // The bundle must contain the string `HIVEMIND_CLI` ONLY in two contexts:
-      //   1. The const declaration (`const HIVEMIND_CLI = join(...)`).
-      //   2. The substitution call (`replace(/HIVEMIND_CLI/g, HIVEMIND_CLI)`).
-      // It must NOT appear inside a quoted template-string segment that would
-      // ship to the agent verbatim. We assert that `replace` is wired up so
-      // any literal occurrence in the inject string gets substituted.
-      expect(text).toMatch(/replace\(\s*\/HIVEMIND_CLI\/g\s*,\s*HIVEMIND_CLI\s*\)/);
-      // esbuild emits `var HIVEMIND_CLI = ...` (it does not preserve const).
-      expect(text).toMatch(/(?:var|const|let)\s+HIVEMIND_CLI\s*=/);
-      // The const must resolve to the unified hivemind dispatcher one level
-      // above each agent's bundle dir: <root>/<agent>/bundle/../../bundle/cli.js
-      expect(text).toMatch(/HIVEMIND_CLI\s*=\s*join\d*\(\s*__bundleDir\s*,\s*"\.\.",\s*"\.\.",\s*"bundle",\s*"cli\.js"\s*\)/);
+      // After the npm-bin unification: the inject text uses bare `hivemind skilify`,
+      // `hivemind login`, etc. There must be NO HIVEMIND_CLI const, NO placeholder
+      // substitution, and NO literal "HIVEMIND_CLI" string in the inject anywhere.
+      expect(text).not.toMatch(/HIVEMIND_CLI/);
+      // The placeholder substitution call (`replace(/HIVEMIND_CLI/g, …)`) must
+      // be gone — its presence would mean we forgot to delete it after the
+      // unification.
+      expect(text).not.toMatch(/replace\(\s*\/HIVEMIND_CLI/);
+      // Inject must contain the bare hivemind invocations the agent should suggest.
+      expect(text).toMatch(/hivemind skilify\b/);
+    }
+  );
+
+  it.each(SESSION_START_BUNDLES)(
+    "%s bundle Organization management section uses bare `hivemind <sub>` form",
+    (_label, p) => {
+      const text = readFileSync(p, "utf-8");
+      // Org management was previously CC-only and used path-resolved form; now
+      // propagated to all four hook-driven agents and unified on bare form.
+      expect(text).toMatch(/Organization management/);
+      expect(text).toMatch(/hivemind whoami\b/);
+      expect(text).toMatch(/hivemind org list\b/);
+      expect(text).toMatch(/hivemind invite\b/);
+      // Must NOT contain the legacy `node "HIVEMIND_AUTH_CMD" <sub>` form
+      expect(text).not.toMatch(/HIVEMIND_AUTH_CMD/);
+      expect(text).not.toMatch(/auth-login\.js"\s+\w/);
     }
   );
 });
@@ -119,6 +133,18 @@ describe("skilify discoverability on non-bundle agent surfaces (Pi + OpenClaw)",
       expect(text).toMatch(/skilify team/);
     }
   );
+
+  it("pi extension Organization management section uses bare `hivemind <sub>` form", () => {
+    // Pi specifically: org management was missing (only CC had it before the
+    // npm-bin unification) and now propagated. OpenClaw uses /hivemind_*
+    // plugin-native commands which are a different surface — covered by
+    // openclaw.plugin.json contracts.commands, not by this assertion.
+    const text = readFileSync(resolve(BUNDLE_ROOT, "pi", "extension-source", "hivemind.ts"), "utf-8");
+    expect(text).toMatch(/Organization management/);
+    expect(text).toMatch(/hivemind whoami\b/);
+    expect(text).toMatch(/hivemind org list\b/);
+    expect(text).toMatch(/hivemind invite\b/);
+  });
 });
 
 describe("Pi skilify worker (mining) wiring", () => {
