@@ -48,6 +48,16 @@ vi.mock("../../src/hooks/shared/autoupdate.js", () => ({
   autoUpdate: (...a: any[]) => autoUpdateMock(...a),
 }));
 
+// getInstalledVersion mocked so we can drive the "version notice" branch
+// in additionalContext deterministically (returns a value vs null). The
+// real implementation walks the fs and would always return the repo's
+// package.json version, leaving the null branch uncovered.
+const getInstalledVersionMock = vi.fn();
+vi.mock("../../src/utils/version-check.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/utils/version-check.js")>();
+  return { ...actual, getInstalledVersion: (...a: unknown[]) => getInstalledVersionMock(...a) };
+});
+
 let stdoutLines: string[] = [];
 const stdoutSpy = vi.spyOn(process.stdout, "write");
 
@@ -96,6 +106,7 @@ beforeEach(() => {
   ensureSessionsTableMock.mockReset().mockResolvedValue(undefined);
   queryMock.mockReset().mockResolvedValue([]); // "no existing summary"
   autoUpdateMock.mockReset().mockResolvedValue(undefined);
+  getInstalledVersionMock.mockReset().mockReturnValue("9.9.9");
 });
 
 afterEach(() => {
@@ -237,26 +248,25 @@ describe("session-start hook — centralized autoupdate", () => {
 // ═══ Negative-pattern guard: legacy paths must NOT re-appear ════════════════
 
 describe("session-start hook — legacy autoupdate paths are gone", () => {
-  // Catches a regression where someone re-introduces the marketplace
-  // execSync flow, the snapshot/restore plumbing, or the fetch-against-
-  // GitHub-raw version probe. After centralization, the hook MUST go
-  // through the autoUpdate helper exclusively.
-
-  it("does not call execSync from session-start (legacy 'claude plugin update')", async () => {
-    // The hook no longer imports execSync — if it did, this assertion
-    // would catch any reintroduction. The mock is a no-op since
-    // node:child_process isn't mocked anymore.
-    await runHook();
-    // No assertion needed — if execSync were re-introduced and called,
-    // it'd hit the real binary and likely fail or hang. The presence of
-    // autoUpdateMock being called proves the new path is in use.
-    expect(autoUpdateMock).toHaveBeenCalled();
-  });
+  // Catches a regression where someone re-introduces the legacy paths.
+  // After centralization, the hook MUST go through the autoUpdate helper
+  // exclusively (which we mock above) — no direct execSync, no direct
+  // fetch against GitHub raw `package.json`.
+  //
+  // We can't `vi.spyOn(childProcess, "execSync")` directly because of an
+  // ESM namespace-immutability limit in vitest:
+  //   https://vitest.dev/guide/browser/#limitations
+  // The fetch-spy below provides the load-bearing negative check: the
+  // legacy autoupdate flow ALWAYS started with a `fetch(githubraw)`, so
+  // if no fetch fires, the legacy probe is gone, and by construction the
+  // marketplace `claude plugin update` execSync that was gated on the
+  // probe result can't fire either.
 
   it("does not call fetch from session-start (legacy GitHub raw probe)", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("should not be called"));
     await runHook();
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(autoUpdateMock).toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 });
@@ -278,6 +288,21 @@ describe("session-start hook — fatal catch", () => {
 // the autoupdate centralization (the hook still composes additionalContext
 // from creds + version stamp, just without the legacy update plumbing).
 describe("session-start hook — context shape edge cases", () => {
+  it("includes version notice when getInstalledVersion returns a value", async () => {
+    getInstalledVersionMock.mockReturnValue("0.7.4");
+    const out = await runHook();
+    const parsed = JSON.parse(out!);
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("✅ Hivemind v0.7.4");
+  });
+
+  it("omits version notice when getInstalledVersion returns null", async () => {
+    getInstalledVersionMock.mockReturnValue(null);
+    const out = await runHook();
+    const parsed = JSON.parse(out!);
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain("Hivemind v");
+  });
+
+
   it("workspaceId missing on creds falls back to 'default' in context", async () => {
     loadCredsMock.mockReturnValue({
       token: "t", orgId: "o", orgName: "acme", userName: "alice",

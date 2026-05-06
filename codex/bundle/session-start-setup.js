@@ -53,8 +53,8 @@ var init_index_marker_store = __esm({
 });
 
 // dist/src/hooks/codex/session-start-setup.js
-import { join as join6 } from "node:path";
-import { homedir as homedir4 } from "node:os";
+import { join as join7 } from "node:path";
+import { homedir as homedir5 } from "node:os";
 
 // dist/src/commands/auth.js
 import { execSync } from "node:child_process";
@@ -574,8 +574,15 @@ function makeWikiLogger(hooksDir, filename = "deeplake-wiki.log") {
 // dist/src/hooks/shared/autoupdate.js
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { openSync, closeSync, statSync, unlinkSync as unlinkSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join6 } from "node:path";
+import { homedir as homedir4 } from "node:os";
 var execFileAsync = promisify(execFile);
 var log3 = (msg) => log("autoupdate", msg);
+function lockPath() {
+  return join6(homedir4(), ".deeplake", ".autoupdate.lock");
+}
+var LOCK_STALE_MS = 5 * 6e4;
 var RESTART_HINT = {
   claude: "Run /reload-plugins to apply.",
   codex: "Restart Codex to apply.",
@@ -607,6 +614,32 @@ async function findHivemindOnPath() {
     return null;
   }
 }
+function tryAcquireLock() {
+  const path = lockPath();
+  try {
+    const age = Date.now() - statSync(path).mtimeMs;
+    if (age > LOCK_STALE_MS) {
+      log3(`stale lock (${Math.round(age / 1e3)}s old) \u2014 clearing`);
+      unlinkSync2(path);
+    }
+  } catch {
+  }
+  try {
+    const fd = openSync(path, "wx");
+    writeFileSync3(path, `${process.pid}
+`);
+    closeSync(fd);
+    return path;
+  } catch {
+    return null;
+  }
+}
+function releaseLock(path) {
+  try {
+    unlinkSync2(path);
+  } catch {
+  }
+}
 function extractUpdateSummary(combined) {
   const lines = combined.split(/\r?\n/);
   for (const re of [/Updated to .+\./, /Update available: .+/, /is up to date/]) {
@@ -633,14 +666,24 @@ async function autoUpdate(creds, opts) {
     log3(`agent=${opts.agent} skip: hivemind binary not on PATH`);
     return;
   }
-  log3(`agent=${opts.agent} binary=${binaryPath} \u2192 spawning update`);
+  const lock = opts.skipLock ? "noop" : tryAcquireLock();
+  if (!lock) {
+    log3(`agent=${opts.agent} skip: another autoupdate in flight`);
+    return;
+  }
+  log3(`agent=${opts.agent} binary=${binaryPath} \u2192 spawning update (lock=${lock})`);
   const spawnFn = opts.spawn ?? defaultSpawn;
   let result;
   try {
-    result = await spawnFn(binaryPath, ["update"], timeoutMs);
-  } catch (e) {
-    log3(`agent=${opts.agent} spawn threw: ${e?.message ?? e}`);
-    return;
+    try {
+      result = await spawnFn(binaryPath, ["update"], timeoutMs);
+    } catch (e) {
+      log3(`agent=${opts.agent} spawn threw: ${e?.message ?? e}`);
+      return;
+    }
+  } finally {
+    if (lock !== "noop")
+      releaseLock(lock);
   }
   log3(`agent=${opts.agent} spawn done: code=${result.code} stdout=${result.stdout.length}B stderr=${result.stderr.length}B`);
   if (result.code !== 0 && !/Update available/.test(result.stderr + result.stdout)) {
@@ -660,7 +703,7 @@ async function autoUpdate(creds, opts) {
 
 // dist/src/hooks/codex/session-start-setup.js
 var log4 = (msg) => log("codex-session-setup", msg);
-var { log: wikiLog } = makeWikiLogger(join6(homedir4(), ".codex", "hooks"));
+var { log: wikiLog } = makeWikiLogger(join7(homedir5(), ".codex", "hooks"));
 async function createPlaceholder(api, table, sessionId, cwd, userName, orgName, workspaceId) {
   const summaryPath = `/summaries/${userName}/${sessionId}.md`;
   const existing = await api.query(`SELECT path FROM "${table}" WHERE path = '${sqlStr(summaryPath)}' LIMIT 1`);

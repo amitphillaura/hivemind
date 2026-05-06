@@ -228,6 +228,15 @@ export default defineConfig({
         "src/hooks/hermes/session-start.ts": { statements: 80, branches: 80, functions: 80, lines: 80 },
         "src/mcp/server.ts":            { statements: 80, branches: 80, functions: 80, lines: 80 },
         "src/utils/version-check.ts":   { statements: 80, branches: 80, functions: 80, lines: 80 },
+        // feat/centralize-autoupdate — shared autoUpdate helper that every
+        // session-start hook calls. Branches at 80 (not 90) because the
+        // default-spawn child_process callbacks (close-with-null-code from
+        // signal kill, the 'error' event-handler ack path) and the empty-
+        // string success branch in findHivemindOnPath() can't be deterministically
+        // triggered from unit tests without forking real subprocesses. Statements
+        // + lines + functions held at 80; the gating + output-parsing logic
+        // (the actually-load-bearing surface) is exhaustively tested.
+        "src/hooks/shared/autoupdate.ts": { statements: 80, branches: 80, functions: 80, lines: 80 },
       },
     },
   },

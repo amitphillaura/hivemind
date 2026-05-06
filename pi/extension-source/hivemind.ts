@@ -62,6 +62,11 @@ interface Creds {
   orgName?: string;
   workspaceId: string;
   userName: string;
+  // Mirrors Credentials.autoupdate from src/commands/auth-creds.ts. The
+  // inline autoUpdate gate below depends on this — without it the gate
+  // sees `undefined !== false` and runs the update even when the user
+  // has explicitly run `hivemind autoupdate off`.
+  autoupdate?: boolean;
 }
 
 function loadCreds(): Creds | null {
@@ -78,6 +83,7 @@ function loadCreds(): Creds | null {
       orgName: parsed.orgName,
       workspaceId: parsed.workspaceId ?? "default",
       userName: parsed.userName ?? "unknown",
+      autoupdate: parsed.autoupdate,
     };
   } catch {
     return null;

@@ -34,11 +34,21 @@
 
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { openSync, closeSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Credentials } from "../../commands/auth-creds.js";
 import { log as _log } from "../../utils/debug.js";
 
 const execFileAsync = promisify(execFile);
 const log = (msg: string) => _log("autoupdate", msg);
+
+// Lazy: homedir() reads $HOME at call time, but capturing it at module
+// load would freeze the path before tests can override process.env.HOME.
+function lockPath(): string {
+  return join(homedir(), ".deeplake", ".autoupdate.lock");
+}
+const LOCK_STALE_MS = 5 * 60_000;  // 5 minutes — covers a slow-link npm install
 
 export type AgentId = "claude" | "codex" | "cursor" | "hermes" | "pi" | "openclaw";
 
@@ -67,6 +77,8 @@ export interface AutoUpdateOpts {
   spawn?: (cmd: string, args: string[], timeoutMs: number) => Promise<SpawnResult>;
   /** Test override: replaces the stderr writer (so we can assert on the summary line). */
   stderr?: (msg: string) => void;
+  /** Test override: skip the machine-wide lock so unit tests don't fight over `~/.deeplake/.autoupdate.lock`. */
+  skipLock?: boolean;
 }
 
 const defaultStderr = (msg: string) => process.stderr.write(msg);
@@ -90,6 +102,48 @@ async function findHivemindOnPath(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Try to acquire a machine-wide lock so only one `hivemind update` runs at
+ * a time across all session-start hooks. Without this, two agents opening
+ * simultaneously would race on `npm install -g` and `hivemind install
+ * --skip-auth`, potentially leaving the install in a partial state.
+ *
+ * Implementation: O_EXCL on a file under `~/.deeplake/.autoupdate.lock`.
+ * If another process holds it, we skip this round (the next session-start
+ * will retry). A stale lock older than LOCK_STALE_MS is forcibly cleared —
+ * covers the case where a previous holder crashed without releasing.
+ *
+ * Returns the lock path on success (caller must `releaseLock()` it), or
+ * null if another holder is active.
+ */
+function tryAcquireLock(): string | null {
+  const path = lockPath();
+  // Best-effort stale-lock cleanup. statSync may fail if the lock isn't
+  // there at all — that's fine, we proceed to the open.
+  try {
+    const age = Date.now() - statSync(path).mtimeMs;
+    if (age > LOCK_STALE_MS) {
+      log(`stale lock (${Math.round(age / 1000)}s old) — clearing`);
+      unlinkSync(path);
+    }
+  } catch { /* lock doesn't exist; that's the happy path */ }
+
+  // O_CREAT | O_EXCL | O_WRONLY — atomic create-or-fail. If the file
+  // already exists, another process holds the lock; we return null.
+  try {
+    const fd = openSync(path, "wx");
+    writeFileSync(path, `${process.pid}\n`);
+    closeSync(fd);
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+function releaseLock(path: string): void {
+  try { unlinkSync(path); } catch { /* already gone — fine */ }
 }
 
 /**
@@ -129,15 +183,25 @@ export async function autoUpdate(
     ? opts.hivemindBinaryPath
     : await findHivemindOnPath();
   if (!binaryPath) { log(`agent=${opts.agent} skip: hivemind binary not on PATH`); return; }
-  log(`agent=${opts.agent} binary=${binaryPath} → spawning update`);
+
+  // Machine-wide lock: only one `hivemind update` may be in flight at
+  // once, across all agents on the host. If another process holds it,
+  // skip — the next session-start will retry.
+  const lock = opts.skipLock ? "noop" : tryAcquireLock();
+  if (!lock) { log(`agent=${opts.agent} skip: another autoupdate in flight`); return; }
+  log(`agent=${opts.agent} binary=${binaryPath} → spawning update (lock=${lock})`);
 
   const spawnFn = opts.spawn ?? defaultSpawn;
   let result: SpawnResult;
   try {
-    result = await spawnFn(binaryPath, ["update"], timeoutMs);
-  } catch (e: any) {
-    log(`agent=${opts.agent} spawn threw: ${e?.message ?? e}`);
-    return;
+    try {
+      result = await spawnFn(binaryPath, ["update"], timeoutMs);
+    } catch (e: any) {
+      log(`agent=${opts.agent} spawn threw: ${e?.message ?? e}`);
+      return;
+    }
+  } finally {
+    if (lock !== "noop") releaseLock(lock);
   }
   log(`agent=${opts.agent} spawn done: code=${result.code} stdout=${result.stdout.length}B stderr=${result.stderr.length}B`);
 

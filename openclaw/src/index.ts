@@ -168,13 +168,16 @@ async function checkForUpdate(logger: PluginLogger): Promise<void> {
   try {
     const current = getInstalledVersion();
     if (!current) return;
-    const res = await fetch(VERSION_URL, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(VERSION_URL, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return;
     const latest = extractLatestVersion(await res.json());
     if (latest && isNewer(latest, current)) {
+      pendingUpdate = { current, latest };
       logger.info?.(`⬆️ Hivemind update available: ${current} → ${latest}. Run: hivemind update`);
     }
-  } catch {}
+  } catch (err) {
+    logger.error(`Auto-update check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // --- Auth state ---
@@ -763,36 +766,10 @@ export default definePluginEntry({
       pluginApi.on(event, handler);
     };
 
-    // Auto-update notice: when enabled (default true), check the npm
-    // registry once per gateway start. If a newer version exists, record
-    // it for before_prompt_build to surface in the system prompt + emit
-    // a logger.info notice telling the user to run `hivemind update`.
-    //
-    // We do NOT spawn `hivemind update` from inside the OpenClaw plugin
-    // because the OpenClaw plugin bundle stubs out `node:child_process`
-    // for security/static-analysis (see esbuild.config.mjs:279). The
-    // plugin can't shell out — only print notices. Centralization here
-    // is at the *source-of-truth* layer (npm registry, not ClawHub) and
-    // the *advice text* layer ("hivemind update", not "openclaw plugins
-    // update hivemind"). The actual upgrade is initiated by the user
-    // running the suggested command (or any other agent's session-start
-    // hook firing the autoUpdate helper, which refreshes openclaw too).
-    if (config.autoUpdate !== false) {
-      (async () => {
-        try {
-          const current = getInstalledVersion();
-          if (!current) return;
-          const res = await fetch(VERSION_URL, { signal: AbortSignal.timeout(5000) });
-          if (!res.ok) return;
-          const latest = extractLatestVersion(await res.json());
-          if (!latest || !isNewer(latest, current)) return;
-          pendingUpdate = { current, latest };
-          logger.info?.(`⬆️ Hivemind update available: ${current} → ${latest}. Run: hivemind update`);
-        } catch (err) {
-          logger.error(`Auto-update check failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      })();
-    }
+    // (Auto-update notice runs further down via the single
+    // checkForUpdate(logger) call, gated on config.autoUpdate. Do NOT
+    // duplicate the npm-registry probe here — see CodeRabbit feedback
+    // on PR #97.)
 
     // Inject SKILL.md body into the system prompt so the agent actually sees
     // the "call hivemind_search first" directives + anti-conflation rules.
@@ -987,8 +964,16 @@ export default definePluginEntry({
       }
     }
 
-    // Non-blocking version check
-    checkForUpdate(logger).catch(() => {});
+    // Non-blocking version check. Gated on `config.autoUpdate` (default
+    // true). The plugin bundle stubs out node:child_process so we can't
+    // spawn `hivemind update` from in-process — checkForUpdate just sets
+    // pendingUpdate (read by before_prompt_build) and prints a notice
+    // pointing the user at `hivemind update`. The real upgrade fires
+    // when ANY other agent's session-start hook calls autoUpdate, which
+    // refreshes the openclaw bundle along with everything else.
+    if (config.autoUpdate !== false) {
+      checkForUpdate(logger).catch(() => {});
+    }
 
     logger.info?.("Hivemind plugin registered");
     } catch (err) {

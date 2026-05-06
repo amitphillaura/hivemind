@@ -162,13 +162,10 @@ async function main(): Promise<void> {
   // Version notice in additionalContext — informational only; the
   // upgrade-applied signal goes to stderr from inside autoUpdate (which
   // already fired earlier in main(), before the DB ensure-table calls).
-  let updateNotice = "";
-  try {
-    const current = getInstalledVersion(__bundleDir, ".claude-plugin");
-    if (current) updateNotice = `\n\n✅ Hivemind v${current}`;
-  } catch (e: any) {
-    log(`version check failed: ${e.message}`);
-  }
+  // getInstalledVersion swallows its own fs errors and returns null, so
+  // no try/catch needed here.
+  const current = getInstalledVersion(__bundleDir, ".claude-plugin");
+  const updateNotice = current ? `\n\n✅ Hivemind v${current}` : "";
 
   const resolvedContext = context.replace(/HIVEMIND_AUTH_CMD/g, AUTH_CMD);
   const additionalContext = creds?.token

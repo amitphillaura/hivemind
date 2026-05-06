@@ -54,8 +54,8 @@ var init_index_marker_store = __esm({
 
 // dist/src/hooks/session-start.js
 import { fileURLToPath } from "node:url";
-import { dirname as dirname2, join as join7 } from "node:path";
-import { homedir as homedir4 } from "node:os";
+import { dirname as dirname2, join as join8 } from "node:path";
+import { homedir as homedir5 } from "node:os";
 
 // dist/src/commands/auth.js
 import { execSync } from "node:child_process";
@@ -617,8 +617,15 @@ function makeWikiLogger(hooksDir, filename = "deeplake-wiki.log") {
 // dist/src/hooks/shared/autoupdate.js
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { openSync, closeSync, statSync, unlinkSync as unlinkSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join7 } from "node:path";
+import { homedir as homedir4 } from "node:os";
 var execFileAsync = promisify(execFile);
 var log3 = (msg) => log("autoupdate", msg);
+function lockPath() {
+  return join7(homedir4(), ".deeplake", ".autoupdate.lock");
+}
+var LOCK_STALE_MS = 5 * 6e4;
 var RESTART_HINT = {
   claude: "Run /reload-plugins to apply.",
   codex: "Restart Codex to apply.",
@@ -650,6 +657,32 @@ async function findHivemindOnPath() {
     return null;
   }
 }
+function tryAcquireLock() {
+  const path = lockPath();
+  try {
+    const age = Date.now() - statSync(path).mtimeMs;
+    if (age > LOCK_STALE_MS) {
+      log3(`stale lock (${Math.round(age / 1e3)}s old) \u2014 clearing`);
+      unlinkSync2(path);
+    }
+  } catch {
+  }
+  try {
+    const fd = openSync(path, "wx");
+    writeFileSync3(path, `${process.pid}
+`);
+    closeSync(fd);
+    return path;
+  } catch {
+    return null;
+  }
+}
+function releaseLock(path) {
+  try {
+    unlinkSync2(path);
+  } catch {
+  }
+}
 function extractUpdateSummary(combined) {
   const lines = combined.split(/\r?\n/);
   for (const re of [/Updated to .+\./, /Update available: .+/, /is up to date/]) {
@@ -676,14 +709,24 @@ async function autoUpdate(creds, opts) {
     log3(`agent=${opts.agent} skip: hivemind binary not on PATH`);
     return;
   }
-  log3(`agent=${opts.agent} binary=${binaryPath} \u2192 spawning update`);
+  const lock = opts.skipLock ? "noop" : tryAcquireLock();
+  if (!lock) {
+    log3(`agent=${opts.agent} skip: another autoupdate in flight`);
+    return;
+  }
+  log3(`agent=${opts.agent} binary=${binaryPath} \u2192 spawning update (lock=${lock})`);
   const spawnFn = opts.spawn ?? defaultSpawn;
   let result;
   try {
-    result = await spawnFn(binaryPath, ["update"], timeoutMs);
-  } catch (e) {
-    log3(`agent=${opts.agent} spawn threw: ${e?.message ?? e}`);
-    return;
+    try {
+      result = await spawnFn(binaryPath, ["update"], timeoutMs);
+    } catch (e) {
+      log3(`agent=${opts.agent} spawn threw: ${e?.message ?? e}`);
+      return;
+    }
+  } finally {
+    if (lock !== "noop")
+      releaseLock(lock);
   }
   log3(`agent=${opts.agent} spawn done: code=${result.code} stdout=${result.stdout.length}B stderr=${result.stderr.length}B`);
   if (result.code !== 0 && !/Update available/.test(result.stderr + result.stdout)) {
@@ -704,7 +747,7 @@ async function autoUpdate(creds, opts) {
 // dist/src/hooks/session-start.js
 var log4 = (msg) => log("session-start", msg);
 var __bundleDir = dirname2(fileURLToPath(import.meta.url));
-var AUTH_CMD = join7(__bundleDir, "commands", "auth-login.js");
+var AUTH_CMD = join8(__bundleDir, "commands", "auth-login.js");
 var context = `DEEPLAKE MEMORY: You have TWO memory sources. ALWAYS check BOTH when the user asks you to recall, remember, or look up ANY information:
 
 1. Your built-in memory (~/.claude/) \u2014 personal per-project notes
@@ -741,8 +784,8 @@ IMPORTANT: Only use bash commands (cat, ls, grep, echo, jq, head, tail, etc.) to
 LIMITS: Do NOT spawn subagents to read deeplake memory. If a file returns empty after 2 attempts, skip it and move on. Report what you found rather than exhaustively retrying.
 
 Debugging: Set HIVEMIND_DEBUG=1 to enable verbose logging to ~/.deeplake/hook-debug.log`;
-var HOME = homedir4();
-var { log: wikiLog } = makeWikiLogger(join7(HOME, ".claude", "hooks"));
+var HOME = homedir5();
+var { log: wikiLog } = makeWikiLogger(join8(HOME, ".claude", "hooks"));
 async function createPlaceholder(api, table, sessionId, cwd, userName, orgName, workspaceId) {
   const summaryPath = `/summaries/${userName}/${sessionId}.md`;
   const existing = await api.query(`SELECT path FROM "${table}" WHERE path = '${sqlStr(summaryPath)}' LIMIT 1`);
@@ -807,16 +850,10 @@ async function main() {
       wikiLog(`SessionStart: placeholder failed for ${input.session_id}: ${e.message}`);
     }
   }
-  let updateNotice = "";
-  try {
-    const current = getInstalledVersion(__bundleDir, ".claude-plugin");
-    if (current)
-      updateNotice = `
+  const current = getInstalledVersion(__bundleDir, ".claude-plugin");
+  const updateNotice = current ? `
 
-\u2705 Hivemind v${current}`;
-  } catch (e) {
-    log4(`version check failed: ${e.message}`);
-  }
+\u2705 Hivemind v${current}` : "";
   const resolvedContext = context.replace(/HIVEMIND_AUTH_CMD/g, AUTH_CMD);
   const additionalContext = creds?.token ? `${resolvedContext}
 
