@@ -243,7 +243,16 @@ jobs:
         # The release job above already synced openclaw/package.json and
         # openclaw/openclaw.plugin.json versions to the bumped root
         # version, so this publishes the same X.Y.Z that npm just got.
-        run: clawhub package publish ./openclaw
+        #
+        # --family code-plugin: the existing `hivemind` package on ClawHub
+        # was originally registered with family=code-plugin (see
+        # `clawhub package inspect hivemind` → "Family: Code Plugin"). The
+        # CLI's auto-detection picks a different default (bundle-plugin) on
+        # this layout, and ClawHub's server rejects with
+        # `Package already exists as a code-plugin; family changes are not
+        # allowed` (convex/packages.ts:4305). Pinning the family explicitly
+        # matches what's already registered and lets the publish proceed.
+        run: clawhub package publish ./openclaw --family code-plugin
 
       - name: Summary
         run: |
