@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync, existsSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,13 +14,21 @@ import { autoUpdate } from "../../src/hooks/shared/autoupdate.js";
  * The helper is called from every agent's session-start hook. It MUST
  * return synchronously (sub-50ms) — no awaited spawns, no awaited fetches.
  * The 3-5s session-start latency that real-world testing surfaced
- * (2026-05-06) was the destructive bug that motivated the rewrite to
- * detached spawn + 4h cache + sync findHivemindOnPath.
+ * (2026-05-06) was the destructive bug that motivated the rewrite to a
+ * detached spawn + sync findHivemindOnPath.
+ *
+ * Earlier drafts had a 4h "last-checked" cache. Removed per review
+ * feedback (efenocchi, 2026-05-07): the cache only saved background CPU
+ * inside the spawned process, but introduced a 4h "miss new release"
+ * window for users with a recent session. Detached spawn already keeps
+ * latency sub-50ms; cache wasn't earning its keep. So tests below
+ * verify the helper fires on every call and never reads/writes any
+ * cache file.
  *
  * Tests below assert:
- *   1. Gating works (creds null / no token / autoupdate=false / cache hit)
+ *   1. Gating works (creds null / no token / autoupdate=false)
  *   2. Spawn is detached + unref'd (no awaiting)
- *   3. Cache file is touched after spawn dispatch
+ *   3. Helper fires every time (no cache)
  *   4. Latency bound: autoUpdate returns within 100ms even when the
  *      "spawn" function itself is intentionally slow.
  */
@@ -79,49 +87,26 @@ describe("autoUpdate — gating", () => {
   });
 });
 
-describe("autoUpdate — 4h cache", () => {
-  it("skips spawn when last-check file mtime < 4h", async () => {
-    const cachePath = join(TMP_HOME, ".deeplake", ".autoupdate-last-check");
-    writeFileSync(cachePath, "");
-    // Default: just-created file → mtime is now → within TTL → skip
-    const spawnFn = vi.fn();
-    await autoUpdate(VALID_CREDS, { agent: "claude", spawn: spawnFn, hivemindBinaryPath: "/u/bin/hivemind" });
-    expect(spawnFn).not.toHaveBeenCalled();
-  });
-
-  it("DOES spawn when last-check file mtime > 4h", async () => {
-    const cachePath = join(TMP_HOME, ".deeplake", ".autoupdate-last-check");
-    writeFileSync(cachePath, "");
-    const fiveHoursAgo = (Date.now() - 5 * 60 * 60_000) / 1000;
-    utimesSync(cachePath, fiveHoursAgo, fiveHoursAgo);
+describe("autoUpdate — fires every session-start (no cache, by design)", () => {
+  // Earlier drafts had a 4h "last-checked" cache. Removed per review
+  // feedback: the cache only saved background CPU (an npm GET inside
+  // the spawned process), but introduced a bad UX paper cut — when a
+  // new release lands, users with a recent session wouldn't see it for
+  // up to 4h. Detached spawn already keeps session-start latency
+  // sub-50ms, so the cache wasn't earning its keep on the hot path.
+  it("dispatches on every call (does not look at any state file)", async () => {
     const spawnFn = vi.fn().mockReturnValue({ pid: 99 });
     await autoUpdate(VALID_CREDS, { agent: "claude", spawn: spawnFn, hivemindBinaryPath: "/u/bin/hivemind" });
-    expect(spawnFn).toHaveBeenCalledTimes(1);
+    await autoUpdate(VALID_CREDS, { agent: "claude", spawn: spawnFn, hivemindBinaryPath: "/u/bin/hivemind" });
+    await autoUpdate(VALID_CREDS, { agent: "claude", spawn: spawnFn, hivemindBinaryPath: "/u/bin/hivemind" });
+    expect(spawnFn).toHaveBeenCalledTimes(3);
   });
 
-  it("DOES spawn when last-check file does NOT exist (first run)", async () => {
+  it("does NOT create or touch ~/.deeplake/.autoupdate-last-check", async () => {
+    const cachePath = join(TMP_HOME, ".deeplake", ".autoupdate-last-check");
     const spawnFn = vi.fn().mockReturnValue({ pid: 99 });
     await autoUpdate(VALID_CREDS, { agent: "claude", spawn: spawnFn, hivemindBinaryPath: "/u/bin/hivemind" });
-    expect(spawnFn).toHaveBeenCalledTimes(1);
-  });
-
-  it("touches the last-check file after dispatching the spawn", async () => {
-    const cachePath = join(TMP_HOME, ".deeplake", ".autoupdate-last-check");
     expect(existsSync(cachePath)).toBe(false);
-    const spawnFn = vi.fn().mockReturnValue({ pid: 99 });
-    await autoUpdate(VALID_CREDS, { agent: "claude", spawn: spawnFn, hivemindBinaryPath: "/u/bin/hivemind" });
-    expect(existsSync(cachePath)).toBe(true);
-  });
-
-  it("skipCache=true bypasses the cache check", async () => {
-    const cachePath = join(TMP_HOME, ".deeplake", ".autoupdate-last-check");
-    writeFileSync(cachePath, "");
-    // Cache fresh → would normally skip. But skipCache=true bypasses.
-    const spawnFn = vi.fn().mockReturnValue({ pid: 99 });
-    await autoUpdate(VALID_CREDS, {
-      agent: "claude", spawn: spawnFn, hivemindBinaryPath: "/u/bin/hivemind", skipCache: true,
-    });
-    expect(spawnFn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -171,13 +156,12 @@ describe("autoUpdate — latency bound (regression guard)", () => {
     expect(elapsed).toBeLessThan(100);
   });
 
-  it("returns in <50ms when the cache says skip", async () => {
-    const cachePath = join(TMP_HOME, ".deeplake", ".autoupdate-last-check");
-    writeFileSync(cachePath, "");
+  it("returns in <50ms when creds say opt-out (autoupdate=false)", async () => {
     const start = Date.now();
-    await autoUpdate(VALID_CREDS, {
-      agent: "claude", hivemindBinaryPath: "/u/bin/hivemind",
-    });
+    await autoUpdate(
+      { ...VALID_CREDS, autoupdate: false },
+      { agent: "claude", hivemindBinaryPath: "/u/bin/hivemind" },
+    );
     const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(50);
   });

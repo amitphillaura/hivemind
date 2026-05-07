@@ -54,7 +54,7 @@ var init_index_marker_store = __esm({
 
 // dist/src/hooks/codex/session-start-setup.js
 import { join as join7 } from "node:path";
-import { homedir as homedir5 } from "node:os";
+import { homedir as homedir4 } from "node:os";
 
 // dist/src/commands/auth.js
 import { execSync } from "node:child_process";
@@ -573,14 +573,9 @@ function makeWikiLogger(hooksDir, filename = "deeplake-wiki.log") {
 
 // dist/src/hooks/shared/autoupdate.js
 import { spawn } from "node:child_process";
-import { existsSync as existsSync3, statSync, utimesSync, writeFileSync as writeFileSync3, mkdirSync as mkdirSync4 } from "node:fs";
-import { dirname, join as join6 } from "node:path";
-import { homedir as homedir4 } from "node:os";
+import { existsSync as existsSync3 } from "node:fs";
+import { join as join6 } from "node:path";
 var log3 = (msg) => log("autoupdate", msg);
-function lastCheckPath() {
-  return join6(homedir4(), ".deeplake", ".autoupdate-last-check");
-}
-var CACHE_TTL_MS = 4 * 60 * 6e4;
 var defaultSpawn = (cmd, args) => {
   const child = spawn(cmd, args, {
     detached: true,
@@ -601,27 +596,6 @@ function findHivemindOnPath() {
   }
   return null;
 }
-function recentlyChecked() {
-  try {
-    const age = Date.now() - statSync(lastCheckPath()).mtimeMs;
-    return age < CACHE_TTL_MS;
-  } catch {
-    return false;
-  }
-}
-function touchLastCheck() {
-  const path = lastCheckPath();
-  try {
-    mkdirSync4(dirname(path), { recursive: true });
-    if (existsSync3(path)) {
-      const now = Date.now() / 1e3;
-      utimesSync(path, now, now);
-    } else {
-      writeFileSync3(path, "");
-    }
-  } catch {
-  }
-}
 async function autoUpdate(creds, opts) {
   const t0 = Date.now();
   log3(`agent=${opts.agent} entered`);
@@ -631,10 +605,6 @@ async function autoUpdate(creds, opts) {
   }
   if (creds.autoupdate === false) {
     log3(`agent=${opts.agent} skip: autoupdate=false (${Date.now() - t0}ms)`);
-    return;
-  }
-  if (!opts.skipCache && recentlyChecked()) {
-    log3(`agent=${opts.agent} skip: checked recently (within ${CACHE_TTL_MS / 6e4}min) (${Date.now() - t0}ms)`);
     return;
   }
   const binaryPath = opts.hivemindBinaryPath !== void 0 ? opts.hivemindBinaryPath : findHivemindOnPath();
@@ -651,13 +621,12 @@ async function autoUpdate(creds, opts) {
     log3(`agent=${opts.agent} dispatch threw: ${e?.message ?? e} (${Date.now() - t0}ms)`);
     return;
   }
-  touchLastCheck();
   log3(`agent=${opts.agent} dispatched (pid=${pid ?? "?"}) (${Date.now() - t0}ms total)`);
 }
 
 // dist/src/hooks/codex/session-start-setup.js
 var log4 = (msg) => log("codex-session-setup", msg);
-var { log: wikiLog } = makeWikiLogger(join7(homedir5(), ".codex", "hooks"));
+var { log: wikiLog } = makeWikiLogger(join7(homedir4(), ".codex", "hooks"));
 async function createPlaceholder(api, table, sessionId, cwd, userName, orgName, workspaceId) {
   const summaryPath = `/summaries/${userName}/${sessionId}.md`;
   const existing = await api.query(`SELECT path FROM "${table}" WHERE path = '${sqlStr(summaryPath)}' LIMIT 1`);

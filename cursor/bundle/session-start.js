@@ -54,7 +54,7 @@ var init_index_marker_store = __esm({
 
 // dist/src/hooks/cursor/session-start.js
 import { fileURLToPath } from "node:url";
-import { dirname as dirname3, join as join7 } from "node:path";
+import { dirname as dirname2, join as join7 } from "node:path";
 
 // dist/src/commands/auth.js
 import { execSync } from "node:child_process";
@@ -590,14 +590,9 @@ function getInstalledVersion(bundleDir, pluginManifestDir) {
 
 // dist/src/hooks/shared/autoupdate.js
 import { spawn } from "node:child_process";
-import { existsSync as existsSync3, statSync, utimesSync, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "node:fs";
-import { dirname as dirname2, join as join6 } from "node:path";
-import { homedir as homedir4 } from "node:os";
+import { existsSync as existsSync3 } from "node:fs";
+import { join as join6 } from "node:path";
 var log3 = (msg) => log("autoupdate", msg);
-function lastCheckPath() {
-  return join6(homedir4(), ".deeplake", ".autoupdate-last-check");
-}
-var CACHE_TTL_MS = 4 * 60 * 6e4;
 var defaultSpawn = (cmd, args) => {
   const child = spawn(cmd, args, {
     detached: true,
@@ -618,27 +613,6 @@ function findHivemindOnPath() {
   }
   return null;
 }
-function recentlyChecked() {
-  try {
-    const age = Date.now() - statSync(lastCheckPath()).mtimeMs;
-    return age < CACHE_TTL_MS;
-  } catch {
-    return false;
-  }
-}
-function touchLastCheck() {
-  const path = lastCheckPath();
-  try {
-    mkdirSync3(dirname2(path), { recursive: true });
-    if (existsSync3(path)) {
-      const now = Date.now() / 1e3;
-      utimesSync(path, now, now);
-    } else {
-      writeFileSync3(path, "");
-    }
-  } catch {
-  }
-}
 async function autoUpdate(creds, opts) {
   const t0 = Date.now();
   log3(`agent=${opts.agent} entered`);
@@ -648,10 +622,6 @@ async function autoUpdate(creds, opts) {
   }
   if (creds.autoupdate === false) {
     log3(`agent=${opts.agent} skip: autoupdate=false (${Date.now() - t0}ms)`);
-    return;
-  }
-  if (!opts.skipCache && recentlyChecked()) {
-    log3(`agent=${opts.agent} skip: checked recently (within ${CACHE_TTL_MS / 6e4}min) (${Date.now() - t0}ms)`);
     return;
   }
   const binaryPath = opts.hivemindBinaryPath !== void 0 ? opts.hivemindBinaryPath : findHivemindOnPath();
@@ -668,13 +638,12 @@ async function autoUpdate(creds, opts) {
     log3(`agent=${opts.agent} dispatch threw: ${e?.message ?? e} (${Date.now() - t0}ms)`);
     return;
   }
-  touchLastCheck();
   log3(`agent=${opts.agent} dispatched (pid=${pid ?? "?"}) (${Date.now() - t0}ms total)`);
 }
 
 // dist/src/hooks/cursor/session-start.js
 var log4 = (msg) => log("cursor-session-start", msg);
-var __bundleDir = dirname3(fileURLToPath(import.meta.url));
+var __bundleDir = dirname2(fileURLToPath(import.meta.url));
 var AUTH_CMD = join7(__bundleDir, "commands", "auth-login.js");
 var context = `DEEPLAKE MEMORY: Persistent memory at ~/.deeplake/memory/ shared across sessions, users, and agents.
 

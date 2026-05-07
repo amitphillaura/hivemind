@@ -31,42 +31,44 @@
  *
  * The lock that prevents concurrent `hivemind update` runs no longer
  * lives here (we'd release it instantly after dispatching, defeating
- * its purpose). It lives in `src/cli/update.ts:runUpdate()` — the
- * long-running update process owns the lock for its lifetime.
+ * its purpose). Follow-up: move it into `src/cli/update.ts:runUpdate()`
+ * so the long-running update process owns the lock for its lifetime.
  *
- * Cache: a single mtime check on `~/.deeplake/.autoupdate-last-check`
- * keeps us from spawning on every session-start. Spawn fires at most
- * once per CACHE_TTL_MS (4h). The spawn itself is cheap (<10ms to
- * dispatch) but firing 100×/day for a typical heavy user adds up; the
- * cache cuts that to ~6×/day.
+ * ## No cache (intentional, per review)
+ *
+ * Earlier drafts of this helper had a 4h "last-checked" cache to avoid
+ * firing the spawn on every session-start. Reviewer feedback (efenocchi,
+ * 2026-05-07): in the worst case "we publish a new release at 13:01,
+ * users who started a session at 13:00 don't pick it up until 17:00."
+ * That's an unacceptable UX paper cut for a small background-CPU win
+ * (the cache was only saving an npm registry GET + version compare in
+ * the spawned process — it never affected session-start latency, since
+ * the dispatch is detached either way).
+ *
+ * So the cache is gone. Every session-start fires the detached spawn.
+ * The detached `hivemind update` checks npm itself; if up-to-date it
+ * exits silently. Trade-off accepted: more npm registry GETs (1 per
+ * session-start instead of 1 per 4h), in exchange for ~zero "miss new
+ * release" window. Concurrent invocations are serialized by the
+ * follow-up flock in `runUpdate()` (see PR #97 review thread).
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, statSync, utimesSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Credentials } from "../../commands/auth-creds.js";
 import { log as _log } from "../../utils/debug.js";
 
 const log = (msg: string) => _log("autoupdate", msg);
 
-// Lazy: homedir() reads $HOME at call time, but capturing it at module
-// load would freeze the path before tests can override process.env.HOME.
-function lastCheckPath(): string {
-  return join(homedir(), ".deeplake", ".autoupdate-last-check");
-}
-const CACHE_TTL_MS = 4 * 60 * 60_000;  // 4 hours
-
 export type AgentId = "claude" | "codex" | "cursor" | "hermes" | "pi" | "openclaw";
 
 export interface AutoUpdateOpts {
   agent: AgentId;
-  /** Test override: resolved hivemind binary path or null. When provided, skips the `which` lookup. */
+  /** Test override: resolved hivemind binary path or null. When provided, skips the PATH walk. */
   hivemindBinaryPath?: string | null;
   /** Test override: replaces the actual subprocess spawn with a fake. Must return the spawned child's pid (or 0). */
   spawn?: (cmd: string, args: string[]) => { pid?: number };
-  /** Test override: skip the 4h-cache check (force the spawn even if recently checked). */
-  skipCache?: boolean;
 }
 
 /**
@@ -102,32 +104,6 @@ function findHivemindOnPath(): string | null {
   return null;
 }
 
-/** Return true if we checked recently and should skip this round. */
-function recentlyChecked(): boolean {
-  try {
-    const age = Date.now() - statSync(lastCheckPath()).mtimeMs;
-    return age < CACHE_TTL_MS;
-  } catch {
-    return false;
-  }
-}
-
-/** Touch the last-check file so the next call respects the TTL. */
-function touchLastCheck(): void {
-  const path = lastCheckPath();
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    if (existsSync(path)) {
-      const now = Date.now() / 1000;
-      utimesSync(path, now, now);
-    } else {
-      writeFileSync(path, "");
-    }
-  } catch {
-    /* non-fatal — at worst we spawn next session too */
-  }
-}
-
 /**
  * Trigger an autoupdate check. Best-effort, fire-and-forget. Returns
  * synchronously (sub-50ms) — never blocks the session-start hook on
@@ -152,14 +128,6 @@ export async function autoUpdate(
   if (!creds?.token) { log(`agent=${opts.agent} skip: no creds.token (${Date.now() - t0}ms)`); return; }
   if (creds.autoupdate === false) { log(`agent=${opts.agent} skip: autoupdate=false (${Date.now() - t0}ms)`); return; }
 
-  // Cache: we check at most once per CACHE_TTL_MS to avoid spawning a
-  // process on every session-start. Tests can pass `skipCache: true` to
-  // force the spawn.
-  if (!opts.skipCache && recentlyChecked()) {
-    log(`agent=${opts.agent} skip: checked recently (within ${CACHE_TTL_MS / 60_000}min) (${Date.now() - t0}ms)`);
-    return;
-  }
-
   const binaryPath = opts.hivemindBinaryPath !== undefined
     ? opts.hivemindBinaryPath
     : findHivemindOnPath();
@@ -174,11 +142,5 @@ export async function autoUpdate(
     log(`agent=${opts.agent} dispatch threw: ${e?.message ?? e} (${Date.now() - t0}ms)`);
     return;
   }
-  // Mark the check timestamp BEFORE we know whether the spawned process
-  // succeeds — the goal of the cache is "rate-limit our trigger", not
-  // "rate-limit successful updates". Even if the spawned process fails,
-  // it'll fail on every session-start within the TTL window without the
-  // touch.
-  touchLastCheck();
   log(`agent=${opts.agent} dispatched (pid=${pid ?? "?"}) (${Date.now() - t0}ms total)`);
 }

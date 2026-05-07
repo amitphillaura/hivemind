@@ -54,8 +54,8 @@ var init_index_marker_store = __esm({
 
 // dist/src/hooks/session-start-setup.js
 import { fileURLToPath } from "node:url";
-import { dirname as dirname2, join as join9 } from "node:path";
-import { homedir as homedir7 } from "node:os";
+import { dirname, join as join9 } from "node:path";
+import { homedir as homedir6 } from "node:os";
 
 // dist/src/commands/auth.js
 import { execSync } from "node:child_process";
@@ -838,14 +838,9 @@ function embeddingsDisabled() {
 
 // dist/src/hooks/shared/autoupdate.js
 import { spawn as spawn2 } from "node:child_process";
-import { existsSync as existsSync4, statSync, utimesSync, writeFileSync as writeFileSync3, mkdirSync as mkdirSync4 } from "node:fs";
-import { dirname, join as join8 } from "node:path";
-import { homedir as homedir6 } from "node:os";
+import { existsSync as existsSync4 } from "node:fs";
+import { join as join8 } from "node:path";
 var log4 = (msg) => log("autoupdate", msg);
-function lastCheckPath() {
-  return join8(homedir6(), ".deeplake", ".autoupdate-last-check");
-}
-var CACHE_TTL_MS = 4 * 60 * 6e4;
 var defaultSpawn = (cmd, args) => {
   const child = spawn2(cmd, args, {
     detached: true,
@@ -866,27 +861,6 @@ function findHivemindOnPath() {
   }
   return null;
 }
-function recentlyChecked() {
-  try {
-    const age = Date.now() - statSync(lastCheckPath()).mtimeMs;
-    return age < CACHE_TTL_MS;
-  } catch {
-    return false;
-  }
-}
-function touchLastCheck() {
-  const path = lastCheckPath();
-  try {
-    mkdirSync4(dirname(path), { recursive: true });
-    if (existsSync4(path)) {
-      const now = Date.now() / 1e3;
-      utimesSync(path, now, now);
-    } else {
-      writeFileSync3(path, "");
-    }
-  } catch {
-  }
-}
 async function autoUpdate(creds, opts) {
   const t0 = Date.now();
   log4(`agent=${opts.agent} entered`);
@@ -896,10 +870,6 @@ async function autoUpdate(creds, opts) {
   }
   if (creds.autoupdate === false) {
     log4(`agent=${opts.agent} skip: autoupdate=false (${Date.now() - t0}ms)`);
-    return;
-  }
-  if (!opts.skipCache && recentlyChecked()) {
-    log4(`agent=${opts.agent} skip: checked recently (within ${CACHE_TTL_MS / 6e4}min) (${Date.now() - t0}ms)`);
     return;
   }
   const binaryPath = opts.hivemindBinaryPath !== void 0 ? opts.hivemindBinaryPath : findHivemindOnPath();
@@ -916,14 +886,13 @@ async function autoUpdate(creds, opts) {
     log4(`agent=${opts.agent} dispatch threw: ${e?.message ?? e} (${Date.now() - t0}ms)`);
     return;
   }
-  touchLastCheck();
   log4(`agent=${opts.agent} dispatched (pid=${pid ?? "?"}) (${Date.now() - t0}ms total)`);
 }
 
 // dist/src/hooks/session-start-setup.js
 var log5 = (msg) => log("session-setup", msg);
-var __bundleDir = dirname2(fileURLToPath(import.meta.url));
-var { log: wikiLog } = makeWikiLogger(join9(homedir7(), ".claude", "hooks"));
+var __bundleDir = dirname(fileURLToPath(import.meta.url));
+var { log: wikiLog } = makeWikiLogger(join9(homedir6(), ".claude", "hooks"));
 async function main() {
   if (process.env.HIVEMIND_WIKI_WORKER === "1")
     return;
