@@ -230,8 +230,6 @@ jobs:
         # ends. The token only ever appears as ${{ secrets.* }}, which
         # GitHub auto-masks in logs.
         run: clawhub login --token "$CLAWHUB_TOKEN" --no-browser
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Publish openclaw bundle to ClawHub
         # The release job above already synced openclaw/package.json and
