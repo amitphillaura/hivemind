@@ -18,9 +18,6 @@ name: Publish smoke test (dry-run)
 # workflow" → pick a branch (usually main).
 
 on:
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       ref:
