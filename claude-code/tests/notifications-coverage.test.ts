@@ -68,40 +68,36 @@ describe("welcomeRule — optional creds fallbacks", () => {
     savedAt: "2026-05-06T00:00:00Z",
   };
 
-  it("falls back to 'there' when userName is missing", () => {
+  it("drops the comma-clause when userName is missing (no awkward 'there' fallback)", () => {
     const result = welcomeRule.evaluate({
       agent: "claude-code",
       creds: { ...baseCreds, userName: undefined },
       state: { shown: {} },
     });
-    expect(result?.title).toContain("there");
+    expect(result?.title).toBe("Welcome back");
+    expect(result?.title).not.toContain("there");
+    expect(result?.title).not.toContain(",");
   });
 
-  it("falls back to orgId when orgName is missing", () => {
+  it("falls back to 'your organization' when orgName is missing (does NOT expose orgId UUID)", () => {
     const result = welcomeRule.evaluate({
       agent: "claude-code",
       creds: { ...baseCreds, orgName: undefined, userName: "u" },
       state: { shown: {} },
     });
-    expect(result?.body).toContain("org-only");
+    expect(result?.body).toContain("your organization");
+    // Critical: must NOT leak the UUID-shaped orgId into user-facing text.
+    expect(result?.body).not.toContain(baseCreds.orgId);
+    expect(result?.body).not.toContain("undefined");
   });
 
-  it("falls back to 'your org' when both orgName AND orgId are missing", () => {
-    // The Credentials type marks orgId as required, so this can only happen
-    // with a malformed credentials.json. The fallback prevents the rendered
-    // body from reading "Connected to org undefined ...".
+  it("uses 'org <name>' phrasing when orgName is present", () => {
     const result = welcomeRule.evaluate({
       agent: "claude-code",
-      creds: {
-        ...baseCreds,
-        orgName: undefined,
-        orgId: undefined as any, // simulate malformed creds
-        userName: "u",
-      },
+      creds: { ...baseCreds, orgName: "acme", userName: "u" },
       state: { shown: {} },
     });
-    expect(result?.body).toContain("your org");
-    expect(result?.body).not.toContain("undefined");
+    expect(result?.body).toContain("Connected to org acme");
   });
 
   it("falls back to 'default' workspace when workspaceId is missing", () => {

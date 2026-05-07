@@ -11,17 +11,21 @@ export const welcomeRule: Rule = {
   trigger: "session_start",
   evaluate({ creds }) {
     if (!creds?.token) return null;
-    const userName = creds.userName ?? "there";
-    // Fallback chain: orgName → orgId → "your org". The "your org" arm
-    // guards against a malformed credentials.json where both fields are
-    // missing — without it, the rendered body would contain "undefined".
-    const orgName = creds.orgName ?? creds.orgId ?? "your org";
+    // Personalization is optional. If creds.userName is missing (malformed
+    // credentials.json — rare), drop the comma-clause rather than fall back
+    // to a generic "there" that reads awkwardly. If creds.orgName is missing,
+    // say "your organization" rather than expose the orgId UUID — UUIDs are
+    // unreadable to humans and worse UX than the original "undefined" leak.
+    const title = creds.userName
+      ? `Welcome back, ${creds.userName}`
+      : "Welcome back";
+    const orgPhrase = creds.orgName ? `org ${creds.orgName}` : "your organization";
     const workspace = creds.workspaceId ?? "default";
     return {
       id: "welcome",
       severity: "info",
-      title: `Welcome back, ${userName}`,
-      body: `Connected to org ${orgName} (workspace ${workspace}).`,
+      title,
+      body: `Connected to ${orgPhrase} (workspace ${workspace}).`,
       dedupKey: { savedAt: creds.savedAt },
     };
   },

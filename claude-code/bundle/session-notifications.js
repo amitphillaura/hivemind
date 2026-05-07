@@ -297,14 +297,14 @@ var welcomeRule = {
   evaluate({ creds }) {
     if (!creds?.token)
       return null;
-    const userName = creds.userName ?? "there";
-    const orgName = creds.orgName ?? creds.orgId ?? "your org";
+    const title = creds.userName ? `Welcome back, ${creds.userName}` : "Welcome back";
+    const orgPhrase = creds.orgName ? `org ${creds.orgName}` : "your organization";
     const workspace = creds.workspaceId ?? "default";
     return {
       id: "welcome",
       severity: "info",
-      title: `Welcome back, ${userName}`,
-      body: `Connected to org ${orgName} (workspace ${workspace}).`,
+      title,
+      body: `Connected to ${orgPhrase} (workspace ${workspace}).`,
       dedupKey: { savedAt: creds.savedAt }
     };
   }

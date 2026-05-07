@@ -1,6 +1,8 @@
 # Per-agent SessionStart delivery channels
 
-Research notes on each agent's harness behavior — what stdout / stderr / JSON shapes get rendered to the user vs the model. The findings below come from source-level reading + multi-channel probes (`probe/probe-*.js`), not just config-shape inspection.
+> **What this file is and why it lives here.** This is not runtime documentation — it's a record of the empirical research that informed the v1 Claude Code adapter and what each future agent integration will need. When we wire up openclaw / codex / cursor / hermes / pi as real consumers (one at a time, based on usage), the implementer will need to know what each agent's harness does with hook stdout / stderr / JSON shapes. Re-discovering this from scratch costs an hour-plus per agent; preserving the findings here is the cheapest way to amortize that work across the team. If the file ever drifts from reality, update it; if it stops being useful, delete it.
+
+Research notes on each agent's harness behavior — what stdout / stderr / JSON shapes get rendered to the user vs the model. Findings come from source-level reading of each agent's harness (`~/.hermes/hermes-agent/...`, `openai/codex@main`, etc.) plus an empirical probing session against Claude Code 2.1.131 (the probes themselves are no longer in-tree — they were 50-line scripts that emitted unique markers per channel and were trivial to recreate when needed).
 
 ## Current implementation status
 
