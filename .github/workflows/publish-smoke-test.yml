@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch or commit SHA to smoke-test (default: main)'
+        description: "Branch or commit SHA to smoke-test (default: main)"
         required: false
-        default: 'main'
+        default: "main"
 
 permissions:
   contents: read
@@ -45,10 +45,18 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24.12'
-          registry-url: 'https://registry.npmjs.org'
-          scope: '@deeplake'
-          cache: 'npm'
+          node-version: "24.12"
+          registry-url: "https://registry.npmjs.org"
+          scope: "@deeplake"
+          cache: "npm"
+
+      - name: Load secrets from 1Password
+        uses: 1Password/load-secrets-action@v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          CLAWHUB_TOKEN: "op://GitHub Actions/hivemind/CLAWHUB_TOKEN"
 
       - name: Install dependencies
         run: npm ci
@@ -64,8 +72,6 @@ jobs:
             echo "::error::NPM_TOKEN is not authenticating. Check the secret in the production environment."
             exit 1
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Build bundles
         run: npm run build
@@ -80,16 +86,12 @@ jobs:
         # is a classic 2FA-required type, this fails with EOTP — which
         # is exactly the canary we want before the real publish.
         run: npm publish --dry-run --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install ClawHub CLI
         run: npm install -g clawhub
 
       - name: Authenticate ClawHub CLI
         run: clawhub login --token "$CLAWHUB_TOKEN" --no-browser
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
 
       - name: Validate CLAWHUB_TOKEN (whoami)
         run: clawhub whoami
