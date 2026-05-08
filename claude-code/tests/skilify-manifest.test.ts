@@ -84,6 +84,28 @@ describe("loadManifest", () => {
     const m = loadManifest();
     expect(m.entries.map(e => e.dirName)).toEqual(["good--alice", "good2--bob"]);
   });
+
+  it("rejects entries whose dirName contains path separators or `..`", () => {
+    // A corrupted (or hand-edited) manifest could otherwise convince
+    // unpull's `rmSync(join(installRoot, dirName))` to delete data outside
+    // the install root. The pull writer never produces a path-segmented
+    // dirName, so dropping these entries is safe.
+    saveManifest({ version: 1, entries: [] });
+    writeFileSync(manifestPath(), JSON.stringify({
+      version: 1,
+      entries: [
+        sampleEntry({ dirName: "good--alice" }),
+        sampleEntry({ dirName: "../escape" }),
+        sampleEntry({ dirName: "..\\escape" }),
+        sampleEntry({ dirName: "evil/../../../etc" }),
+        sampleEntry({ dirName: "with/slash" }),
+        sampleEntry({ dirName: "with\\backslash" }),
+        sampleEntry({ dirName: "another--bob" }),
+      ],
+    }));
+    const m = loadManifest();
+    expect(m.entries.map(e => e.dirName)).toEqual(["good--alice", "another--bob"]);
+  });
 });
 
 describe("saveManifest", () => {

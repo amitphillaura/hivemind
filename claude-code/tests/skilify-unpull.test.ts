@@ -177,3 +177,46 @@ describe("runUnpull --all and --legacy-cleanup", () => {
     expect(existsSync(legacy)).toBe(true);
   });
 });
+
+// ── filter+all conflict guard ──────────────────────────────────────────────
+
+describe("runUnpull filter+all conflict guard", () => {
+  // `--all` and `--legacy-cleanup` walk the disk and remove entries the
+  // manifest doesn't know about. Those entries have no recorded author, so
+  // any --user / --users / --not-mine filter would be silently ignored for
+  // them — an over-removal footgun. Refuse the combination loudly.
+
+  it("throws when --all is combined with --user", () => {
+    expect(() => runUnpull({
+      install: "project", cwd: projectRoot, users: ["alice"], all: true,
+    })).toThrow(/--all.*--user/);
+  });
+
+  it("throws when --all is combined with --not-mine", () => {
+    expect(() => runUnpull({
+      install: "project", cwd: projectRoot, users: [],
+      myUsername: "alice", notMine: true, all: true,
+    })).toThrow(/--all.*--not-mine/);
+  });
+
+  it("throws when --legacy-cleanup is combined with --users", () => {
+    expect(() => runUnpull({
+      install: "project", cwd: projectRoot, users: ["alice", "bob"],
+      legacyCleanup: true,
+    })).toThrow(/--legacy-cleanup.*--user/);
+  });
+
+  it("allows --all with no author filter", () => {
+    plantManualSkill("graphify");
+    expect(() => runUnpull({
+      install: "project", cwd: projectRoot, users: [], all: true,
+    })).not.toThrow();
+  });
+
+  it("allows --user without --all (manifest-only path)", () => {
+    plantPulledSkill("deploy--alice", "alice", "deploy");
+    expect(() => runUnpull({
+      install: "project", cwd: projectRoot, users: ["alice"],
+    })).not.toThrow();
+  });
+});

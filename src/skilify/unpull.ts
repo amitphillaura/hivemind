@@ -85,6 +85,24 @@ export function runUnpull(opts: UnpullOptions): UnpullSummary {
   const userFilter = new Set(opts.users.filter(u => u.length > 0));
   const haveUserFilter = userFilter.size > 0;
 
+  // `--all` and `--legacy-cleanup` walk the disk for entries that aren't in
+  // the manifest, so they have no author metadata to filter on. Combining
+  // them with an author filter would silently ignore the filter for those
+  // entries — an over-removal footgun. Refuse the combination loudly and
+  // make the user run two passes (one filtered, then one with --all).
+  if ((opts.all || opts.legacyCleanup) && (haveUserFilter || opts.notMine)) {
+    const flags = [opts.all && "--all", opts.legacyCleanup && "--legacy-cleanup"]
+      .filter(Boolean).join(" / ");
+    const filters = [haveUserFilter && "--user/--users", opts.notMine && "--not-mine"]
+      .filter(Boolean).join(" / ");
+    throw new Error(
+      `${flags} cannot be combined with ${filters}: entries removed by ` +
+      `${flags} are not in the manifest and have no author metadata, so ` +
+      `the filter would silently fail to apply. Run the filtered unpull ` +
+      `first, then ${flags} as a separate invocation.`,
+    );
+  }
+
   // ── Pass 1: manifest-driven removal of pulled entries ────────────────────
   const manifest = loadManifest();
   const entries = entriesForRoot(manifest, opts.install, root);

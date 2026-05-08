@@ -68,6 +68,13 @@ export function loadManifest(path: string = manifestPath()): PulledManifest {
     for (const e of parsed.entries) {
       if (!e || typeof e !== "object") continue;
       if (typeof e.dirName !== "string" || !e.dirName) continue;
+      // Reject any dirName containing path separators or `..`. A corrupted
+      // (or maliciously edited) manifest could otherwise convince `unpull`
+      // to `rmSync(join(installRoot, dirName))` outside the install root —
+      // e.g. `dirName = "../../etc"`. The pull writer always produces a
+      // single-segment `<name>--<author>` string, so this validation only
+      // discards entries that someone hand-edited into pulled.json.
+      if (e.dirName.includes("/") || e.dirName.includes("\\") || e.dirName.includes("..")) continue;
       if (typeof e.name !== "string" || !e.name) continue;
       if (typeof e.author !== "string") continue;
       if (typeof e.installRoot !== "string" || !e.installRoot) continue;

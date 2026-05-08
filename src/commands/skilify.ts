@@ -273,16 +273,25 @@ async function unpullSkills(args: string[]): Promise<void> {
   if (userOne) users = [userOne];
   else if (usersMany) users = usersMany.split(",").map(s => s.trim()).filter(Boolean);
 
-  const config = loadConfig();
-  if (!config) {
-    throw new Error("Not logged in. Run: hivemind login");
+  // Unpull is a local filesystem operation: deleting `<root>/<dir>/` and
+  // pruning `pulled.json`. The Deeplake API is never queried. The only
+  // reason we need credentials is `--not-mine`, which compares each
+  // entry's author to `config.userName`. Skip the login check otherwise so
+  // a user who's been bounced from the org can still clean up their disk.
+  let myUsername: string | undefined;
+  if (notMine) {
+    const config = loadConfig();
+    if (!config) {
+      throw new Error("--not-mine requires a logged-in user. Run: hivemind login");
+    }
+    myUsername = config.userName;
   }
 
   const summary = runUnpull({
     install: toRaw,
     cwd: toRaw === "project" ? process.cwd() : undefined,
     users,
-    myUsername: config.userName,
+    myUsername,
     notMine,
     dryRun,
     all,

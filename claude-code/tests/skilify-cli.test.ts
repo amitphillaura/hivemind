@@ -5,13 +5,10 @@ import { join } from "node:path";
 
 // Mock the loadConfig + DeeplakeApi so the pull subcommand can run without
 // hitting the network. The mock returns a fake row from the skills table.
+// loadConfig is a vi.fn so individual tests can swap in null (unauthenticated)
+// to exercise the unpull login-gating path.
 vi.mock("../../src/config.js", () => ({
-  loadConfig: () => ({
-    token: "tok", apiUrl: "x", orgId: "org", workspaceId: "ws",
-    userName: "tester", skillsTableName: "skills",
-    tableName: "memory", sessionsTableName: "sessions", memoryPath: "/m",
-    orgName: "org",
-  }),
+  loadConfig: vi.fn(),
 }));
 vi.mock("../../src/deeplake-api.js", () => ({
   DeeplakeApi: class {
@@ -28,6 +25,15 @@ vi.mock("../../src/deeplake-api.js", () => ({
 }));
 
 import { runSkilifyCommand } from "../../src/commands/skilify.js";
+import { loadConfig } from "../../src/config.js";
+const loadConfigMock = loadConfig as unknown as ReturnType<typeof vi.fn>;
+
+const VALID_CONFIG = {
+  token: "tok", apiUrl: "x", orgId: "org", workspaceId: "ws",
+  userName: "tester", skillsTableName: "skills",
+  tableName: "memory", sessionsTableName: "sessions", memoryPath: "/m",
+  orgName: "org",
+};
 
 const STATE_DIR = join(homedir(), ".deeplake", "state", "skilify");
 const CONFIG_PATH = join(STATE_DIR, "config.json");
@@ -45,6 +51,11 @@ beforeEach(() => {
   else configBackup = null;
   try { rmSync(CONFIG_PATH); } catch { /* nothing */ }
   logged = []; erred = [];
+  // Default: logged in. Individual tests can `loadConfigMock.mockReturnValueOnce(null)`
+  // to exercise the unauthenticated path of unpull (no login needed) vs --not-mine
+  // (which still requires myUsername).
+  loadConfigMock.mockReset();
+  loadConfigMock.mockReturnValue(VALID_CONFIG);
   logSpy = vi.spyOn(console, "log").mockImplementation((...args: any[]) => { logged.push(args.join(" ")); });
   errSpy = vi.spyOn(console, "error").mockImplementation((...args: any[]) => { erred.push(args.join(" ")); });
   exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => { throw new Error(`__EXIT_${code ?? 0}__`); }) as any);
@@ -276,11 +287,20 @@ describe("unpull", () => {
     expect(logged.join("\n")).toMatch(/Filter:\s+\(no filter — all pulled\)/);
   });
 
-  it("composes multiple flags into the filter description", () => {
-    runSkilifyCommand(["unpull", "--user", "alice", "--not-mine", "--dry-run", "--all", "--legacy-cleanup"]);
+  it("composes manifest-only filter flags into the filter description", () => {
+    // --all and --legacy-cleanup are mutually exclusive with --user/--users
+    // /--not-mine (see filter+all conflict guard), so the manifest-only
+    // path is the right surface to assert flag composition on.
+    runSkilifyCommand(["unpull", "--user", "alice", "--not-mine", "--dry-run"]);
     const out = logged.join("\n");
     expect(out).toMatch(/users=alice/);
     expect(out).toMatch(/not-mine/);
+    expect(out).toMatch(/dry-run/);
+  });
+
+  it("composes disk-walk flags into the filter description", () => {
+    runSkilifyCommand(["unpull", "--all", "--legacy-cleanup", "--dry-run"]);
+    const out = logged.join("\n");
     expect(out).toMatch(/all/);
     expect(out).toMatch(/legacy-cleanup/);
     expect(out).toMatch(/dry-run/);
@@ -339,6 +359,48 @@ describe("unpull", () => {
     const out = logged.join("\n");
     expect(out).toMatch(/pruned \(orphan\)/);
     expect(out).toMatch(/manifest-pruned/);
+  });
+
+  // ── login gating ──────────────────────────────────────────────────────────
+  // Unpull is a local FS-only operation in the default path; only --not-mine
+  // needs a username to compare against. Don't force the user back through
+  // `hivemind login` just to clean up disk state when their cred is gone.
+
+  it("default unpull works when not logged in (no Deeplake call required)", async () => {
+    loadConfigMock.mockReturnValue(null);
+    runSkilifyCommand(["unpull", "--dry-run"]);
+    await new Promise(r => setImmediate(r));
+    expect(erred.join("\n")).not.toMatch(/login/i);
+    expect(logged.join("\n")).toMatch(/Result: 0 removed/);
+  });
+
+  it("--user X works when not logged in (filter is local, not a server query)", async () => {
+    loadConfigMock.mockReturnValue(null);
+    runSkilifyCommand(["unpull", "--user", "alice", "--dry-run"]);
+    await new Promise(r => setImmediate(r));
+    expect(erred.join("\n")).not.toMatch(/login/i);
+    expect(logged.join("\n")).toMatch(/users=alice/);
+  });
+
+  it("--not-mine still requires login (needs myUsername to exclude self)", async () => {
+    loadConfigMock.mockReturnValue(null);
+    runSkilifyCommand(["unpull", "--not-mine", "--dry-run"]);
+    await new Promise(r => setImmediate(r));
+    expect(erred.join("\n")).toMatch(/--not-mine requires a logged-in user/);
+  });
+
+  // ── filter+all conflict surfacing ─────────────────────────────────────────
+
+  it("--all combined with --user surfaces a clear error message", async () => {
+    runSkilifyCommand(["unpull", "--all", "--user", "alice"]);
+    await new Promise(r => setImmediate(r));
+    expect(erred.join("\n")).toMatch(/--all.*--user/);
+  });
+
+  it("--legacy-cleanup combined with --not-mine surfaces a clear error message", async () => {
+    runSkilifyCommand(["unpull", "--legacy-cleanup", "--not-mine"]);
+    await new Promise(r => setImmediate(r));
+    expect(erred.join("\n")).toMatch(/--legacy-cleanup.*--not-mine/);
   });
 });
 
