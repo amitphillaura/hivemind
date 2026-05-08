@@ -262,18 +262,18 @@ After each session, a background worker generates an AI-written wiki summary and
 
 Triggers, generation flow, and env-var reference: **[docs/SUMMARIES.md](docs/SUMMARIES.md)**.
 
-## Skills (skilify)
+## Skills (skillify)
 
 Hivemind **codifies recurring patterns from your team's recent sessions into reusable skills** that propagate to every agent on your team — automatically. An async background worker fires on Stop / SessionEnd, mines recent sessions in scope, asks Haiku whether the activity contains something worth keeping, and writes a `SKILL.md` to `<project>/.claude/skills/<name>/`.
 
 ```bash
-hivemind skilify                            # show current scope, team, install, per-project state
-hivemind skilify scope <me|team|org>        # who counts as "in scope" for mining
-hivemind skilify pull                       # install teammates' skills locally
-hivemind skilify unpull                     # remove pulled skills
+hivemind skillify                            # show current scope, team, install, per-project state
+hivemind skillify scope <me|team|org>        # who counts as "in scope" for mining
+hivemind skillify pull                       # install teammates' skills locally
+hivemind skillify unpull                     # remove pulled skills
 ```
 
-Triggers, generation flow, full `pull` / `unpull` semantics, gate-CLI table per agent, env vars, logs: **[docs/SKILIFY.md](docs/SKILIFY.md)**.
+Triggers, generation flow, full `pull` / `unpull` semantics, gate-CLI table per agent, env vars, logs: **[docs/SKILLIFY.md](docs/SKILLIFY.md)**.
 
 ## Architecture
 
