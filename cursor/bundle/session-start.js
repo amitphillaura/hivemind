@@ -1205,7 +1205,7 @@ function withTimeout(p, ms) {
       clearTimeout(timer);
   });
 }
-async function maybeAutoPull(deps = {}) {
+async function autoPullSkills(deps = {}) {
   if (process.env.HIVEMIND_AUTOPULL_DISABLED === "1") {
     log4("disabled via HIVEMIND_AUTOPULL_DISABLED=1");
     return { pulled: 0, skipped: true, reason: "disabled" };
@@ -1340,7 +1340,7 @@ async function main() {
       log5(`placeholder failed: ${e.message}`);
     }
   }
-  const pullResult = await maybeAutoPull();
+  const pullResult = await autoPullSkills();
   log5(`autopull: pulled=${pullResult.pulled} skipped=${pullResult.skipped}`);
   let versionNotice = "";
   const current = getInstalledVersion(__bundleDir, ".claude-plugin");

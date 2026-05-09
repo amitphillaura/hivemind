@@ -72,7 +72,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  *
  * Always resolves; never rejects. The return value is informational only.
  */
-export async function maybeAutoPull(deps: AutoPullDeps = {}): Promise<AutoPullResult> {
+export async function autoPullSkills(deps: AutoPullDeps = {}): Promise<AutoPullResult> {
   // Hard opt-out: env flag short-circuits before any disk / config read.
   if (process.env.HIVEMIND_AUTOPULL_DISABLED === "1") {
     log("disabled via HIVEMIND_AUTOPULL_DISABLED=1");

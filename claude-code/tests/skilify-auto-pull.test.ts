@@ -15,7 +15,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// Stub DeeplakeApi at module load — the no-queryFn path inside maybeAutoPull
+// Stub DeeplakeApi at module load — the no-queryFn path inside autoPullSkills
 // constructs one and calls .query(sql). Without this, that branch (and its
 // internal SQL-wrapping lambda) is uncoverable in tests, dropping the file's
 // function-coverage below the configured 90% threshold.
@@ -28,7 +28,7 @@ vi.mock("../../src/deeplake-api.js", () => ({
   },
 }));
 
-import { maybeAutoPull } from "../../src/skilify/auto-pull.js";
+import { autoPullSkills } from "../../src/skilify/auto-pull.js";
 import type { QueryFn } from "../../src/skilify/pull.js";
 import type { Config } from "../../src/config.js";
 
@@ -96,14 +96,14 @@ function makeMockQuery(rows: Record<string, unknown>[]): { fn: QueryFn; calls: s
   return { fn, calls };
 }
 
-// ─── maybeAutoPull — env-based skips ──────────────────────────────────────────
+// ─── autoPullSkills — env-based skips ──────────────────────────────────────────
 
-describe("maybeAutoPull — disabled paths", () => {
+describe("autoPullSkills — disabled paths", () => {
   it("skips when HIVEMIND_AUTOPULL_DISABLED=1 (no config / query touched)", async () => {
     process.env.HIVEMIND_AUTOPULL_DISABLED = "1";
     const loadConfigFn = vi.fn(() => makeConfig());
     const { fn: queryFn, calls } = makeMockQuery([]);
-    const result = await maybeAutoPull({ loadConfigFn, queryFn });
+    const result = await autoPullSkills({ loadConfigFn, queryFn });
     expect(result).toEqual({ pulled: 0, skipped: true, reason: "disabled" });
     // Short-circuit: env-disabled must not even reach loadConfig.
     expect(loadConfigFn).not.toHaveBeenCalled();
@@ -111,26 +111,26 @@ describe("maybeAutoPull — disabled paths", () => {
   });
 });
 
-// ─── maybeAutoPull — not-logged-in ────────────────────────────────────────────
+// ─── autoPullSkills — not-logged-in ────────────────────────────────────────────
 
-describe("maybeAutoPull — not logged in", () => {
+describe("autoPullSkills — not logged in", () => {
   it("returns silently when loadConfig returns null (no nag)", async () => {
     const loadConfigFn = vi.fn(() => null);
     const { fn: queryFn, calls } = makeMockQuery([]);
-    const result = await maybeAutoPull({ loadConfigFn, queryFn });
+    const result = await autoPullSkills({ loadConfigFn, queryFn });
     expect(result).toEqual({ pulled: 0, skipped: true, reason: "not-logged-in" });
     expect(loadConfigFn).toHaveBeenCalledTimes(1);
     expect(calls).toHaveLength(0);
   });
 });
 
-// ─── maybeAutoPull — happy path runs every call (no throttle) ─────────────────
+// ─── autoPullSkills — happy path runs every call (no throttle) ─────────────────
 
-describe("maybeAutoPull — runs every call", () => {
+describe("autoPullSkills — runs every call", () => {
   it("first call runs the pull and writes SKILL.md", async () => {
     const loadConfigFn = () => makeConfig();
     const { fn: queryFn, calls } = makeMockQuery([sampleRow()]);
-    const result = await maybeAutoPull({
+    const result = await autoPullSkills({
       loadConfigFn, queryFn, install: "project", cwd: tmpHome,
     });
     expect(result.skipped).toBe(false);
@@ -151,11 +151,11 @@ describe("maybeAutoPull — runs every call", () => {
     const loadConfigFn = () => makeConfig();
     const { fn: queryFn, calls } = makeMockQuery([sampleRow()]);
 
-    const r1 = await maybeAutoPull({ loadConfigFn, queryFn, install: "project", cwd: tmpHome });
+    const r1 = await autoPullSkills({ loadConfigFn, queryFn, install: "project", cwd: tmpHome });
     expect(r1.skipped).toBe(false);
     expect(calls).toHaveLength(1);
 
-    const r2 = await maybeAutoPull({ loadConfigFn, queryFn, install: "project", cwd: tmpHome });
+    const r2 = await autoPullSkills({ loadConfigFn, queryFn, install: "project", cwd: tmpHome });
     // skipped:false even though SKILL.md is up-to-date — the auto-pull
     // ran the query end-to-end. wrote=0 because runPull's decideAction
     // returned "skipped" for the now-unchanged row.
@@ -165,13 +165,13 @@ describe("maybeAutoPull — runs every call", () => {
   });
 });
 
-// ─── maybeAutoPull — failure handling ─────────────────────────────────────────
+// ─── autoPullSkills — failure handling ─────────────────────────────────────────
 
-describe("maybeAutoPull — failures swallowed", () => {
+describe("autoPullSkills — failures swallowed", () => {
   it("does NOT throw when query fails", async () => {
     const loadConfigFn = () => makeConfig();
     const failingQuery: QueryFn = async () => { throw new Error("network borked"); };
-    const result = await maybeAutoPull({
+    const result = await autoPullSkills({
       loadConfigFn, queryFn: failingQuery, install: "project", cwd: tmpHome,
     });
     expect(result).toEqual({ pulled: 0, skipped: true, reason: "error" });
@@ -179,12 +179,12 @@ describe("maybeAutoPull — failures swallowed", () => {
 
   it("treats 'table does not exist' as empty result (zero-write success)", async () => {
     // runPull's isMissingTableError swallows this and returns scanned=0.
-    // maybeAutoPull then treats it as a successful zero-write pull.
+    // autoPullSkills then treats it as a successful zero-write pull.
     const loadConfigFn = () => makeConfig();
     const tableMissingQuery: QueryFn = async () => {
       throw new Error('relation "skills" does not exist');
     };
-    const result = await maybeAutoPull({
+    const result = await autoPullSkills({
       loadConfigFn, queryFn: tableMissingQuery, install: "project", cwd: tmpHome,
     });
     expect(result.skipped).toBe(false);
@@ -196,7 +196,7 @@ describe("maybeAutoPull — failures swallowed", () => {
     // Query never resolves — would hang forever without the timeout.
     const hangingQuery: QueryFn = () => new Promise(() => { /* never */ });
     const start = Date.now();
-    const result = await maybeAutoPull({
+    const result = await autoPullSkills({
       loadConfigFn, queryFn: hangingQuery, install: "project", cwd: tmpHome,
       timeoutMs: 100,                                  // tiny timeout for the test
     });
@@ -207,13 +207,13 @@ describe("maybeAutoPull — failures swallowed", () => {
   });
 });
 
-// ─── maybeAutoPull — install location default ────────────────────────────────
+// ─── autoPullSkills — install location default ────────────────────────────────
 
-describe("maybeAutoPull — install location", () => {
+describe("autoPullSkills — install location", () => {
   it("defaults install to 'global' (writes under ~/.claude/skills)", async () => {
     const loadConfigFn = () => makeConfig();
     const { fn: queryFn } = makeMockQuery([sampleRow()]);
-    const result = await maybeAutoPull({
+    const result = await autoPullSkills({
       loadConfigFn, queryFn,
       // install + cwd intentionally NOT passed — we want the global default.
     });
@@ -224,16 +224,16 @@ describe("maybeAutoPull — install location", () => {
   });
 });
 
-// ─── maybeAutoPull — default DeeplakeApi-backed query path ────────────────────
+// ─── autoPullSkills — default DeeplakeApi-backed query path ────────────────────
 
-describe("maybeAutoPull — no-queryFn path (uses DeeplakeApi)", () => {
+describe("autoPullSkills — no-queryFn path (uses DeeplakeApi)", () => {
   it("falls back to DeeplakeApi.query when deps.queryFn is not injected", async () => {
     // The lambda that wraps `api.query(sql)` is otherwise uncoverable —
     // every other test injects queryFn directly. Module-level vi.mock
     // replaces DeeplakeApi with a stub whose `.query` we observe.
     apiQueryMock.mockResolvedValue([sampleRow()]);
     const loadConfigFn = () => makeConfig();
-    const result = await maybeAutoPull({
+    const result = await autoPullSkills({
       loadConfigFn,
       // queryFn intentionally omitted — exercise the constructor path
       install: "project",

@@ -1067,7 +1067,7 @@ function withTimeout(p, ms) {
       clearTimeout(timer);
   });
 }
-async function maybeAutoPull(deps = {}) {
+async function autoPullSkills(deps = {}) {
   if (process.env.HIVEMIND_AUTOPULL_DISABLED === "1") {
     log3("disabled via HIVEMIND_AUTOPULL_DISABLED=1");
     return { pulled: 0, skipped: true, reason: "disabled" };
@@ -1108,7 +1108,7 @@ async function maybeAutoPull(deps = {}) {
 // dist/src/skilify/autopull-worker.js
 void (async () => {
   try {
-    await maybeAutoPull();
+    await autoPullSkills();
   } catch {
   }
 })();

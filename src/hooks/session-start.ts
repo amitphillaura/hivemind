@@ -18,7 +18,7 @@ import { log as _log } from "../utils/debug.js";
 import { getInstalledVersion } from "../utils/version-check.js";
 import { makeWikiLogger } from "../utils/wiki-log.js";
 import { autoUpdate } from "./shared/autoupdate.js";
-import { maybeAutoPull } from "../skilify/auto-pull.js";
+import { autoPullSkills } from "../skilify/auto-pull.js";
 const log = (msg: string) => _log("session-start", msg);
 
 const __bundleDir = dirname(fileURLToPath(import.meta.url));
@@ -191,9 +191,9 @@ async function main(): Promise<void> {
   // session is cheap on disk; the only per-call cost is the SQL
   // round-trip. Bounded by a 5s timeout so a slow Deeplake never
   // freezes SessionStart. Hard opt-out via HIVEMIND_AUTOPULL_DISABLED=1.
-  // All failures swallowed inside maybeAutoPull (documented as
+  // All failures swallowed inside autoPullSkills (documented as
   // never-rejecting), so no try/catch needed here.
-  const pullResult = await maybeAutoPull();
+  const pullResult = await autoPullSkills();
   log(`autopull: pulled=${pullResult.pulled} skipped=${pullResult.skipped}`);
 
   // Version notice in additionalContext — informational only; the

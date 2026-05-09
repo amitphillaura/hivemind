@@ -107,7 +107,7 @@ beforeEach(() => {
   queryMock.mockReset().mockResolvedValue([]); // "no existing summary"
   autoUpdateMock.mockReset().mockResolvedValue(undefined);
   getInstalledVersionMock.mockReset().mockReturnValue("9.9.9");
-  // Disable auto-pull during this test: maybeAutoPull would otherwise issue
+  // Disable auto-pull during this test: autoPullSkills would otherwise issue
   // an extra SQL query (against `skills`) through the same DeeplakeApi mock,
   // breaking the placeholder-branching call-count assertions. The auto-pull
   // module's behaviour is covered exhaustively in skilify-auto-pull.test.ts.

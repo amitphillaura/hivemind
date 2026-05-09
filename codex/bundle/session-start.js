@@ -1153,7 +1153,7 @@ function withTimeout(p, ms) {
       clearTimeout(timer);
   });
 }
-async function maybeAutoPull(deps = {}) {
+async function autoPullSkills(deps = {}) {
   if (process.env.HIVEMIND_AUTOPULL_DISABLED === "1") {
     log3("disabled via HIVEMIND_AUTOPULL_DISABLED=1");
     return { pulled: 0, skipped: true, reason: "disabled" };
@@ -1262,7 +1262,7 @@ async function main() {
     child.unref();
     log4("spawned async setup process");
   }
-  const pullResult = await maybeAutoPull();
+  const pullResult = await autoPullSkills();
   log4(`autopull: pulled=${pullResult.pulled} skipped=${pullResult.skipped}`);
   let versionNotice = "";
   const current = getInstalledVersion(__bundleDir, ".codex-plugin");
