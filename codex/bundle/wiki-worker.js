@@ -135,13 +135,14 @@ async function uploadSummary(query2, params) {
   const desc = extractDescription(text);
   const sizeBytes = Buffer.byteLength(text);
   const embSql = embeddingSqlLiteral(params.embedding ?? null);
+  const pluginVersion = params.pluginVersion ?? "";
   const existing = await query2(`SELECT path FROM "${tableName}" WHERE path = '${esc(vpath)}' LIMIT 1`);
   if (existing.length > 0) {
-    const sql2 = `UPDATE "${tableName}" SET summary = E'${esc(text)}', summary_embedding = ${embSql}, size_bytes = ${sizeBytes}, description = E'${esc(desc)}', last_update_date = '${ts}' WHERE path = '${esc(vpath)}'`;
+    const sql2 = `UPDATE "${tableName}" SET summary = E'${esc(text)}', summary_embedding = ${embSql}, size_bytes = ${sizeBytes}, description = E'${esc(desc)}', plugin_version = '${esc(pluginVersion)}', last_update_date = '${ts}' WHERE path = '${esc(vpath)}'`;
     await query2(sql2);
     return { path: "update", sql: sql2, descLength: desc.length, summaryLength: text.length };
   }
-  const sql = `INSERT INTO "${tableName}" (id, path, filename, summary, summary_embedding, author, mime_type, size_bytes, project, description, agent, creation_date, last_update_date) VALUES ('${randomUUID()}', '${esc(vpath)}', '${esc(fname)}', E'${esc(text)}', ${embSql}, '${esc(userName)}', 'text/markdown', ${sizeBytes}, '${esc(project)}', E'${esc(desc)}', '${esc(agent)}', '${ts}', '${ts}')`;
+  const sql = `INSERT INTO "${tableName}" (id, path, filename, summary, summary_embedding, author, mime_type, size_bytes, project, description, agent, plugin_version, creation_date, last_update_date) VALUES ('${randomUUID()}', '${esc(vpath)}', '${esc(fname)}', E'${esc(text)}', ${embSql}, '${esc(userName)}', 'text/markdown', ${sizeBytes}, '${esc(project)}', E'${esc(desc)}', '${esc(agent)}', '${esc(pluginVersion)}', '${ts}', '${ts}')`;
   await query2(sql);
   return { path: "insert", sql, descLength: desc.length, summaryLength: text.length };
 }
@@ -539,7 +540,8 @@ async function main() {
           agent: "codex",
           sessionId: cfg.sessionId,
           text,
-          embedding
+          embedding,
+          pluginVersion: cfg.pluginVersion ?? ""
         });
         wlog(`uploaded ${vpath} (summary=${result.summaryLength}, desc=${result.descLength})`);
         try {
