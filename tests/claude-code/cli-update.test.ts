@@ -19,8 +19,8 @@ import { join } from "node:path";
 
 import { runUpdate, detectInstallKind, getLatestNpmVersion } from "../../src/cli/update.js";
 
-let stdoutMock: ReturnType<typeof vi.fn>;
-let stderrMock: ReturnType<typeof vi.fn>;
+let stdoutMock: any;
+let stderrMock: any;
 
 beforeEach(() => {
   stdoutMock = vi.fn();
@@ -33,8 +33,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const stdoutText = () => stdoutMock.mock.calls.map(c => c[0]).join("");
-const stderrText = () => stderrMock.mock.calls.map(c => c[0]).join("");
+const stdoutText = () => stdoutMock.mock.calls.map((c: any) => c[0]).join("");
+const stderrText = () => stderrMock.mock.calls.map((c: any) => c[0]).join("");
 
 describe("runUpdate — branches", () => {
   it("exits 0 with 'up to date' when latest equals current", async () => {
@@ -221,7 +221,7 @@ describe("runUpdate — branches", () => {
     // the "up to date" branch deterministically.
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const repoRoot = join(__dirname, "..", "..");
+    const repoRoot = process.cwd();
     const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf-8"));
     const version: string = pkg.version;
 
@@ -282,7 +282,12 @@ describe("detectInstallKind — heuristics", () => {
     pkgName?: string;              // package.json name field
     addGitIn?: string[];           // create .git in this subpath of installDir
   }): string {
-    const installDir = join(TMP, ...opts.pathSegments);
+    // NOTE: this repo's CI images may have `/tmp/.git`, which would make the
+    // `.git`-reachable heuristic misclassify arbitrary tmp paths as local-dev.
+    // The production probe only walks 6 levels; nest the fake install deeply
+    // enough that it cannot reach `/tmp/.git`.
+    const deepPrefix = ["d1", "d2", "d3", "d4", "d5", "d6", "d7"];
+    const installDir = join(TMP, ...deepPrefix, ...opts.pathSegments);
     mkdirSync(installDir, { recursive: true });
     if (opts.pkgName) {
       writeFileSync(join(installDir, "package.json"), JSON.stringify({ name: opts.pkgName, version: "0.0.0" }));

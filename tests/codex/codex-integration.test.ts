@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const bundleDir = join(__dir, "..", "bundle");
+const bundleDir = join(process.cwd(), "codex", "bundle");
 
 /** Pipe JSON into a bundle and return parsed stdout. */
 function runHook(bundle: string, input: Record<string, unknown>, extraEnv: Record<string, string> = {}): string {

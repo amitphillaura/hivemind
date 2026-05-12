@@ -89,7 +89,6 @@ function jsonResp(body: unknown, ok = true, status = 200): Response {
 
 async function runWorker(): Promise<void> {
   vi.resetModules();
-  // @ts-expect-error
   global.fetch = fetchMock;
   await import("../../src/hooks/wiki-worker.js");
   // Let main() and all its awaits complete.
@@ -118,7 +117,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // @ts-expect-error
   global.fetch = originalFetch;
   process.argv[2] = originalArgv2;
   try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* ignore */ }

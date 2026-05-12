@@ -94,7 +94,7 @@ const BASE_CONFIG = {
   apiUrl: "https://api.test",
   orgId: "locomo_benchmark",
   workspaceId: "baseline",
-};
+} as any;
 
 /** Simulates the real baseline workspace: memory empty, sessions populated. */
 function makeBaselineWorkspaceApi(sessionRows = SESSION_ROWS) {

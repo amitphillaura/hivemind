@@ -19,9 +19,9 @@ export default defineConfig({
   },
   test: {
     include: [
-      "claude-code/tests/**/*.test.ts",
-      "codex/tests/**/*.test.ts",
-      "openclaw/tests/**/*.test.ts",
+      "tests/claude-code/**/*.test.ts",
+      "tests/codex/**/*.test.ts",
+      "tests/openclaw/**/*.test.ts",
     ],
     environment: "node",
     coverage: {
@@ -40,7 +40,7 @@ export default defineConfig({
         "src/**/*.js.map",
         // CLI entry points — `main()` calls process.exit(), so source-level
         // unit tests don't make sense. These files have subprocess-spawn
-        // coverage via claude-code/tests/shell-bundle-*.test.ts instead.
+        // coverage via tests/claude-code/shell-bundle-*.test.ts instead.
         "src/shell/deeplake-shell.ts",
         // Skillify worker entry points: skillify-worker.ts parses cfg from
         // process.argv[2] at top level then runs main() which spawns
@@ -48,7 +48,7 @@ export default defineConfig({
         // Both are excluded from vitest because they need a live Deeplake
         // workspace + a real agent CLI to exercise meaningfully.
         // Coverage on the SHIPPED bundle is enforced indirectly by
-        // claude-code/tests/skillify-bundle-scan.test.ts (asserts the
+        // tests/claude-code/skillify-bundle-scan.test.ts (asserts the
         // skillify-worker.js bundle exists per agent and contains the
         // required entry strings + agent labels). For full e2e in
         // development, see the manual matrix script described in the
@@ -184,7 +184,7 @@ export default defineConfig({
         },
         // PR #76 — feat/openclaw-static-scan-clean. Two new files extracted
         // from auth.ts / deeplake-api.ts so the openclaw bundle could split
-        // fs reads from fetch calls. Tests in claude-code/tests/{auth-creds,
+        // fs reads from fetch calls. Tests in tests/claude-code/{auth-creds,
         // index-marker-store}.test.ts cover both source modules above 90%.
         "src/commands/auth-creds.ts": {
           statements: 90,

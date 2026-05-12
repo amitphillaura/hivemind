@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * skip-when-no-config, and the EmbedClient warmup paths.
  *
  * The autoUpdate helper itself is exhaustively tested in
- * `claude-code/tests/autoupdate.test.ts`. We mock it at the boundary
+ * `tests/claude-code/autoupdate.test.ts`. We mock it at the boundary
  * here so the setup hook can be tested in isolation.
  */
 

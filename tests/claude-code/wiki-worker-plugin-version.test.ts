@@ -111,7 +111,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // @ts-expect-error
   global.fetch = originalFetch;
   process.argv[2] = originalArgv2;
   try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -139,7 +138,6 @@ async function runVariant(variant: AgentVariant, pluginVersion: string): Promise
     }
     return jsonResp({ columns: [], rows: [] });
   });
-  // @ts-expect-error — replace fetch for the worker import
   global.fetch = fetchMock;
   vi.resetModules();
   await import(variant.workerPath);
@@ -200,7 +198,6 @@ describe("wiki-worker pluginVersion threading — per agent", () => {
         }
         return jsonResp({ columns: [], rows: [] });
       });
-      // @ts-expect-error
       global.fetch = fetchMock;
       vi.resetModules();
       await import(v.workerPath);
@@ -275,7 +272,6 @@ describe("wiki-worker API retry path — per agent", () => {
         }
         return jsonResp({ columns: [], rows: [] });
       });
-      // @ts-expect-error
       global.fetch = fetchMock;
       vi.resetModules();
       await import(v.workerPath);
@@ -318,7 +314,6 @@ describe("wiki-worker resume + embeddings-disabled branches — per agent", () =
         }
         return jsonResp({ columns: [], rows: [] });
       });
-      // @ts-expect-error
       global.fetch = fetchMock;
       vi.resetModules();
       await import(v.workerPath);
@@ -391,7 +386,6 @@ describe("wiki-worker error / edge-case branches — per agent", () => {
         }
         return jsonResp({ columns: [], rows: [] });
       });
-      // @ts-expect-error
       global.fetch = fetchMock;
       vi.resetModules();
       await import(v.workerPath);

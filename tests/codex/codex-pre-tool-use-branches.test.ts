@@ -47,6 +47,19 @@ function baseDeps(extra: Record<string, any> = {}) {
   };
 }
 
+function toolInput(command: string, overrides: Record<string, unknown> = {}) {
+  return {
+    session_id: "s",
+    tool_name: "shell",
+    tool_use_id: "tu-1",
+    tool_input: { command },
+    cwd: "/tmp",
+    hook_event_name: "pre_tool_use",
+    model: "gpt-test",
+    ...overrides,
+  };
+}
+
 describe("codex: pure helpers", () => {
   it("buildUnsupportedGuidance names the allowed bash builtins and rejects interpreters", () => {
     const s = buildUnsupportedGuidance();
@@ -66,7 +79,7 @@ describe("codex: pure helpers", () => {
 describe("processCodexPreToolUse: pass-through + unsafe", () => {
   it("returns `pass` when the command doesn't mention the memory path", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "ls /tmp" } },
+      toolInput("ls /tmp"),
       baseDeps(),
     );
     expect(d.action).toBe("pass");
@@ -74,7 +87,7 @@ describe("processCodexPreToolUse: pass-through + unsafe", () => {
 
   it("returns `guide` with the unsupported-command guidance when a memory-path command uses an interpreter", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "python ~/.deeplake/memory/x.py" } },
+      toolInput("python ~/.deeplake/memory/x.py"),
       baseDeps(),
     );
     expect(d.action).toBe("guide");
@@ -85,7 +98,7 @@ describe("processCodexPreToolUse: pass-through + unsafe", () => {
   it("falls back to runVirtualShell when no config is loaded", async () => {
     const runVirtualShellFn = vi.fn(() => "FROM-SHELL") as any;
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/index.md" } },
+      toolInput("cat ~/.deeplake/memory/index.md"),
       { ...baseDeps({ runVirtualShellFn }), config: null as any },
     );
     expect(d.action).toBe("block");
@@ -96,7 +109,7 @@ describe("processCodexPreToolUse: pass-through + unsafe", () => {
   it("falls back to the virtual shell's empty-result placeholder when the shell returns empty", async () => {
     const runVirtualShellFn = vi.fn(() => "") as any;
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/nonexistent.md" } },
+      toolInput("cat ~/.deeplake/memory/nonexistent.md"),
       {
         ...baseDeps({ runVirtualShellFn }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -111,7 +124,7 @@ describe("processCodexPreToolUse: compiled bash fast-path", () => {
   it("delegates to executeCompiledBashCommand and blocks with its output when a segment compiles", async () => {
     const executeCompiledBashCommandFn = vi.fn(async () => "COMPILED OUTPUT") as any;
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/index.md && ls ~/.deeplake/memory/summaries" } },
+      toolInput("cat ~/.deeplake/memory/index.md && ls ~/.deeplake/memory/summaries"),
       { ...baseDeps(), executeCompiledBashCommandFn },
     );
     expect(d.action).toBe("block");
@@ -132,7 +145,7 @@ describe("processCodexPreToolUse: compiled bash fast-path", () => {
     }) as any;
 
     const d = await processCodexPreToolUse(
-      { session_id: "sess-A", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/index.md && cat ~/.deeplake/memory/sessions/x.json" } },
+      toolInput("cat ~/.deeplake/memory/index.md && cat ~/.deeplake/memory/sessions/x.json", { session_id: "sess-A" }),
       {
         ...baseDeps({ readCachedIndexContentFn, readVirtualPathContentsFn }),
         executeCompiledBashCommandFn,
@@ -152,7 +165,7 @@ describe("processCodexPreToolUse: compiled bash fast-path", () => {
 describe("processCodexPreToolUse: direct read (cat/head/tail/wc)", () => {
   it("cat <file> returns raw content", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/sessions/a.json" } },
+      toolInput("cat ~/.deeplake/memory/sessions/a.json"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -164,7 +177,7 @@ describe("processCodexPreToolUse: direct read (cat/head/tail/wc)", () => {
 
   it("head -N <file> slices to the first N lines", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "head -2 ~/.deeplake/memory/sessions/a.json" } },
+      toolInput("head -2 ~/.deeplake/memory/sessions/a.json"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -176,7 +189,7 @@ describe("processCodexPreToolUse: direct read (cat/head/tail/wc)", () => {
 
   it("head <file> (no -N) defaults to 10 lines", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "head ~/.deeplake/memory/sessions/a.json" } },
+      toolInput("head ~/.deeplake/memory/sessions/a.json"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -190,7 +203,7 @@ describe("processCodexPreToolUse: direct read (cat/head/tail/wc)", () => {
 
   it("tail -N <file> slices to the last N lines", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "tail -2 ~/.deeplake/memory/sessions/a.json" } },
+      toolInput("tail -2 ~/.deeplake/memory/sessions/a.json"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -202,7 +215,7 @@ describe("processCodexPreToolUse: direct read (cat/head/tail/wc)", () => {
 
   it("tail <file> defaults to the last 10 lines", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "tail ~/.deeplake/memory/sessions/a.json" } },
+      toolInput("tail ~/.deeplake/memory/sessions/a.json"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -216,7 +229,7 @@ describe("processCodexPreToolUse: direct read (cat/head/tail/wc)", () => {
 
   it("wc -l <file> returns `<count> <virtualPath>`", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "wc -l ~/.deeplake/memory/sessions/a.json" } },
+      toolInput("wc -l ~/.deeplake/memory/sessions/a.json"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -228,7 +241,7 @@ describe("processCodexPreToolUse: direct read (cat/head/tail/wc)", () => {
 
   it("cat | head pipeline collapses to a single head read", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/sessions/a.json | head -3" } },
+      toolInput("cat ~/.deeplake/memory/sessions/a.json | head -3"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -246,7 +259,7 @@ describe("processCodexPreToolUse: /index.md caching + fallback", () => {
     const readCachedIndexContentFn = vi.fn(() => "CACHED-BODY");
     const readVirtualPathContentFn = vi.fn(async () => "FRESH") as any;
     const d = await processCodexPreToolUse(
-      { session_id: "s-cache", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/index.md" } },
+      toolInput("cat ~/.deeplake/memory/index.md", { session_id: "s-cache" }),
       {
         ...baseDeps({ readCachedIndexContentFn, readVirtualPathContentFn }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -259,7 +272,7 @@ describe("processCodexPreToolUse: /index.md caching + fallback", () => {
   it("on cache miss fetches /index.md via readVirtualPathContent + writes it into the cache", async () => {
     const writeCachedIndexContentFn = vi.fn();
     const d = await processCodexPreToolUse(
-      { session_id: "s-miss", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/index.md" } },
+      toolInput("cat ~/.deeplake/memory/index.md", { session_id: "s-miss" }),
       {
         ...baseDeps({ writeCachedIndexContentFn }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -278,7 +291,7 @@ describe("processCodexPreToolUse: /index.md caching + fallback", () => {
       { path: "/summaries/a/s2.md", project: "", description: "", creation_date: "2026-04-19" },
     ]);
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/index.md" } },
+      toolInput("cat ~/.deeplake/memory/index.md"),
       {
         ...baseDeps({ createApi: vi.fn(() => api) }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -301,7 +314,7 @@ describe("processCodexPreToolUse: ls branch", () => {
     ]) as any;
 
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "ls ~/.deeplake/memory/summaries" } },
+      toolInput("ls ~/.deeplake/memory/summaries"),
       {
         ...baseDeps({ listVirtualPathRowsFn }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -314,7 +327,7 @@ describe("processCodexPreToolUse: ls branch", () => {
 
   it("long-format listing includes permission strings and sizes", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "ls -la ~/.deeplake/memory/summaries" } },
+      toolInput("ls -la ~/.deeplake/memory/summaries"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -332,7 +345,7 @@ describe("processCodexPreToolUse: ls branch", () => {
 
   it("ls on an empty or non-existent directory returns a 'cannot access' message", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "ls ~/.deeplake/memory/nope" } },
+      toolInput("ls ~/.deeplake/memory/nope"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -352,7 +365,7 @@ describe("processCodexPreToolUse: find + grep + fallback", () => {
     ]) as any;
 
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "find ~/.deeplake/memory/sessions -name '*.json'" } },
+      toolInput("find ~/.deeplake/memory/sessions -name '*.json'"),
       {
         ...baseDeps({ findVirtualPathsFn }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -363,7 +376,7 @@ describe("processCodexPreToolUse: find + grep + fallback", () => {
 
   it("find … | wc -l collapses to the count", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "find ~/.deeplake/memory/sessions -name '*.json' | wc -l" } },
+      toolInput("find ~/.deeplake/memory/sessions -name '*.json' | wc -l"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -375,7 +388,7 @@ describe("processCodexPreToolUse: find + grep + fallback", () => {
 
   it("find with zero matches returns '(no matches)'", async () => {
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "find ~/.deeplake/memory/sessions -name '*.xyz'" } },
+      toolInput("find ~/.deeplake/memory/sessions -name '*.xyz'"),
       {
         ...baseDeps(),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -388,7 +401,7 @@ describe("processCodexPreToolUse: find + grep + fallback", () => {
   it("grep via parseBashGrep delegates to handleGrepDirect", async () => {
     const handleGrepDirectFn = vi.fn(async () => "/sessions/a.json:matching line") as any;
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "grep -l foo ~/.deeplake/memory/sessions/*.json" } },
+      toolInput("grep -l foo ~/.deeplake/memory/sessions/*.json"),
       {
         ...baseDeps({ handleGrepDirectFn }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,
@@ -401,7 +414,7 @@ describe("processCodexPreToolUse: find + grep + fallback", () => {
   it("falls back to runVirtualShell when the direct-query path throws mid-flow", async () => {
     const runVirtualShellFn = vi.fn(() => "SHELL OK") as any;
     const d = await processCodexPreToolUse(
-      { session_id: "s", tool_name: "shell", tool_input: { command: "cat ~/.deeplake/memory/sessions/a.json" } },
+      toolInput("cat ~/.deeplake/memory/sessions/a.json"),
       {
         ...baseDeps({ runVirtualShellFn }),
         executeCompiledBashCommandFn: vi.fn(async () => null) as any,

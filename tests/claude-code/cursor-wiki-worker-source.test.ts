@@ -10,7 +10,7 @@ import { join } from "node:path";
  * refactors against the codex template don't silently regress Cursor.
  */
 
-const REPO_ROOT = join(__dirname, "..", "..");
+const REPO_ROOT = process.cwd();
 const WORKER_SRC = readFileSync(join(REPO_ROOT, "src/hooks/cursor/wiki-worker.ts"), "utf-8");
 const SPAWN_SRC = readFileSync(join(REPO_ROOT, "src/hooks/cursor/spawn-wiki-worker.ts"), "utf-8");
 

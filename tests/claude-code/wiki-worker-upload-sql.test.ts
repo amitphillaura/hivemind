@@ -13,9 +13,10 @@ import { resolve } from "node:path";
  * UPDATEs on the same row.
  */
 
+const ROOT = process.cwd();
 const BUNDLES: Array<[string, string]> = [
-  ["claude-code", resolve(__dirname, "..", "bundle", "wiki-worker.js")],
-  ["codex", resolve(__dirname, "..", "..", "codex", "bundle", "wiki-worker.js")],
+  ["claude-code", resolve(ROOT, "claude-code", "bundle", "wiki-worker.js")],
+  ["codex", resolve(ROOT, "codex", "bundle", "wiki-worker.js")],
 ];
 
 for (const [label, path] of BUNDLES) {

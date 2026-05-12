@@ -67,7 +67,6 @@ async function runHook(env: Record<string, string | undefined> = {}): Promise<vo
     else process.env[k] = v;
   }
   vi.resetModules();
-  // @ts-expect-error: replace global fetch for the GitHub lookup
   global.fetch = fetchMock;
   await import("../../src/hooks/session-start-setup.js");
   await new Promise(r => setImmediate(r));
@@ -100,7 +99,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  // @ts-expect-error
   global.fetch = originalFetch;
 });
 

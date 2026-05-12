@@ -15,7 +15,7 @@ import { resolve } from "node:path";
  * that drops the injection or breaks the placeholder substitution.
  */
 
-const BUNDLE_ROOT = resolve(__dirname, "..", "..");
+const BUNDLE_ROOT = resolve(process.cwd());
 
 const SESSION_START_BUNDLES: Array<[string, string]> = [
   ["claude-code", resolve(BUNDLE_ROOT, "claude-code", "bundle", "session-start.js")],

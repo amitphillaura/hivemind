@@ -49,7 +49,7 @@ type CommandRegistration = {
 
 async function loadSetupCommand(): Promise<CommandRegistration> {
   vi.resetModules();
-  const mod = await import("../src/index.js");
+  const mod = await import("../../openclaw/src/index.js");
   const plugin = mod.default as { register: (api: any) => void };
   const commands: CommandRegistration[] = [];
   plugin.register({

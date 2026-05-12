@@ -9,7 +9,7 @@ import { join } from "node:path";
  * these tests prove `npm run build` didn't drop them.
  */
 
-const ROOT = join(__dirname, "..", "..");
+const ROOT = process.cwd();
 // openclaw is a separate npm sub-package and writes its build to `dist/`
 // (gitignored, regenerated on `npm run build`), whereas the other agents
 // commit their bundles under `bundle/`. We still want the shared worker

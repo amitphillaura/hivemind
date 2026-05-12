@@ -10,7 +10,7 @@ import { join } from "node:path";
  * codex template doesn't silently regress Hermes.
  */
 
-const REPO_ROOT = join(__dirname, "..", "..");
+const REPO_ROOT = process.cwd();
 const WORKER_SRC = readFileSync(join(REPO_ROOT, "src/hooks/hermes/wiki-worker.ts"), "utf-8");
 const SPAWN_SRC = readFileSync(join(REPO_ROOT, "src/hooks/hermes/spawn-wiki-worker.ts"), "utf-8");
 const SESSION_START_SRC = readFileSync(join(REPO_ROOT, "src/hooks/hermes/session-start.ts"), "utf-8");

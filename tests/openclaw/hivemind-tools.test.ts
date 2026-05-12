@@ -49,7 +49,7 @@ type MockTool = {
 
 async function loadPluginWithTools() {
   vi.resetModules();
-  const mod = await import("../src/index.js");
+  const mod = await import("../../openclaw/src/index.js");
   const plugin = mod.default as { register: (api: any) => void };
   const tools: MockTool[] = [];
   const mockApi = {
@@ -96,7 +96,7 @@ describe("openclaw hivemind tools — registration", () => {
 
   it("skips tool registration when host does not expose registerTool", async () => {
     vi.resetModules();
-    const mod = await import("../src/index.js");
+    const mod = await import("../../openclaw/src/index.js");
     const plugin = mod.default as { register: (api: any) => void };
     let threw: unknown = null;
     try {
@@ -133,7 +133,7 @@ describe("openclaw hivemind tools — registration", () => {
     (globalThis as any).__HIVEMIND_SKILL__ = "TEST_SKILL_BODY_CONTENT";
     try {
       vi.resetModules();
-      const mod = await import("../src/index.js");
+      const mod = await import("../../openclaw/src/index.js");
       const plugin = mod.default as { register: (api: any) => void };
       const onMock = vi.fn();
       plugin.register({
@@ -156,7 +156,7 @@ describe("openclaw hivemind tools — registration", () => {
   it("registers memoryCorpusSupplement when host exposes it", async () => {
     const supplementMock = vi.fn();
     vi.resetModules();
-    const mod = await import("../src/index.js");
+    const mod = await import("../../openclaw/src/index.js");
     const plugin = mod.default as { register: (api: any) => void };
     plugin.register({
       logger: { info: vi.fn(), error: vi.fn() },

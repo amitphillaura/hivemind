@@ -1,11 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const ccRoot = join(__dir, "..");
+const ccRoot = join(process.cwd(), "claude-code");
 const bundleDir = join(ccRoot, "bundle");
 
 // ── hooks.json structure tests ──────────────────────────────────────────────

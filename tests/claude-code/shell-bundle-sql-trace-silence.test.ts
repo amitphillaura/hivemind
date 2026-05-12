@@ -29,7 +29,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BUNDLE_PATH = join(__dirname, "..", "bundle", "shell", "deeplake-shell.js");
+const BUNDLE_PATH = join(process.cwd(), "claude-code", "bundle", "shell", "deeplake-shell.js");
 
 describe("shell bundle one-shot: SQL trace silence (fix #3)", () => {
   it("does not write [deeplake-sql] to stderr even when trace env vars are set", () => {
@@ -78,7 +78,7 @@ describe("shell bundle one-shot: SQL trace silence (fix #3)", () => {
     // spawn the REPL here, so we just verify the condition in source — this
     // guards against an over-eager fix that silences tracing globally.
     const { readFileSync } = require("node:fs");
-    const apiSource = readFileSync(join(__dirname, "..", "..", "src", "deeplake-api.ts"), "utf-8");
+    const apiSource = readFileSync(join(process.cwd(), "src", "deeplake-api.ts"), "utf-8");
     expect(apiSource).toMatch(/function traceSql\([^)]*\): void \{[\s\S]*process\.env\.HIVEMIND_TRACE_SQL/);
     // Ensure the env read is inside the function (runtime), not a top-level const.
     expect(apiSource).not.toMatch(/^const TRACE_SQL =/m);

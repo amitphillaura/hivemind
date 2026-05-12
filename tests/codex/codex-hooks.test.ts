@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const codexRoot = join(__dir, "..");
+const codexRoot = join(process.cwd(), "codex");
 
 describe("codex hooks.json", () => {
   const hooks = JSON.parse(readFileSync(join(codexRoot, "hooks", "hooks.json"), "utf-8"));

@@ -18,7 +18,8 @@ import { join } from "node:path";
  * versioned dirs at SessionEnd) and that's still asserted below.
  */
 
-const claudeCodeBundleDir = join(__dirname, "..", "bundle");
+const claudeCodeRoot = join(process.cwd(), "claude-code");
+const claudeCodeBundleDir = join(claudeCodeRoot, "bundle");
 
 describe("shipped bundles contain plugin-cache safety", () => {
   it("session-start-setup.js does NOT reach for snapshotPluginDir or execSync (centralized via autoUpdate)", () => {
@@ -41,7 +42,7 @@ describe("shipped bundles contain plugin-cache safety", () => {
   });
 
   it("hooks.json wires plugin-cache-gc into SessionEnd", () => {
-    const hooks = JSON.parse(readFileSync(join(__dirname, "..", "hooks", "hooks.json"), "utf-8"));
+    const hooks = JSON.parse(readFileSync(join(claudeCodeRoot, "hooks", "hooks.json"), "utf-8"));
     const sessionEnd = hooks.hooks.SessionEnd?.[0]?.hooks ?? [];
     const gcEntry = sessionEnd.find((h: any) => typeof h.command === "string" && h.command.includes("plugin-cache-gc.js"));
     expect(gcEntry).toBeTruthy();

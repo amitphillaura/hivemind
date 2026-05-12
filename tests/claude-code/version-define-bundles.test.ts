@@ -15,7 +15,7 @@ import { readdirSync, statSync } from "node:fs";
  * again, including for any new agent we wire up later.
  */
 
-const ROOT = resolve(__dirname, "..", "..");
+const ROOT = resolve(process.cwd());
 
 function listBundleFiles(dir: string): string[] {
   const out: string[] = [];

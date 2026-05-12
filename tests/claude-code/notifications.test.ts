@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import {
   drainSessionStart,
@@ -334,8 +333,7 @@ describe("drainSessionStart resilience", () => {
 // ---------------------------------------------------------------------------
 
 describe("bundle/session-notifications.js (built artifact)", () => {
-  const __dir = dirname(fileURLToPath(import.meta.url));
-  const bundlePath = join(__dir, "..", "bundle", "session-notifications.js");
+  const bundlePath = join(process.cwd(), "claude-code", "bundle", "session-notifications.js");
 
   // spawnSync (vs execFileSync) so we can capture stdout + stderr separately
   // to verify the dual-channel emit: user-visible stderr banner + model-

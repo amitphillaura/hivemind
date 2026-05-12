@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const bundleDir = join(__dir, "..", "bundle");
+const bundleDir = join(process.cwd(), "claude-code", "bundle");
 
 /**
  * Pipe JSON into the CC pre-tool-use hook and return parsed output.
@@ -368,7 +366,7 @@ describe("pre-tool-use: interpreter read on clean single-file path is rewritten 
     expect(r.empty).toBe(false);
     if (!r.empty) {
       // Either RETRY (if regex rejects the apostrophe) or a properly-escaped cat
-      if (!r.updatedCommand.includes("RETRY")) {
+      if (r.updatedCommand && !r.updatedCommand.includes("RETRY")) {
         // Must not close the outer single-quote naively
         expect(r.updatedCommand).not.toMatch(/cat '[^']*'[^']+'$/);
       }

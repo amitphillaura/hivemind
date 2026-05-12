@@ -25,7 +25,7 @@ import { resolve } from "node:path";
  * these bundle checks prove the build didn't drop the call sites.
  */
 
-const BUNDLE_ROOT = resolve(__dirname, "..", "..");
+const BUNDLE_ROOT = resolve(process.cwd());
 
 const SESSION_END_HOOKS: Array<[string, string]> = [
   ["claude-code session-end", resolve(BUNDLE_ROOT, "claude-code", "bundle", "session-end.js")],

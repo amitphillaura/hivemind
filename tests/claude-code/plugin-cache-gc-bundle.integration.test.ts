@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
  * Requires the bundle to be built (`npm run build`). Skipped if missing.
  */
 
-const bundlePath = resolve(__dirname, "..", "bundle", "plugin-cache-gc.js");
+const bundlePath = resolve(process.cwd(), "claude-code", "bundle", "plugin-cache-gc.js");
 const bundleExists = existsSync(bundlePath);
 
 function makeFakeHome(): string {
