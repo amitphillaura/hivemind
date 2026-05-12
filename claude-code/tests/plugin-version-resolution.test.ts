@@ -52,7 +52,10 @@ describe("plugin_version stamps a non-empty value for every shipped agent", () =
     // covered. Either way the runtime must NOT see an empty string here.
     const version = getInstalledVersion(bundleDir, manifestDir);
     expect(version, `${manifestDir} from ${bundleDir} must resolve a version`).not.toBeNull();
-    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    // Accept full SemVer 2.0: x.y.z plus optional -prerelease and +build
+    // segments. We don't ship prerelease today but a future RC tag
+    // (0.8.0-rc.1) shouldn't make this guard fail.
+    expect(version).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
   });
 });
 
