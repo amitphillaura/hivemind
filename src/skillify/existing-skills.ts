@@ -75,6 +75,24 @@ export function listAllExistingSkills(cwd: string): TaggedSkill[] {
 /**
  * Render the gate-prompt block. `charCap` is the soft budget — once we
  * cross it, we emit a "[…N more omitted]" line and stop.
+ *
+ * MERGE eligibility (post-#125 review): only `[project]` skills are
+ * returned in `mergeTargetNames`. A previous iteration of this PR opened
+ * MERGE to every rendered skill (including `[global]`), but the worker's
+ * mergeSkill path is rooted at `cfg.install` — for a `[global]` target
+ * the local file doesn't exist under that root, so mergeSkill throws and
+ * the fallback writes a brand-new skill (creating exactly the duplicate
+ * we set out to prevent). Until the worker carries the source root
+ * through the verdict and resolves a `<root>/<name>--<author>` dirname
+ * for global targets, `[global]` skills stay reference-only here.
+ * Tracked as a follow-up (see PR #125 description).
+ *
+ * Two narrower issues caught in the same review and fixed here:
+ *   - `mergeTargetNames` must only include skills whose bodies were
+ *     actually rendered into the prompt — otherwise the truncation tail
+ *     leaks names the LLM never saw the context for.
+ *   - The `[global, read-only]` tag is restored so the gate prompt's
+ *     "MERGE only on [project]" rule has a stable surface to point at.
  */
 export function renderExistingSkillsBlock(cwd: string, charCap: number): ExistingSkillsBlock {
   const skills = listAllExistingSkills(cwd);
@@ -84,18 +102,14 @@ export function renderExistingSkillsBlock(cwd: string, charCap: number): Existin
       block: "(no existing skills — MERGE is NOT a valid choice; pick KEEP or SKIP only)",
     };
   }
-  // Every skill is now a valid MERGE target — cross-author MERGE triggers
-  // an auto-promotion of `scope` to "team" plus an append to the
-  // `contributors` column, instead of being forbidden.
-  const mergeTargetNames = skills.map(s => s.name);
   let total = 0;
   const out: string[] = [];
+  const mergeTargetNames: string[] = [];
   for (const s of skills) {
-    // Tag captures both the install root (project vs global) and the
-    // author so the gate prompt can communicate "this one's yours / this
-    // one's a teammate's; MERGE is allowed either way but promotion
-    // applies when authors differ".
-    const sourceTag = s.source === "project" ? "project" : "global";
+    // Tag carries both the install root and the author so the gate
+    // prompt can communicate "this one's yours, MERGE-eligible; this
+    // one's a teammate's pulled into your global root, reference only".
+    const sourceTag = s.source === "project" ? "project" : "global, read-only";
     const authorTag = s.author ? `, author=${s.author}` : "";
     const block = `--- existing skill [${sourceTag}${authorTag}]: ${s.name} ---\n${s.body}\n`;
     if (total + block.length > charCap) {
@@ -104,6 +118,10 @@ export function renderExistingSkillsBlock(cwd: string, charCap: number): Existin
     }
     out.push(block);
     total += block.length;
+    // Only register the name once we know the block fit and the source
+    // is [project] — global skills are reference-only per the policy
+    // documented above.
+    if (s.source === "project") mergeTargetNames.push(s.name);
   }
   return { mergeTargetNames, block: out.join("\n") };
 }

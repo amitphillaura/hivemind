@@ -97,20 +97,21 @@ describe("renderExistingSkillsBlock", () => {
     expect(result.block).toMatch(/MERGE is NOT a valid choice/);
   });
 
-  it("lists every existing skill as MERGE-eligible (issue #118: cross-author MERGE allowed)", () => {
+  it("only [project] skills are MERGE-eligible (post-#125 review: worker's mergeSkill is rooted at cfg.install)", () => {
     writeSkill(projectRoot(), "deploy", "p body");
     writeSkill(globalRoot(), "team-standup--d", "g body");
     writeSkill(globalRoot(), "pg-deeplake-cred-callback--levon", "g body 2");
     const result = renderExistingSkillsBlock(projectCwd, 10_000);
-    // Before #118 the global ones were filtered out. Now they're all
-    // valid targets — the worker handles cross-author lineage by
-    // promoting scope=me -> scope=team on the v+1 row.
-    expect(result.mergeTargetNames.sort()).toEqual(
-      ["deploy", "pg-deeplake-cred-callback--levon", "team-standup--d"],
-    );
+    // [global] entries are reference-only until the worker can resolve a
+    // global mergeSkill root (`<root>/<name>--<author>`) and translate
+    // the verdict name back to a DB name. Without that plumbing the
+    // worker would always fall through to writeNewSkill — i.e. silently
+    // create a new skill instead of merging — which is exactly the
+    // duplicate-producing bug #118 was meant to prevent.
+    expect(result.mergeTargetNames).toEqual(["deploy"]);
   });
 
-  it("tags each rendered skill with [project] or [global] and surfaces author when present", () => {
+  it("tags each rendered skill with [project, ...] or [global, read-only, ...] and surfaces author", () => {
     // Project skill carries its author in the frontmatter; global pulled
     // skill from a teammate likewise.
     const fmWithAuthor = (name: string, author: string, body: string) =>
@@ -126,13 +127,30 @@ describe("renderExistingSkillsBlock", () => {
       writeFileSync(join(dir, "SKILL.md"), fmWithAuthor("their-skill--alice", "alice", "alice body"));
     }
     const result = renderExistingSkillsBlock(projectCwd, 10_000);
-    // Tag shape: [<root>[, author=<name>]]. The gate uses the author to
-    // judge whether MERGE is cross-author (auto-promote trigger).
+    // Tag shape: [<source>[, author=<name>]]. `[global, read-only, ...]`
+    // signals to the LLM that the skill exists but isn't a MERGE target.
     expect(result.block).toContain("[project, author=emanuele]: my-local");
-    expect(result.block).toContain("[global, author=alice]: their-skill--alice");
-    // Defensive against future template churn: no skill should ever
-    // render without a bracketed source tag.
+    expect(result.block).toContain("[global, read-only, author=alice]: their-skill--alice");
+    // Defensive against future template churn.
     expect(result.block).not.toMatch(/^--- existing skill: /m);
+  });
+
+  it("mergeTargetNames excludes skills truncated by the char cap (not just by source)", () => {
+    // The previous implementation built mergeTargetNames from ALL skills
+    // and only the rendered block was truncated. That would let the gate
+    // pick a name whose body it never saw — breaking the "safe + visible
+    // to the LLM" contract.
+    writeSkill(projectRoot(), "alpha", "a".repeat(50));
+    writeSkill(projectRoot(), "beta", "b".repeat(50));
+    writeSkill(projectRoot(), "gamma", "c".repeat(50));
+    const huge = renderExistingSkillsBlock(projectCwd, 1_000_000);
+    expect(huge.mergeTargetNames.sort()).toEqual(["alpha", "beta", "gamma"]);
+    // Cap that fits only the first block.
+    const oneBlockLen = Math.ceil(huge.block.length / 3);
+    const truncated = renderExistingSkillsBlock(projectCwd, oneBlockLen + 5);
+    expect(truncated.block).toContain("omitted");
+    // Only the first (rendered) name is a valid MERGE target.
+    expect(truncated.mergeTargetNames).toEqual(["alpha"]);
   });
 
   it("respects the char cap with a placeholder line for the omitted tail", () => {

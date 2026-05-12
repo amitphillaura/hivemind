@@ -289,11 +289,11 @@ function renderExistingSkillsBlock(cwd, charCap) {
       block: "(no existing skills \u2014 MERGE is NOT a valid choice; pick KEEP or SKIP only)"
     };
   }
-  const mergeTargetNames = skills.map((s) => s.name);
   let total = 0;
   const out = [];
+  const mergeTargetNames = [];
   for (const s of skills) {
-    const sourceTag = s.source === "project" ? "project" : "global";
+    const sourceTag = s.source === "project" ? "project" : "global, read-only";
     const authorTag = s.author ? `, author=${s.author}` : "";
     const block = `--- existing skill [${sourceTag}${authorTag}]: ${s.name} ---
 ${s.body}
@@ -304,6 +304,8 @@ ${s.body}
     }
     out.push(block);
     total += block.length;
+    if (s.source === "project")
+      mergeTargetNames.push(s.name);
   }
   return { mergeTargetNames, block: out.join("\n") };
 }
