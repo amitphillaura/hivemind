@@ -27,6 +27,7 @@ import { runPull, type PullSummary } from "../skillify/pull.js";
 import { runUnpull } from "../skillify/unpull.js";
 import { loadConfig } from "../config.js";
 import { DeeplakeApi } from "../deeplake-api.js";
+import { runMineLocal } from "./mine-local.js";
 
 // Compute lazily so tests that swap `process.env.HOME` actually affect the
 // path. A module-level `const STATE_DIR = join(homedir(), ...)` would
@@ -190,6 +191,11 @@ function usage(): void {
   console.log("      --all                     also remove flat-layout (locally-mined) entries");
   console.log("      --legacy-cleanup          also remove pre-`--author`-layout legacy `<projectKey>/` dirs");
   console.log("  hivemind skillify status                     show per-project state");
+  console.log("  hivemind skillify mine-local [opts]          one-shot: seed skills from local sessions (no auth needed)");
+  console.log("    Options for mine-local:");
+  console.log("      --n <num|all>             how many sessions to mine (default: 3)");
+  console.log("      --force                   re-run even if the manifest sentinel exists");
+  console.log("      --dry-run                 stop before calling the LLM gate");
 }
 
 /** Parse a single string flag value out of `args`, removing the matched tokens. */
@@ -389,6 +395,13 @@ export function runSkillifyCommand(args: string[]): void {
     if (action === "list")   { teamList(); return; }
     console.error("Usage: hivemind skillify team <add|remove|list> [name]");
     process.exit(1);
+  }
+  if (sub === "mine-local") {
+    runMineLocal(args.slice(1)).catch(e => {
+      console.error(`mine-local error: ${e?.message ?? e}`);
+      process.exit(1);
+    });
+    return;
   }
   if (sub === "--help" || sub === "-h" || sub === "help") { usage(); return; }
   console.error(`Unknown skillify subcommand: ${sub}`);

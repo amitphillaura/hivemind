@@ -4719,9 +4719,9 @@ if (process.argv[1] && process.argv[1].endsWith("auth-login.js")) {
 }
 
 // dist/src/commands/skillify.js
-import { readdirSync as readdirSync4, existsSync as existsSync19, readFileSync as readFileSync13, mkdirSync as mkdirSync8, renameSync as renameSync4 } from "node:fs";
-import { homedir as homedir12 } from "node:os";
-import { dirname as dirname4, join as join22 } from "node:path";
+import { readdirSync as readdirSync5, existsSync as existsSync22, readFileSync as readFileSync15, mkdirSync as mkdirSync9, renameSync as renameSync4 } from "node:fs";
+import { homedir as homedir15 } from "node:os";
+import { dirname as dirname5, join as join25 } from "node:path";
 
 // dist/src/skillify/scope-config.js
 import { existsSync as existsSync13, mkdirSync as mkdirSync4, readFileSync as readFileSync9, writeFileSync as writeFileSync6 } from "node:fs";
@@ -4805,6 +4805,28 @@ function assertValidSkillName(name) {
     throw new Error(`invalid skill name: must be kebab-case (lowercase a-z, 0-9, hyphen): ${name}`);
   }
 }
+function skillDir(skillsRoot, name) {
+  return join17(skillsRoot, name);
+}
+function skillPath(skillsRoot, name) {
+  return join17(skillDir(skillsRoot, name), "SKILL.md");
+}
+function renderFrontmatter(fm) {
+  const lines = ["---"];
+  lines.push(`name: ${fm.name}`);
+  lines.push(`description: ${JSON.stringify(fm.description)}`);
+  if (fm.trigger)
+    lines.push(`trigger: ${JSON.stringify(fm.trigger)}`);
+  lines.push(`source_sessions:`);
+  for (const s of fm.source_sessions)
+    lines.push(`  - ${s}`);
+  lines.push(`version: ${fm.version}`);
+  lines.push(`created_by_agent: ${fm.created_by_agent}`);
+  lines.push(`created_at: ${fm.created_at}`);
+  lines.push(`updated_at: ${fm.updated_at}`);
+  lines.push("---");
+  return lines.join("\n");
+}
 function parseFrontmatter(text) {
   if (!text.startsWith("---\n") && !text.startsWith("---\r\n"))
     return null;
@@ -4846,6 +4868,50 @@ function parseFrontmatter(text) {
     fm[k] = val;
   }
   return { fm, body };
+}
+function writeNewSkill(args) {
+  assertValidSkillName(args.name);
+  const dir = skillDir(args.skillsRoot, args.name);
+  const path = skillPath(args.skillsRoot, args.name);
+  if (existsSync14(path)) {
+    throw new Error(`skill already exists at ${path}; use mergeSkill`);
+  }
+  mkdirSync5(dir, { recursive: true });
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const fm = {
+    name: args.name,
+    description: args.description,
+    trigger: args.trigger,
+    source_sessions: args.sourceSessions,
+    version: 1,
+    created_by_agent: args.agent,
+    created_at: now,
+    updated_at: now
+  };
+  const text = `${renderFrontmatter(fm)}
+
+${args.body.trim()}
+`;
+  writeFileSync7(path, text);
+  return { path, action: "created", version: 1, createdAt: now, updatedAt: now };
+}
+function listSkills(skillsRoot) {
+  if (!existsSync14(skillsRoot))
+    return [];
+  const out = [];
+  for (const name of readdirSync2(skillsRoot)) {
+    const skillFile = join17(skillsRoot, name, "SKILL.md");
+    if (existsSync14(skillFile) && statSync2(skillFile).isFile()) {
+      out.push({ name, body: readFileSync10(skillFile, "utf-8") });
+    }
+  }
+  return out;
+}
+function resolveSkillsRoot(install, cwd) {
+  if (install === "global") {
+    return join17(homedir7(), ".claude", "skills");
+  }
+  return join17(cwd, ".claude", "skills");
 }
 
 // dist/src/skillify/manifest.js
@@ -5126,7 +5192,7 @@ function renderSkillFile(row) {
     updated_at: String(row.updated_at ?? (/* @__PURE__ */ new Date()).toISOString())
   };
   const body = String(row.body ?? "").trim();
-  return `${renderFrontmatter(fm)}
+  return `${renderFrontmatter2(fm)}
 
 ${body}
 `;
@@ -5144,7 +5210,7 @@ function parseSourceSessions(v) {
   }
   return [];
 }
-function renderFrontmatter(fm) {
+function renderFrontmatter2(fm) {
   const lines = ["---"];
   lines.push(`name: ${fm.name}`);
   lines.push(`description: ${JSON.stringify(fm.description)}`);
@@ -5250,8 +5316,8 @@ async function runPull(opts) {
       summary.skipped++;
       continue;
     }
-    const skillDir = join20(root, dirName);
-    const skillFile = join20(skillDir, "SKILL.md");
+    const skillDir2 = join20(root, dirName);
+    const skillFile = join20(skillDir2, "SKILL.md");
     const remoteVersion = Number(row.version ?? 1);
     const localVersion = readLocalVersion(skillFile);
     const action = decideAction({
@@ -5262,7 +5328,7 @@ async function runPull(opts) {
     });
     let manifestError;
     if (action === "wrote") {
-      mkdirSync7(skillDir, { recursive: true });
+      mkdirSync7(skillDir2, { recursive: true });
       if (existsSync17(skillFile)) {
         try {
           renameSync3(skillFile, `${skillFile}.bak`);
@@ -5270,7 +5336,7 @@ async function runPull(opts) {
         }
       }
       writeFileSync9(skillFile, renderSkillFile(row));
-      const symlinks = opts.install === "global" ? fanOutSymlinks(skillDir, dirName, detectAgentSkillsRoots(root)) : [];
+      const symlinks = opts.install === "global" ? fanOutSymlinks(skillDir2, dirName, detectAgentSkillsRoots(root)) : [];
       try {
         recordPull({
           dirName,
@@ -5478,9 +5544,739 @@ function decideTargetForManifestEntry(entry, opts, userFilter, haveUserFilter) {
   return { shouldRemove: true };
 }
 
+// dist/src/commands/mine-local.js
+import { spawn } from "node:child_process";
+import { existsSync as existsSync21, mkdirSync as mkdirSync8, readFileSync as readFileSync14, writeFileSync as writeFileSync10 } from "node:fs";
+import { homedir as homedir14 } from "node:os";
+import { dirname as dirname4, join as join24 } from "node:path";
+
+// dist/src/skillify/local-source.js
+import { readdirSync as readdirSync4, readFileSync as readFileSync13, existsSync as existsSync19, statSync as statSync4 } from "node:fs";
+import { homedir as homedir12 } from "node:os";
+import { join as join22 } from "node:path";
+var HOME2 = homedir12();
+function encodeCwdClaudeCode(cwd) {
+  return cwd.replace(/[/_]/g, "-");
+}
+function detectInstalledAgents() {
+  const installs = [];
+  const claudeRoot = join22(HOME2, ".claude", "projects");
+  if (existsSync19(claudeRoot)) {
+    installs.push({
+      agent: "claude_code",
+      sessionRoot: claudeRoot,
+      encodeCwd: encodeCwdClaudeCode
+    });
+  }
+  const codexRoot = join22(HOME2, ".codex", "sessions");
+  if (existsSync19(codexRoot)) {
+    installs.push({
+      agent: "codex",
+      sessionRoot: codexRoot,
+      encodeCwd: () => "__cwd_unknown__"
+    });
+  }
+  return installs;
+}
+function detectHostAgent() {
+  if (process.env.CLAUDECODE === "1" || process.env.CLAUDE_CODE_ENTRYPOINT)
+    return "claude_code";
+  if (process.env.CODEX_HOME || process.env.CODEX_SESSION_ID)
+    return "codex";
+  return null;
+}
+function listLocalSessions(installs, cwd) {
+  const out = [];
+  for (const install of installs) {
+    const cwdEncoded = install.encodeCwd(cwd);
+    let subdirs = [];
+    try {
+      subdirs = readdirSync4(install.sessionRoot);
+    } catch {
+      continue;
+    }
+    for (const sub of subdirs) {
+      const subdirPath = join22(install.sessionRoot, sub);
+      try {
+        if (!statSync4(subdirPath).isDirectory())
+          continue;
+      } catch {
+        continue;
+      }
+      const inCwd = sub === cwdEncoded;
+      let files = [];
+      try {
+        files = readdirSync4(subdirPath);
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!f.endsWith(".jsonl"))
+          continue;
+        const fullPath = join22(subdirPath, f);
+        let stats;
+        try {
+          stats = statSync4(fullPath);
+        } catch {
+          continue;
+        }
+        if (!stats.isFile())
+          continue;
+        const sessionId = f.replace(/\.jsonl$/, "");
+        out.push({
+          agent: install.agent,
+          path: fullPath,
+          mtime: stats.mtimeMs,
+          inCwd,
+          sessionId
+        });
+      }
+    }
+  }
+  return out;
+}
+function pickSessions(candidates, opts) {
+  const { n, epsilon } = opts;
+  if (n <= 0 || candidates.length === 0)
+    return [];
+  const sorted = [...candidates].sort((a, b) => b.mtime - a.mtime);
+  const cwdQuota = Math.ceil((1 - epsilon) * n);
+  const globalQuota = Math.floor(epsilon * n);
+  const picked = [];
+  const taken = /* @__PURE__ */ new Set();
+  for (const s of sorted) {
+    if (picked.length >= cwdQuota)
+      break;
+    if (s.inCwd && !taken.has(s.path)) {
+      picked.push(s);
+      taken.add(s.path);
+    }
+  }
+  const cap2 = picked.length + globalQuota;
+  for (const s of sorted) {
+    if (picked.length >= cap2)
+      break;
+    if (!taken.has(s.path)) {
+      picked.push(s);
+      taken.add(s.path);
+    }
+  }
+  for (const s of sorted) {
+    if (picked.length >= n)
+      break;
+    if (!taken.has(s.path)) {
+      picked.push(s);
+      taken.add(s.path);
+    }
+  }
+  return picked;
+}
+function nativeJsonlToRows(filePath, sessionId, agent) {
+  let raw;
+  try {
+    raw = readFileSync13(filePath, "utf-8");
+  } catch {
+    return [];
+  }
+  const rows = [];
+  let pendingAsstText;
+  let pendingAsstTs;
+  const flushAssistant = () => {
+    if (pendingAsstText && pendingAsstText.trim().length > 0) {
+      rows.push({
+        type: "assistant_message",
+        content: pendingAsstText,
+        creation_date: pendingAsstTs,
+        session_id: sessionId,
+        agent
+      });
+    }
+    pendingAsstText = void 0;
+    pendingAsstTs = void 0;
+  };
+  for (const line of raw.split(/\n/)) {
+    if (!line)
+      continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const t = obj?.type;
+    const ts = obj?.timestamp ?? obj?.created_at;
+    if (t === "user") {
+      const c = obj?.message?.content;
+      if (typeof c === "string" && c.trim().length > 0) {
+        flushAssistant();
+        rows.push({
+          type: "user_message",
+          content: c,
+          creation_date: ts,
+          session_id: sessionId,
+          agent
+        });
+      }
+    } else if (t === "assistant") {
+      const c = obj?.message?.content;
+      if (Array.isArray(c)) {
+        const text = c.filter((b) => b?.type === "text" && typeof b.text === "string").map((b) => b.text).join("\n\n");
+        if (text.trim().length > 0) {
+          pendingAsstText = text;
+          pendingAsstTs = ts;
+        }
+      }
+    }
+  }
+  flushAssistant();
+  return rows;
+}
+
+// dist/src/skillify/extractors/index.js
+function extractPairs(rows) {
+  const pairs2 = [];
+  let pendingPrompt = null;
+  let pendingAnswer = [];
+  function flush() {
+    if (pendingPrompt && pendingAnswer.length > 0) {
+      pairs2.push({
+        sessionId: pendingPrompt.row.session_id ?? "",
+        agent: pendingPrompt.row.agent ?? null,
+        date: pendingPrompt.row.creation_date ?? null,
+        prompt: pendingPrompt.content,
+        answer: pendingAnswer.join("\n\n")
+      });
+    }
+    pendingPrompt = null;
+    pendingAnswer = [];
+  }
+  for (const r of rows) {
+    if (r.type === "user_message" && typeof r.content === "string") {
+      flush();
+      pendingPrompt = { content: r.content, row: r };
+    } else if (r.type === "assistant_message" && typeof r.content === "string" && pendingPrompt) {
+      if (r.content.trim().length > 0)
+        pendingAnswer.push(r.content);
+    }
+  }
+  flush();
+  return pairs2;
+}
+
+// dist/src/skillify/gate-runner.js
+import { execFileSync as execFileSync4 } from "node:child_process";
+import { existsSync as existsSync20 } from "node:fs";
+import { homedir as homedir13 } from "node:os";
+import { join as join23 } from "node:path";
+function findAgentBin(agent) {
+  const which = (name) => {
+    try {
+      const out = execFileSync4("which", [name], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"]
+      });
+      return out.trim() || null;
+    } catch {
+      return null;
+    }
+  };
+  switch (agent) {
+    case "claude_code":
+      return which("claude") ?? join23(homedir13(), ".claude", "local", "claude");
+    case "codex":
+      return which("codex") ?? "/usr/local/bin/codex";
+    case "cursor":
+      return which("cursor-agent") ?? "/usr/local/bin/cursor-agent";
+    case "hermes":
+      return which("hermes") ?? join23(homedir13(), ".local", "bin", "hermes");
+    case "pi":
+      return which("pi") ?? join23(homedir13(), ".local", "bin", "pi");
+  }
+}
+
+// dist/src/skillify/gate-parser.js
+function extractJsonBlock(s) {
+  const trimmed = s.trim();
+  if (!trimmed)
+    return null;
+  const fenced = trimmed.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+  if (fenced)
+    return fenced[1].trim();
+  const start = trimmed.indexOf("{");
+  if (start < 0)
+    return null;
+  let depth = 0;
+  for (let i = start; i < trimmed.length; i++) {
+    const c = trimmed[i];
+    if (c === "{")
+      depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0)
+        return trimmed.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+// dist/src/commands/mine-local.js
+var EPSILON = 0.3;
+var DEFAULT_N = 8;
+var PAIR_CHAR_CAP = 4e3;
+var PER_SESSION_PAIR_CAP = 30;
+var PER_SESSION_PROMPT_CAP = 12e4;
+var GATE_CONCURRENCY = 4;
+var IN_FLIGHT_MAX_AGE_MS = 6e4;
+var GATE_TIMEOUT_MS = 24e4;
+var MANIFEST_PATH = join24(homedir14(), ".claude", "hivemind", "local-mined.json");
+function runGateViaStdin(opts) {
+  return new Promise((resolve) => {
+    if (opts.agent !== "claude_code") {
+      resolve({
+        stdout: "",
+        stderr: "",
+        errored: true,
+        errorMessage: `stdin gate runner only supports claude_code (got ${opts.agent}); for other agents the prompt must fit in argv`
+      });
+      return;
+    }
+    if (!existsSync21(opts.bin)) {
+      resolve({
+        stdout: "",
+        stderr: "",
+        errored: true,
+        errorMessage: `agent binary not found at ${opts.bin}`
+      });
+      return;
+    }
+    const args = [
+      "-p",
+      "--no-session-persistence",
+      "--model",
+      "haiku",
+      "--permission-mode",
+      "bypassPermissions"
+    ];
+    const child = spawn(opts.bin, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, HIVEMIND_WIKI_WORKER: "1", HIVEMIND_CAPTURE: "false" }
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (r) => {
+      if (settled)
+        return;
+      settled = true;
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+      }
+      finish({
+        stdout,
+        stderr,
+        errored: true,
+        errorMessage: `gate timed out after ${opts.timeoutMs}ms`
+      });
+    }, opts.timeoutMs);
+    child.stdout.on("data", (b) => {
+      stdout += b.toString("utf-8");
+    });
+    child.stderr.on("data", (b) => {
+      stderr += b.toString("utf-8");
+    });
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      finish({ stdout, stderr, errored: true, errorMessage: e.message });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      finish({
+        stdout,
+        stderr,
+        errored: code !== 0,
+        errorMessage: code !== 0 ? `claude_code CLI exited with code ${code}` : void 0
+      });
+    });
+    child.stdin.on("error", (e) => {
+      clearTimeout(timer);
+      finish({ stdout, stderr, errored: true, errorMessage: `stdin write failed: ${e.message}` });
+    });
+    child.stdin.end(opts.prompt);
+  });
+}
+function loadManifest2() {
+  if (!existsSync21(MANIFEST_PATH))
+    return null;
+  try {
+    return JSON.parse(readFileSync14(MANIFEST_PATH, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+function saveManifest2(m) {
+  mkdirSync8(dirname4(MANIFEST_PATH), { recursive: true });
+  writeFileSync10(MANIFEST_PATH, JSON.stringify(m, null, 2));
+}
+function truncate(s, max) {
+  if (s.length <= max)
+    return s;
+  return s.slice(0, max) + `
+[\u2026truncated ${s.length - max} chars]`;
+}
+function renderPairsBlock(pairs2) {
+  let total = 0;
+  const out = [];
+  for (const [i, p] of pairs2.entries()) {
+    const block = `--- exchange ${i + 1} ---
+USER:
+${truncate(p.prompt, PAIR_CHAR_CAP)}
+
+ASSISTANT:
+${truncate(p.answer, PAIR_CHAR_CAP)}
+`;
+    if (total + block.length > PER_SESSION_PROMPT_CAP) {
+      out.push(`[\u2026${pairs2.length - i} more exchanges omitted to stay under budget]`);
+      break;
+    }
+    out.push(block);
+    total += block.length;
+  }
+  return out.join("\n");
+}
+function buildSessionPrompt(pairs2, session, verdictPath) {
+  return [
+    `You are a skill curator examining ONE session of recent agent activity.`,
+    `Your job: identify up to 3 distinct, non-overlapping reusable skills hiding in this session.`,
+    `Distinct = different problem domains. Empty list is fine if nothing qualifies.`,
+    ``,
+    `Session: ${session.sessionId} (agent: ${session.agent})`,
+    ``,
+    `RULES:`,
+    `- A skill qualifies if it captures a concrete, repeatable workflow OR a non-obvious`,
+    `  constraint/gotcha a future engineer would benefit from knowing. Intra-session is fine \u2014`,
+    `  one deep dive yielding a generalizable takeaway counts.`,
+    `- Skip patterns that are obvious from reading the codebase or already in CLAUDE.md.`,
+    `- Each body uses short sections (When to use, Workflow, Anti-patterns), concrete commands`,
+    `  / paths / snippets drawn from the exchanges below, no marketing, no emojis.`,
+    `- Each body under ~3000 characters.`,
+    `- Skill names are kebab-case slugs (lowercase letters/digits/hyphens only).`,
+    ``,
+    `=== EXCHANGES (user prompts + assistant final answers, tool calls stripped) ===`,
+    renderPairsBlock(pairs2),
+    ``,
+    `=== YOUR TASK ===`,
+    `Output a single JSON object. You may either:`,
+    `  (a) Write the JSON to this exact path using the Write tool: ${verdictPath}`,
+    `  (b) Print the JSON object to stdout as your final message, nothing else.`,
+    `Pick whichever you prefer. Do not do both.`,
+    ``,
+    `Required shape:`,
+    `{`,
+    `  "reason": "<one-line justification>",`,
+    `  "skills": [`,
+    `    {`,
+    `      "name": "<kebab-case>",`,
+    `      "description": "<one-line>",`,
+    `      "trigger": "<short trigger>",`,
+    `      "body": "<full SKILL.md body without frontmatter>"`,
+    `    },`,
+    `    ... up to 3 entries, or [] if nothing qualifies`,
+    `  ]`,
+    `}`,
+    ``,
+    `If you print to stdout, do not include any prose before or after the JSON.`
+  ].join("\n");
+}
+function parseMultiVerdict(raw) {
+  const block = extractJsonBlock(raw);
+  if (!block)
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(block);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object")
+    return null;
+  const skills = parsed.skills;
+  if (!Array.isArray(skills))
+    return null;
+  const out = [];
+  for (const s of skills) {
+    if (!s || typeof s !== "object")
+      continue;
+    const name = typeof s.name === "string" ? s.name.trim() : "";
+    const description = typeof s.description === "string" ? s.description.trim() : "";
+    const body = typeof s.body === "string" ? s.body.trim() : "";
+    const trigger = typeof s.trigger === "string" ? s.trigger.trim() : void 0;
+    if (!name || !body)
+      continue;
+    out.push({ name, description, body, trigger });
+  }
+  return { reason: typeof parsed.reason === "string" ? parsed.reason : void 0, skills: out };
+}
+function gateAgentFor(host, fallback) {
+  return host ?? fallback;
+}
+async function parallelMap(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = [];
+  for (let w = 0; w < Math.min(concurrency, items.length); w++) {
+    workers.push((async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= items.length)
+          return;
+        results[i] = await fn(items[i], i);
+      }
+    })());
+  }
+  await Promise.all(workers);
+  return results;
+}
+var SUMMARY_STOPWORDS = /* @__PURE__ */ new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "into",
+  "via",
+  "this",
+  "that",
+  "your",
+  "you",
+  "are",
+  "was",
+  "were",
+  "use",
+  "using",
+  "uses",
+  "used",
+  "skill",
+  "when",
+  "what",
+  "where",
+  "which",
+  "while",
+  "how",
+  "non",
+  "any",
+  "all",
+  "code",
+  "file",
+  "files",
+  "way",
+  "ways",
+  "via"
+]);
+function summaryTokens(s) {
+  return new Set(s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3 && !SUMMARY_STOPWORDS.has(t)));
+}
+function jaccard(a, b) {
+  if (a.size === 0 || b.size === 0)
+    return 0;
+  let intersection = 0;
+  for (const t of a)
+    if (b.has(t))
+      intersection++;
+  return intersection / (a.size + b.size - intersection);
+}
+var OVERLAP_THRESHOLD = 0.4;
+function findOverlap(candidateDesc, others) {
+  const ct = summaryTokens(candidateDesc);
+  let best = null;
+  for (const e of others) {
+    const score = jaccard(ct, summaryTokens(e.desc));
+    if (score >= OVERLAP_THRESHOLD && (!best || score > best.score)) {
+      best = { name: e.name, score };
+    }
+  }
+  return best;
+}
+function loadExistingSummaries(skillsRoot) {
+  const out = [];
+  for (const s of listSkills(skillsRoot)) {
+    const parsed = parseFrontmatter(s.body);
+    const desc = parsed?.fm.description ?? "";
+    if (desc)
+      out.push({ name: s.name, desc });
+  }
+  return out;
+}
+function takeFlagValue(args, flag) {
+  const idx = args.indexOf(flag);
+  if (idx < 0)
+    return null;
+  const v = args[idx + 1];
+  if (v === void 0 || v.startsWith("--")) {
+    console.error(`${flag} requires a value`);
+    process.exit(1);
+  }
+  args.splice(idx, 2);
+  return v;
+}
+function takeBoolFlag(args, flag) {
+  const idx = args.indexOf(flag);
+  if (idx < 0)
+    return false;
+  args.splice(idx, 1);
+  return true;
+}
+async function runMineLocal(args) {
+  const work = [...args];
+  const force = takeBoolFlag(work, "--force");
+  const dryRun = takeBoolFlag(work, "--dry-run");
+  const nRaw = takeFlagValue(work, "--n");
+  if (loadManifest2() && !force) {
+    console.error(`Local skills have already been mined on this machine.`);
+    console.error(`Manifest: ${MANIFEST_PATH}`);
+    console.error(`Pass --force to re-mine.`);
+    process.exit(1);
+  }
+  const installs = detectInstalledAgents();
+  if (installs.length === 0) {
+    console.error(`No agent session directories detected. Run a session first.`);
+    process.exit(1);
+  }
+  console.log(`Detected installed agents: ${installs.map((i) => i.agent).join(", ")}`);
+  const host = detectHostAgent();
+  const fallback = installs[0].agent;
+  const gateAgent = gateAgentFor(host, fallback);
+  const gateBin = findAgentBin(gateAgent);
+  console.log(`Gate CLI: ${gateAgent} (${gateBin})${host ? " \u2014 host-agent detected" : ""}`);
+  const cwd = process.cwd();
+  const rawSessions = listLocalSessions(installs, cwd);
+  const now = Date.now();
+  const allSessions = rawSessions.filter((s) => now - s.mtime >= IN_FLIGHT_MAX_AGE_MS);
+  const dropped = rawSessions.length - allSessions.length;
+  const cwdCount = allSessions.filter((s) => s.inCwd).length;
+  console.log(`Found ${allSessions.length} local session(s) (${cwdCount} in cwd${dropped > 0 ? `, ${dropped} in-flight skipped` : ""})`);
+  if (allSessions.length === 0) {
+    console.error(`No mineable session files (all were modified within the last ${IN_FLIGHT_MAX_AGE_MS / 1e3}s).`);
+    process.exit(1);
+  }
+  const n = nRaw === "all" ? allSessions.length : nRaw ? Math.max(1, parseInt(nRaw, 10) || DEFAULT_N) : DEFAULT_N;
+  const picked = pickSessions(allSessions, { n, epsilon: EPSILON });
+  console.log(`Picking ${picked.length} session(s) (\u03B5=${EPSILON}, N=${n}): ${picked.map((s) => s.sessionId.slice(0, 8)).join(", ")}`);
+  if (dryRun) {
+    console.log(`Dry-run: would invoke ${gateAgent} gate on ${picked.length} session(s) in parallel (concurrency=${GATE_CONCURRENCY}).`);
+    return;
+  }
+  const tmpDir = join24(homedir14(), ".claude", "hivemind", `mine-local-${Date.now()}`);
+  mkdirSync8(tmpDir, { recursive: true });
+  console.log(`Running ${picked.length} gate call(s) in parallel (concurrency=${GATE_CONCURRENCY}, timeout=${GATE_TIMEOUT_MS / 1e3}s each)...`);
+  const results = await parallelMap(picked, GATE_CONCURRENCY, async (s) => {
+    const shortId = s.sessionId.slice(0, 8);
+    const rows = nativeJsonlToRows(s.path, s.sessionId, s.agent);
+    const pairs2 = extractPairs(rows);
+    if (pairs2.length === 0) {
+      console.log(`  [${shortId}] no usable pairs \u2014 skipped`);
+      return { session: s, skills: [], reason: "no pairs", error: null };
+    }
+    const tail = pairs2.slice(-PER_SESSION_PAIR_CAP);
+    const sessionTmp = join24(tmpDir, `s-${shortId}`);
+    mkdirSync8(sessionTmp, { recursive: true });
+    const verdictPath = join24(sessionTmp, "verdict.json");
+    const prompt = buildSessionPrompt(tail, s, verdictPath);
+    writeFileSync10(join24(sessionTmp, "prompt.txt"), prompt);
+    const gate = await runGateViaStdin({ agent: gateAgent, bin: gateBin, prompt, timeoutMs: GATE_TIMEOUT_MS });
+    try {
+      writeFileSync10(join24(sessionTmp, "gate-stdout.txt"), gate.stdout);
+      if (gate.stderr)
+        writeFileSync10(join24(sessionTmp, "gate-stderr.txt"), gate.stderr);
+    } catch {
+    }
+    if (gate.errored) {
+      console.log(`  [${shortId}] gate failed: ${gate.errorMessage}`);
+      return { session: s, skills: [], reason: null, error: gate.errorMessage ?? "gate failed" };
+    }
+    const verdictText = existsSync21(verdictPath) ? readFileSync14(verdictPath, "utf-8") : gate.stdout;
+    const mv = parseMultiVerdict(verdictText);
+    if (!mv) {
+      console.log(`  [${shortId}] unparseable verdict (kept at ${sessionTmp})`);
+      return { session: s, skills: [], reason: null, error: "unparseable verdict" };
+    }
+    console.log(`  [${shortId}] ${mv.skills.length} skill candidate(s) \u2014 ${mv.reason ?? "no reason given"}`);
+    return { session: s, skills: mv.skills, reason: mv.reason ?? null, error: null };
+  });
+  const skillsRoot = resolveSkillsRoot("global", cwd);
+  const totalCandidates = results.reduce((sum, r) => sum + r.skills.length, 0);
+  const existingSummaries = loadExistingSummaries(skillsRoot);
+  console.log("");
+  console.log(`Got ${totalCandidates} candidate(s) across ${picked.length} session(s). Checking overlap against ${existingSummaries.length} installed skill(s) + each new write.`);
+  if (totalCandidates === 0) {
+    console.log(`No skills to write.`);
+    console.log(`tmp dir kept for inspection: ${tmpDir}`);
+    return;
+  }
+  const flat = [];
+  for (const r of results) {
+    for (const sk of r.skills)
+      flat.push({ skill: sk, session: r.session });
+  }
+  flat.sort((a, b) => b.session.mtime - a.session.mtime);
+  const written = [];
+  const knownSummaries = [...existingSummaries];
+  for (const { skill, session } of flat) {
+    const overlap = findOverlap(skill.description, knownSummaries);
+    if (overlap) {
+      console.log(`  skipped ${skill.name} \u2190 session ${session.sessionId.slice(0, 8)} (description overlaps "${overlap.name}", Jaccard=${overlap.score.toFixed(2)})`);
+      continue;
+    }
+    try {
+      const result = writeNewSkill({
+        skillsRoot,
+        name: skill.name,
+        description: skill.description,
+        trigger: skill.trigger,
+        body: skill.body,
+        sourceSessions: [session.sessionId],
+        agent: gateAgent
+      });
+      console.log(`  wrote ${skill.name} \u2190 session ${session.sessionId.slice(0, 8)} (${session.agent})`);
+      written.push({ skill, session, result });
+      knownSummaries.push({ name: skill.name, desc: skill.description });
+    } catch (e) {
+      if (/already exists/i.test(e.message ?? "")) {
+        console.log(`  skipped ${skill.name} (file already exists at ${skillsRoot})`);
+      } else {
+        console.log(`  failed ${skill.name}: ${e.message}`);
+      }
+    }
+  }
+  if (written.length > 0) {
+    const existing = loadManifest2();
+    const newEntries = written.map(({ skill, session, result }) => ({
+      skill_name: skill.name,
+      canonical_path: result.path,
+      source_session_ids: [session.sessionId],
+      source_session_paths: [session.path],
+      source_agent: session.agent,
+      gate_agent: gateAgent,
+      created_at: result.createdAt,
+      uploaded: false
+    }));
+    saveManifest2({
+      created_at: existing?.created_at ?? (/* @__PURE__ */ new Date()).toISOString(),
+      entries: [...existing?.entries ?? [], ...newEntries]
+    });
+  }
+  console.log("");
+  console.log(`Mined ${written.length} skill(s) from ${picked.length} session(s) (${results.filter((r) => r.skills.length > 0).length} session(s) contributed candidate(s)).`);
+  console.log(`Installed to ${skillsRoot}/ \u2014 local-only, not shared.`);
+  console.log(`Sign in with 'hivemind login' to share with your team later.`);
+}
+
 // dist/src/commands/skillify.js
 function stateDir() {
-  return join22(homedir12(), ".deeplake", "state", "skillify");
+  return join25(homedir15(), ".deeplake", "state", "skillify");
 }
 function showStatus() {
   const cfg = loadScopeConfig();
@@ -5488,11 +6284,11 @@ function showStatus() {
   console.log(`team:    ${cfg.team.length === 0 ? "(empty)" : cfg.team.join(", ")}`);
   console.log(`install: ${cfg.install}  (${cfg.install === "global" ? "~/.claude/skills/" : "<project>/.claude/skills/"})`);
   const dir = stateDir();
-  if (!existsSync19(dir)) {
+  if (!existsSync22(dir)) {
     console.log(`state: (no projects tracked yet)`);
     return;
   }
-  const files = readdirSync4(dir).filter((f) => f.endsWith(".json") && f !== "config.json" && f !== "pulled.json" && f !== "autopull-last-run.json");
+  const files = readdirSync5(dir).filter((f) => f.endsWith(".json") && f !== "config.json" && f !== "pulled.json" && f !== "autopull-last-run.json");
   if (files.length === 0) {
     console.log(`state: (no projects tracked yet)`);
     return;
@@ -5500,7 +6296,7 @@ function showStatus() {
   console.log(`state: ${files.length} project(s) tracked`);
   for (const f of files) {
     try {
-      const s = JSON.parse(readFileSync13(join22(dir, f), "utf-8"));
+      const s = JSON.parse(readFileSync15(join25(dir, f), "utf-8"));
       const last = typeof s.updatedAt === "number" ? new Date(s.updatedAt).toISOString() : s.lastDate ?? "never";
       const skills = Array.isArray(s.skillsGenerated) && s.skillsGenerated.length > 0 ? s.skillsGenerated.join(", ") : "none";
       console.log(`  - ${s.project} (counter=${s.counter}, last=${last}, skills=${skills})`);
@@ -5527,7 +6323,7 @@ function setInstall(loc) {
   }
   const cfg = loadScopeConfig();
   saveScopeConfig({ ...cfg, install: loc });
-  const path = loc === "global" ? join22(homedir12(), ".claude", "skills") : "<cwd>/.claude/skills";
+  const path = loc === "global" ? join25(homedir15(), ".claude", "skills") : "<cwd>/.claude/skills";
   console.log(`Install location set to '${loc}'. New skills will be written to ${path}/<name>/SKILL.md.`);
 }
 function promoteSkill(name, cwd) {
@@ -5535,17 +6331,17 @@ function promoteSkill(name, cwd) {
     console.error("Usage: hivemind skillify promote <skill-name>");
     process.exit(1);
   }
-  const projectPath = join22(cwd, ".claude", "skills", name);
-  const globalPath = join22(homedir12(), ".claude", "skills", name);
-  if (!existsSync19(join22(projectPath, "SKILL.md"))) {
+  const projectPath = join25(cwd, ".claude", "skills", name);
+  const globalPath = join25(homedir15(), ".claude", "skills", name);
+  if (!existsSync22(join25(projectPath, "SKILL.md"))) {
     console.error(`Skill '${name}' not found at ${projectPath}/SKILL.md`);
     process.exit(1);
   }
-  if (existsSync19(join22(globalPath, "SKILL.md"))) {
+  if (existsSync22(join25(globalPath, "SKILL.md"))) {
     console.error(`Skill '${name}' already exists at ${globalPath}/SKILL.md \u2014 refusing to overwrite. Remove it first or rename the project skill.`);
     process.exit(1);
   }
-  mkdirSync8(dirname4(globalPath), { recursive: true });
+  mkdirSync9(dirname5(globalPath), { recursive: true });
   renameSync4(projectPath, globalPath);
   console.log(`Promoted '${name}' from ${projectPath} \u2192 ${globalPath}.`);
 }
@@ -5613,8 +6409,13 @@ function usage() {
   console.log("      --all                     also remove flat-layout (locally-mined) entries");
   console.log("      --legacy-cleanup          also remove pre-`--author`-layout legacy `<projectKey>/` dirs");
   console.log("  hivemind skillify status                     show per-project state");
+  console.log("  hivemind skillify mine-local [opts]          one-shot: seed skills from local sessions (no auth needed)");
+  console.log("    Options for mine-local:");
+  console.log("      --n <num|all>             how many sessions to mine (default: 3)");
+  console.log("      --force                   re-run even if the manifest sentinel exists");
+  console.log("      --dry-run                 stop before calling the LLM gate");
 }
-function takeFlagValue(args, flag) {
+function takeFlagValue2(args, flag) {
   const idx = args.indexOf(flag);
   if (idx < 0)
     return null;
@@ -5635,9 +6436,9 @@ function takeBooleanFlag(args, flag) {
 }
 async function pullSkills(args) {
   const work = [...args];
-  const toRaw = takeFlagValue(work, "--to") ?? "global";
-  const userOne = takeFlagValue(work, "--user");
-  const usersMany = takeFlagValue(work, "--users");
+  const toRaw = takeFlagValue2(work, "--to") ?? "global";
+  const userOne = takeFlagValue2(work, "--user");
+  const usersMany = takeFlagValue2(work, "--users");
   const allUsers = takeBooleanFlag(work, "--all-users");
   const dryRun = takeBooleanFlag(work, "--dry-run");
   const force = takeBooleanFlag(work, "--force");
@@ -5676,7 +6477,7 @@ async function pullSkills(args) {
     console.error(`pull failed: ${e?.message ?? e}`);
     process.exit(1);
   }
-  const dest = toRaw === "global" ? join22(homedir12(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
+  const dest = toRaw === "global" ? join25(homedir15(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
   const filterDesc = users.length === 0 ? "all users" : users.join(", ");
   console.log(`Destination: ${dest}`);
   console.log(`Filter:      ${filterDesc}${skillName ? ` \xB7 skill='${skillName}'` : ""}${dryRun ? " \xB7 dry-run" : ""}${force ? " \xB7 force" : ""}`);
@@ -5693,9 +6494,9 @@ async function pullSkills(args) {
 }
 async function unpullSkills(args) {
   const work = [...args];
-  const toRaw = takeFlagValue(work, "--to") ?? "global";
-  const userOne = takeFlagValue(work, "--user");
-  const usersMany = takeFlagValue(work, "--users");
+  const toRaw = takeFlagValue2(work, "--to") ?? "global";
+  const userOne = takeFlagValue2(work, "--user");
+  const usersMany = takeFlagValue2(work, "--users");
   const notMine = takeBooleanFlag(work, "--not-mine");
   const dryRun = takeBooleanFlag(work, "--dry-run");
   const all = takeBooleanFlag(work, "--all");
@@ -5726,7 +6527,7 @@ async function unpullSkills(args) {
     all,
     legacyCleanup
   });
-  const dest = toRaw === "global" ? join22(homedir12(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
+  const dest = toRaw === "global" ? join25(homedir15(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
   const filterParts = [];
   if (users.length > 0)
     filterParts.push(`users=${users.join(",")}`);
@@ -5801,6 +6602,13 @@ function runSkillifyCommand(args) {
     console.error("Usage: hivemind skillify team <add|remove|list> [name]");
     process.exit(1);
   }
+  if (sub === "mine-local") {
+    runMineLocal(args.slice(1)).catch((e) => {
+      console.error(`mine-local error: ${e?.message ?? e}`);
+      process.exit(1);
+    });
+    return;
+  }
   if (sub === "--help" || sub === "-h" || sub === "help") {
     usage();
     return;
@@ -5814,14 +6622,14 @@ if (process.argv[1] && process.argv[1].endsWith("skillify.js")) {
 }
 
 // dist/src/cli/update.js
-import { execFileSync as execFileSync4 } from "node:child_process";
-import { existsSync as existsSync20, readFileSync as readFileSync15, realpathSync } from "node:fs";
-import { dirname as dirname6, sep } from "node:path";
+import { execFileSync as execFileSync5 } from "node:child_process";
+import { existsSync as existsSync23, readFileSync as readFileSync17, realpathSync } from "node:fs";
+import { dirname as dirname7, sep } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // dist/src/utils/version-check.js
-import { readFileSync as readFileSync14 } from "node:fs";
-import { dirname as dirname5, join as join23 } from "node:path";
+import { readFileSync as readFileSync16 } from "node:fs";
+import { dirname as dirname6, join as join26 } from "node:path";
 function isNewer(latest, current) {
   const parse = (v) => v.split(".").map(Number);
   const [la, lb, lc] = parse(latest);
@@ -5840,24 +6648,24 @@ function detectInstallKind(argv1) {
       return argv1 ?? process.argv[1] ?? fileURLToPath2(import.meta.url);
     }
   })();
-  let dir = dirname6(realArgv1);
+  let dir = dirname7(realArgv1);
   let installDir = null;
   for (let i = 0; i < 10; i++) {
     const pkgPath = `${dir}${sep}package.json`;
     try {
-      const pkg = JSON.parse(readFileSync15(pkgPath, "utf-8"));
+      const pkg = JSON.parse(readFileSync17(pkgPath, "utf-8"));
       if (pkg.name === PKG_NAME || pkg.name === "hivemind") {
         installDir = dir;
         break;
       }
     } catch {
     }
-    const parent = dirname6(dir);
+    const parent = dirname7(dir);
     if (parent === dir)
       break;
     dir = parent;
   }
-  installDir ??= dirname6(realArgv1);
+  installDir ??= dirname7(realArgv1);
   if (realArgv1.includes(`${sep}_npx${sep}`) || realArgv1.includes(`${sep}.npx${sep}`)) {
     return { kind: "npx", installDir };
   }
@@ -5866,10 +6674,10 @@ function detectInstallKind(argv1) {
   }
   let gitDir = installDir;
   for (let i = 0; i < 6; i++) {
-    if (existsSync20(`${gitDir}${sep}.git`)) {
+    if (existsSync23(`${gitDir}${sep}.git`)) {
       return { kind: "local-dev", installDir };
     }
-    const parent = dirname6(gitDir);
+    const parent = dirname7(gitDir);
     if (parent === gitDir)
       break;
     gitDir = parent;
@@ -5888,7 +6696,7 @@ async function getLatestNpmVersion(timeoutMs = 5e3) {
   }
 }
 var defaultSpawn = (cmd, args) => {
-  execFileSync4(cmd, args, { stdio: "inherit" });
+  execFileSync5(cmd, args, { stdio: "inherit" });
 };
 async function runUpdate(opts = {}) {
   const current = opts.currentVersionOverride ?? getVersion();
@@ -5904,7 +6712,7 @@ async function runUpdate(opts = {}) {
   }
   log(`Update available: ${current} \u2192 ${latest}`);
   const detected = opts.installKindOverride ?? detectInstallKind();
-  const spawn = opts.spawn ?? defaultSpawn;
+  const spawn2 = opts.spawn ?? defaultSpawn;
   switch (detected.kind) {
     case "npm-global": {
       if (opts.dryRun) {
@@ -5914,7 +6722,7 @@ async function runUpdate(opts = {}) {
       }
       log(`Upgrading via npm\u2026`);
       try {
-        spawn("npm", ["install", "-g", `${PKG_NAME}@latest`]);
+        spawn2("npm", ["install", "-g", `${PKG_NAME}@latest`]);
       } catch (e) {
         warn(`npm install failed: ${e.message}`);
         warn(`Try running it manually: npm install -g ${PKG_NAME}@latest`);
@@ -5923,7 +6731,7 @@ async function runUpdate(opts = {}) {
       log(``);
       log(`Refreshing agent bundles\u2026`);
       try {
-        spawn("hivemind", ["install", "--skip-auth"]);
+        spawn2("hivemind", ["install", "--skip-auth"]);
       } catch (e) {
         warn(`Agent refresh failed: ${e.message}`);
         warn(`Run manually: hivemind install`);
