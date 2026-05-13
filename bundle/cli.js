@@ -5824,6 +5824,7 @@ import { existsSync as existsSync21, mkdirSync as mkdirSync8, readFileSync as re
 import { homedir as homedir14 } from "node:os";
 import { dirname as dirname4, join as join24 } from "node:path";
 var LOCAL_MANIFEST_PATH = join24(homedir14(), ".claude", "hivemind", "local-mined.json");
+var LOCAL_MINE_LOCK_PATH = join24(homedir14(), ".claude", "hivemind", "local-mined.lock");
 function readLocalManifest(path = LOCAL_MANIFEST_PATH) {
   if (!existsSync21(path))
     return null;
@@ -5839,6 +5840,7 @@ function writeLocalManifest(m, path = LOCAL_MANIFEST_PATH) {
 }
 
 // dist/src/commands/mine-local.js
+import { unlinkSync as unlinkSync9 } from "node:fs";
 var EPSILON = 0.3;
 var DEFAULT_N = 8;
 var PAIR_CHAR_CAP = 4e3;
@@ -6138,6 +6140,24 @@ function takeBoolFlag(args, flag) {
   return true;
 }
 async function runMineLocal(args) {
+  let lockReleased = false;
+  const releaseLock = () => {
+    if (lockReleased)
+      return;
+    lockReleased = true;
+    try {
+      unlinkSync9(LOCAL_MINE_LOCK_PATH);
+    } catch {
+    }
+  };
+  process.on("exit", releaseLock);
+  try {
+    return await runMineLocalImpl(args);
+  } finally {
+    releaseLock();
+  }
+}
+async function runMineLocalImpl(args) {
   const work = [...args];
   const force = takeBoolFlag(work, "--force");
   const dryRun = takeBoolFlag(work, "--dry-run");

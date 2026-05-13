@@ -17,6 +17,7 @@ import { DeeplakeApi } from "../../deeplake-api.js";
 import { sqlStr } from "../../utils/sql.js";
 import { renderSkillifyCommands } from "../../cli/skillify-spec.js";
 import { countLocalManifestEntries } from "../../skillify/local-manifest.js";
+import { maybeAutoMineLocal } from "../../skillify/spawn-mine-local-worker.js";
 import { readStdin } from "../../utils/stdin.js";
 import { log as _log } from "../../utils/debug.js";
 import { getInstalledVersion } from "../../utils/version-check.js";
@@ -100,6 +101,14 @@ async function main(): Promise<void> {
 
   const creds = loadCredentials();
   const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false";
+
+  if (!creds?.token) {
+    // Auto-trigger mine-local on first SessionStart for unauthenticated
+    // users. Detached spawn — see spawn-mine-local-worker.ts for the
+    // full set of guards. Next session shows the count via
+    // countLocalManifestEntries().
+    maybeAutoMineLocal();
+  }
 
   // Centralized autoupdate fires BEFORE the DB ensure-table calls — those
   // can stall for tens of seconds against a slow/unreachable backend, and

@@ -17,6 +17,7 @@ import { loadCredentials } from "../../commands/auth.js";
 import { readStdin } from "../../utils/stdin.js";
 import { renderSkillifyCommands } from "../../cli/skillify-spec.js";
 import { countLocalManifestEntries } from "../../skillify/local-manifest.js";
+import { maybeAutoMineLocal } from "../../skillify/spawn-mine-local-worker.js";
 import { log as _log } from "../../utils/debug.js";
 import { getInstalledVersion } from "../../utils/version-check.js";
 import { autoPullSkills } from "../../skillify/auto-pull.js";
@@ -76,6 +77,8 @@ async function main(): Promise<void> {
 
   if (!creds?.token) {
     log("no credentials found — run auth login to authenticate");
+    const auto = maybeAutoMineLocal();
+    log(`auto-mine: ${auto.triggered ? "triggered (background)" : `skipped (${auto.reason})`}`);
   } else {
     log(`credentials loaded: org=${creds.orgName ?? creds.orgId}`);
   }

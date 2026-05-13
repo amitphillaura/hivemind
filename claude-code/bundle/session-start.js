@@ -54,8 +54,8 @@ var init_index_marker_store = __esm({
 
 // dist/src/hooks/session-start.js
 import { fileURLToPath } from "node:url";
-import { dirname as dirname5, join as join14 } from "node:path";
-import { homedir as homedir10 } from "node:os";
+import { dirname as dirname5, join as join15 } from "node:path";
+import { homedir as homedir11 } from "node:os";
 
 // dist/src/commands/auth.js
 import { execSync } from "node:child_process";
@@ -1334,6 +1334,7 @@ import { existsSync as existsSync9, mkdirSync as mkdirSync7, readFileSync as rea
 import { homedir as homedir9 } from "node:os";
 import { dirname as dirname4, join as join13 } from "node:path";
 var LOCAL_MANIFEST_PATH = join13(homedir9(), ".claude", "hivemind", "local-mined.json");
+var LOCAL_MINE_LOCK_PATH = join13(homedir9(), ".claude", "hivemind", "local-mined.lock");
 function readLocalManifest(path = LOCAL_MANIFEST_PATH) {
   if (!existsSync9(path))
     return null;
@@ -1346,6 +1347,98 @@ function readLocalManifest(path = LOCAL_MANIFEST_PATH) {
 function countLocalManifestEntries(path = LOCAL_MANIFEST_PATH) {
   const m = readLocalManifest(path);
   return Array.isArray(m?.entries) ? m.entries.length : 0;
+}
+
+// dist/src/skillify/spawn-mine-local-worker.js
+import { execFileSync, spawn as spawn2 } from "node:child_process";
+import { closeSync, existsSync as existsSync10, mkdirSync as mkdirSync8, openSync, readdirSync as readdirSync2, statSync as statSync2, unlinkSync as unlinkSync4 } from "node:fs";
+import { homedir as homedir10 } from "node:os";
+import { join as join14 } from "node:path";
+var HOME = homedir10();
+var HIVEMIND_DIR = join14(HOME, ".claude", "hivemind");
+var LOG_PATH = join14(HOME, ".claude", "hooks", "mine-local.log");
+var CLAUDE_PROJECTS_DIR = join14(HOME, ".claude", "projects");
+var LOCK_STALE_MS = 15 * 60 * 1e3;
+function findHivemindBin() {
+  try {
+    const out = execFileSync("which", ["hivemind"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    return out.trim() || null;
+  } catch {
+    return null;
+  }
+}
+function hasLocalClaudeSessions() {
+  if (!existsSync10(CLAUDE_PROJECTS_DIR))
+    return false;
+  let subdirs;
+  try {
+    subdirs = readdirSync2(CLAUDE_PROJECTS_DIR);
+  } catch {
+    return false;
+  }
+  for (const sub of subdirs) {
+    let files;
+    try {
+      files = readdirSync2(join14(CLAUDE_PROJECTS_DIR, sub));
+    } catch {
+      continue;
+    }
+    if (files.some((f) => f.endsWith(".jsonl")))
+      return true;
+  }
+  return false;
+}
+function maybeAutoMineLocal() {
+  if (existsSync10(LOCAL_MANIFEST_PATH))
+    return { triggered: false, reason: "manifest-exists" };
+  if (existsSync10(LOCAL_MINE_LOCK_PATH)) {
+    let stale = false;
+    try {
+      const stats = statSync2(LOCAL_MINE_LOCK_PATH);
+      stale = Date.now() - stats.mtimeMs > LOCK_STALE_MS;
+    } catch {
+    }
+    if (!stale)
+      return { triggered: false, reason: "lock-exists" };
+    try {
+      unlinkSync4(LOCAL_MINE_LOCK_PATH);
+    } catch {
+      return { triggered: false, reason: "lock-exists" };
+    }
+  }
+  if (!hasLocalClaudeSessions())
+    return { triggered: false, reason: "no-claude-sessions" };
+  const bin = findHivemindBin();
+  if (!bin)
+    return { triggered: false, reason: "no-hivemind-bin" };
+  try {
+    mkdirSync8(HIVEMIND_DIR, { recursive: true });
+    const fd = openSync(LOCAL_MINE_LOCK_PATH, "wx");
+    closeSync(fd);
+  } catch {
+    return { triggered: false, reason: "lock-acquire-failed" };
+  }
+  try {
+    mkdirSync8(join14(HOME, ".claude", "hooks"), { recursive: true });
+    const out = openSync(LOG_PATH, "a");
+    const child = spawn2(bin, ["skillify", "mine-local"], {
+      detached: true,
+      stdio: ["ignore", out, out],
+      env: process.env
+    });
+    closeSync(out);
+    child.unref();
+    return { triggered: true };
+  } catch {
+    try {
+      unlinkSync4(LOCAL_MINE_LOCK_PATH);
+    } catch {
+    }
+    return { triggered: false, reason: "spawn-failed" };
+  }
 }
 
 // dist/src/hooks/session-start.js
@@ -1390,8 +1483,8 @@ IMPORTANT: Only use bash commands (cat, ls, grep, echo, jq, head, tail, etc.) to
 LIMITS: Do NOT spawn subagents to read deeplake memory. If a file returns empty after 2 attempts, skip it and move on. Report what you found rather than exhaustively retrying.
 
 Debugging: Set HIVEMIND_DEBUG=1 to enable verbose logging to ~/.deeplake/hook-debug.log`;
-var HOME = homedir10();
-var { log: wikiLog } = makeWikiLogger(join14(HOME, ".claude", "hooks"));
+var HOME2 = homedir11();
+var { log: wikiLog } = makeWikiLogger(join15(HOME2, ".claude", "hooks"));
 async function createPlaceholder(api, table, sessionId, cwd, userName, orgName, workspaceId) {
   const summaryPath = `/summaries/${userName}/${sessionId}.md`;
   const existing = await api.query(`SELECT path FROM "${table}" WHERE path = '${sqlStr(summaryPath)}' LIMIT 1`);
@@ -1423,6 +1516,8 @@ async function main() {
   let creds = loadCredentials();
   if (!creds?.token) {
     log5("no credentials found \u2014 run /hivemind:login to authenticate");
+    const auto = maybeAutoMineLocal();
+    log5(`auto-mine: ${auto.triggered ? "triggered (background)" : `skipped (${auto.reason})`}`);
   } else {
     log5(`credentials loaded: org=${creds.orgName ?? creds.orgId}`);
     if (creds.token && !creds.userName) {

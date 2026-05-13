@@ -21,6 +21,7 @@ import { autoUpdate } from "./shared/autoupdate.js";
 import { autoPullSkills } from "../skillify/auto-pull.js";
 import { renderSkillifyCommands } from "../cli/skillify-spec.js";
 import { countLocalManifestEntries } from "../skillify/local-manifest.js";
+import { maybeAutoMineLocal } from "../skillify/spawn-mine-local-worker.js";
 const log = (msg: string) => _log("session-start", msg);
 
 const __bundleDir = dirname(fileURLToPath(import.meta.url));
@@ -124,6 +125,16 @@ async function main(): Promise<void> {
 
   if (!creds?.token) {
     log("no credentials found — run /hivemind:login to authenticate");
+    // First-impression bootstrap: when an unauthenticated user opens a
+    // session on a box that has Claude Code transcripts but no local
+    // mining manifest yet, spawn `hivemind skillify mine-local` in the
+    // background. The worker writes to ~/.claude/skills/ + fan-out
+    // symlinks; THIS session sees the standard "not logged in" message,
+    // and the NEXT SessionStart fire surfaces the count + sign-in CTA.
+    // All guards (manifest, lock, no-sessions, no-hivemind-bin) live
+    // inside maybeAutoMineLocal — call is always safe.
+    const auto = maybeAutoMineLocal();
+    log(`auto-mine: ${auto.triggered ? "triggered (background)" : `skipped (${auto.reason})`}`);
   } else {
     log(`credentials loaded: org=${creds.orgName ?? creds.orgId}`);
     // Backfill userName if missing (for users who logged in before this field was added)

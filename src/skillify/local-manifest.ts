@@ -45,6 +45,13 @@ export interface LocalManifest {
 export const LOCAL_MANIFEST_PATH = join(homedir(), ".claude", "hivemind", "local-mined.json");
 
 /**
+ * Sibling lock file used by maybeAutoMineLocal() (spawn-mine-local-worker.ts)
+ * and released by runMineLocal() on exit. Exported here so both producers
+ * agree on the path without circular imports.
+ */
+export const LOCAL_MINE_LOCK_PATH = join(homedir(), ".claude", "hivemind", "local-mined.lock");
+
+/**
  * Read the manifest. Returns null when the file doesn't exist or is
  * malformed. `path` defaults to LOCAL_MANIFEST_PATH; tests inject a
  * tmpdir path so they don't have to mutate the developer's HOME.

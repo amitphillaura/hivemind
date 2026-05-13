@@ -26,12 +26,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
   readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync,
-  openSync, closeSync, renameSync, constants as fsConstants,
+  openSync, closeSync, renameSync, readdirSync, statSync, unlinkSync,
+  constants as fsConstants,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { connect } from "node:net";
-import { spawn, spawnSync, execSync } from "node:child_process";
+import { spawn, spawnSync, execSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 // ---------- diagnostic logging --------------------------------------------------
@@ -694,6 +695,75 @@ function piCountLocalManifestEntries(): number {
   }
 }
 
+// MIRROR of src/skillify/spawn-mine-local-worker.ts maybeAutoMineLocal().
+// First-impression bootstrap: when an unauthenticated pi session sees
+// past Claude Code transcripts but no local mining manifest, spawn the
+// `hivemind` CLI in the background. THIS session sees the standard
+// "not logged in" message; the NEXT pi session sees the mined-count
+// CTA from piCountLocalManifestEntries above.
+const PI_LOCAL_MINE_LOCK_PATH = join(homedir(), ".claude", "hivemind", "local-mined.lock");
+const PI_AUTO_MINE_LOG_PATH = join(homedir(), ".claude", "hooks", "mine-local.log");
+const PI_CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+const PI_LOCK_STALE_MS = 15 * 60 * 1000;
+
+function piMaybeAutoMineLocal(): boolean {
+  try {
+    if (existsSync(PI_LOCAL_MANIFEST_PATH)) return false;
+    if (existsSync(PI_LOCAL_MINE_LOCK_PATH)) {
+      let stale = false;
+      try {
+        const stats = statSync(PI_LOCAL_MINE_LOCK_PATH);
+        stale = Date.now() - stats.mtimeMs > PI_LOCK_STALE_MS;
+      } catch { /* not stale */ }
+      if (!stale) return false;
+      try { unlinkSync(PI_LOCAL_MINE_LOCK_PATH); } catch { return false; }
+    }
+    if (!existsSync(PI_CLAUDE_PROJECTS_DIR)) return false;
+    // cheap existence-of-jsonl check (1-level walk)
+    let hasJsonl = false;
+    try {
+      for (const sub of readdirSync(PI_CLAUDE_PROJECTS_DIR)) {
+        let files: string[] = [];
+        try { files = readdirSync(join(PI_CLAUDE_PROJECTS_DIR, sub)); } catch { continue; }
+        if (files.some((f: string) => f.endsWith(".jsonl"))) { hasJsonl = true; break; }
+      }
+    } catch { return false; }
+    if (!hasJsonl) return false;
+
+    // Locate the hivemind binary on PATH; skip auto-mine if missing.
+    let bin: string | null = null;
+    try {
+      const out = execFileSync("which", ["hivemind"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+      bin = String(out).trim() || null;
+    } catch { return false; }
+    if (!bin) return false;
+
+    // Acquire the lock (exclusive create); if another pi session got
+    // here first, skip.
+    try {
+      mkdirSync(dirname(PI_LOCAL_MINE_LOCK_PATH), { recursive: true });
+      const fd = openSync(PI_LOCAL_MINE_LOCK_PATH, "wx");
+      closeSync(fd);
+    } catch { return false; }
+
+    try {
+      mkdirSync(dirname(PI_AUTO_MINE_LOG_PATH), { recursive: true });
+      const out = openSync(PI_AUTO_MINE_LOG_PATH, "a");
+      const child = spawn(bin, ["skillify", "mine-local"], {
+        detached: true,
+        stdio: ["ignore", out, out],
+        env: process.env,
+      });
+      closeSync(out);
+      child.unref();
+      return true;
+    } catch {
+      try { unlinkSync(PI_LOCAL_MINE_LOCK_PATH); } catch { /* best-effort */ }
+      return false;
+    }
+  } catch { return false; }
+}
+
 // MIRROR of src/cli/skillify-spec.ts SKILLIFY_COMMANDS.
 //
 // pi extensions are shipped as a single self-contained .ts file loaded by
@@ -936,6 +1006,14 @@ export default function hivemindExtension(pi: ExtensionAPI): void {
     // per-agent symlink fan-out all live in the worker — no inline
     // duplicate maintained here.
     if (creds) runAutopullWorker();
+    else {
+      // First-impression bootstrap: auto-run `hivemind skillify mine-local`
+      // when the user isn't signed in and has Claude Code transcripts on
+      // disk. THIS session sees nothing different; the NEXT pi session
+      // surfaces the mined count + sign-in CTA below.
+      const triggered = piMaybeAutoMineLocal();
+      logHm(`auto-mine: ${triggered ? "triggered" : "skipped"}`);
+    }
 
     const localMined = piCountLocalManifestEntries();
     const localMinedNote = localMined > 0

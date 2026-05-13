@@ -42,11 +42,13 @@ import { detectAgentSkillsRoots } from "../skillify/agent-roots.js";
 import { fanOutSymlinks } from "../skillify/pull.js";
 import {
   LOCAL_MANIFEST_PATH,
+  LOCAL_MINE_LOCK_PATH,
   readLocalManifest,
   writeLocalManifest,
   type LocalManifest,
   type LocalManifestEntry,
 } from "../skillify/local-manifest.js";
+import { unlinkSync } from "node:fs";
 
 const EPSILON = 0.3;
 const DEFAULT_N = 8;
@@ -396,6 +398,27 @@ function takeBoolFlag(args: string[], flag: string): boolean {
 }
 
 export async function runMineLocal(args: string[]): Promise<void> {
+  // Auto-mine launched via spawn-mine-local-worker.ts plants a lock file
+  // so concurrent SessionStart fires don't spawn duplicate workers. We
+  // need to release the lock on ANY exit path — including the
+  // process.exit(1) calls below — so install an `exit` handler in
+  // addition to the try/finally. process.exit skips finally blocks
+  // inside an async function, but it does fire 'exit' handlers.
+  let lockReleased = false;
+  const releaseLock = (): void => {
+    if (lockReleased) return;
+    lockReleased = true;
+    try { unlinkSync(LOCAL_MINE_LOCK_PATH); } catch { /* best-effort */ }
+  };
+  process.on("exit", releaseLock);
+  try {
+    return await runMineLocalImpl(args);
+  } finally {
+    releaseLock();
+  }
+}
+
+async function runMineLocalImpl(args: string[]): Promise<void> {
   const work = [...args];
   const force = takeBoolFlag(work, "--force");
   const dryRun = takeBoolFlag(work, "--dry-run");
