@@ -181,74 +181,74 @@ function pluginAlreadyInstalled() {
   return r.stdout.includes(PLUGIN_KEY);
 }
 var PLUGIN_SCOPES = ["user", "project", "local", "managed"];
-function resolvePluginRoot() {
-  return join2(homedir2(), ".claude", "plugins", "hivemind");
-}
-function marketplaceHooksJsonPath() {
-  return join2(homedir2(), ".claude", "plugins", "marketplaces", "hivemind", "claude-code", "hooks", "hooks.json");
-}
 function settingsJsonPath() {
   return join2(homedir2(), ".claude", "settings.json");
 }
-function resolveCommand(command, pluginRoot) {
-  return command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot);
+var LEGACY_PATH_FRAGMENT = ".claude/plugins/hivemind/bundle/";
+function isBrokenHivemindHookEntry(h) {
+  if (typeof h.command !== "string")
+    return false;
+  const normalized = h.command.replace(/\\/g, "/");
+  if (!normalized.includes(LEGACY_PATH_FRAGMENT))
+    return false;
+  const match = normalized.match(/"([^"]+\.claude\/plugins\/hivemind\/bundle\/[^"]+)"/);
+  const filePath = match ? match[1] : null;
+  if (!filePath)
+    return false;
+  return !existsSync2(filePath);
 }
-function isHivemindMatcher(matcher) {
-  return matcher.hooks?.some((h) => {
-    if (typeof h.command !== "string")
-      return false;
-    const normalized = h.command.replace(/\\/g, "/");
-    return normalized.includes("plugins/hivemind/bundle/");
-  }) ?? false;
-}
-function syncHivemindHooksToSettings() {
-  const hooksPath = marketplaceHooksJsonPath();
+function cleanupBrokenSettingsHooks() {
   const settingsPath = settingsJsonPath();
-  if (!existsSync2(hooksPath))
-    return { changed: false, events: [] };
-  let canonical;
+  if (!existsSync2(settingsPath))
+    return { removed: 0, events: [] };
+  let parsed;
   try {
-    canonical = JSON.parse(readFileSync2(hooksPath, "utf-8"));
+    parsed = JSON.parse(readFileSync2(settingsPath, "utf-8"));
   } catch {
-    return { changed: false, events: [] };
+    return { removed: 0, events: [] };
   }
-  if (!canonical.hooks)
-    return { changed: false, events: [] };
-  let settings = {};
-  if (existsSync2(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync2(settingsPath, "utf-8"));
-    } catch {
-      return { changed: false, events: [] };
+  if (!parsed || typeof parsed !== "object")
+    return { removed: 0, events: [] };
+  const settings = parsed;
+  if (!settings.hooks || typeof settings.hooks !== "object")
+    return { removed: 0, events: [] };
+  let removed = 0;
+  const touchedEvents = [];
+  for (const [event, matchers] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(matchers))
+      continue;
+    const cleanedMatchers = [];
+    let eventTouched = false;
+    for (const m of matchers) {
+      if (!m || !Array.isArray(m.hooks)) {
+        cleanedMatchers.push(m);
+        continue;
+      }
+      const keptHooks = m.hooks.filter((h) => {
+        const broken = isBrokenHivemindHookEntry(h);
+        if (broken) {
+          removed += 1;
+          eventTouched = true;
+        }
+        return !broken;
+      });
+      if (keptHooks.length > 0) {
+        cleanedMatchers.push({ ...m, hooks: keptHooks });
+      } else if (m.hooks.length > 0) {
+        eventTouched = true;
+      } else {
+        cleanedMatchers.push(m);
+      }
+    }
+    if (eventTouched) {
+      settings.hooks[event] = cleanedMatchers;
+      touchedEvents.push(event);
     }
   }
-  settings.hooks = settings.hooks ?? {};
-  const pluginRoot = resolvePluginRoot();
-  const changedEvents = [];
-  let changed = false;
-  for (const [event, matchers] of Object.entries(canonical.hooks)) {
-    const resolvedMatchers = matchers.map((m) => ({
-      ...m.matcher !== void 0 ? { matcher: m.matcher } : {},
-      hooks: m.hooks.map((h) => ({
-        ...h.type !== void 0 ? { type: h.type } : {},
-        ...h.command !== void 0 ? { command: resolveCommand(h.command, pluginRoot) } : {},
-        ...h.timeout !== void 0 ? { timeout: h.timeout } : {},
-        ...h.async !== void 0 ? { async: h.async } : {}
-      }))
-    }));
-    const existing = settings.hooks[event] ?? [];
-    const preserved = existing.filter((m) => !isHivemindMatcher(m));
-    const next = [...preserved, ...resolvedMatchers];
-    if (JSON.stringify(next) !== JSON.stringify(existing)) {
-      settings.hooks[event] = next;
-      changedEvents.push(event);
-      changed = true;
-    }
-  }
-  if (changed) {
+  if (removed > 0) {
     writeFileSync2(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
   }
-  return { changed, events: changedEvents };
+  return { removed, events: touchedEvents };
 }
 function installClaude() {
   requireClaudeCli();
@@ -273,12 +273,12 @@ function installClaude() {
   }
   runClaude(["plugin", "enable", PLUGIN_KEY]);
   try {
-    const sync = syncHivemindHooksToSettings();
-    if (sync.changed) {
-      log(`  Claude Code    settings.json hooks synced (${sync.events.join(", ")})`);
+    const cleanup = cleanupBrokenSettingsHooks();
+    if (cleanup.removed > 0) {
+      log(`  Claude Code    settings.json cleaned: removed ${cleanup.removed} stale hook entr${cleanup.removed === 1 ? "y" : "ies"} (events: ${cleanup.events.join(", ")})`);
     }
   } catch (e) {
-    log(`  Claude Code    settings.json sync skipped: ${e?.message ?? String(e)}`);
+    log(`  Claude Code    settings.json cleanup skipped: ${e?.message ?? String(e)}`);
   }
 }
 function uninstallClaude() {
