@@ -584,7 +584,7 @@ function loadScopeConfig() {
     return DEFAULT;
   try {
     const raw = JSON.parse(readFileSync5(CONFIG_PATH, "utf-8"));
-    const scope = raw.scope === "team" || raw.scope === "org" ? raw.scope : "me";
+    const scope = raw.scope === "team" ? "team" : raw.scope === "org" ? "team" : "me";
     const team = Array.isArray(raw.team) ? raw.team.filter((s) => typeof s === "string") : [];
     const install = raw.install === "global" ? "global" : "project";
     return { scope, team, install };
@@ -633,8 +633,135 @@ function forceSessionEndTrigger(opts) {
   }
 }
 
+// dist/src/notifications/transcript-parser.js
+import { existsSync as existsSync7, readFileSync as readFileSync6 } from "node:fs";
+var log2 = (msg) => log("transcript-parser", msg);
+function parseTranscript(transcriptPath, fallbackSessionId, now = /* @__PURE__ */ new Date()) {
+  const empty = {
+    endedAt: now.toISOString(),
+    sessionId: fallbackSessionId,
+    memorySearchBytes: 0,
+    memorySearchCount: 0
+  };
+  if (!transcriptPath || !existsSync7(transcriptPath)) {
+    log2(`transcript missing: ${transcriptPath}`);
+    return empty;
+  }
+  let raw;
+  try {
+    raw = readFileSync6(transcriptPath, "utf-8");
+  } catch (e) {
+    log2(`read failed: ${e?.message ?? String(e)}`);
+    return empty;
+  }
+  const memoryLookupToolUseIds = /* @__PURE__ */ new Set();
+  let memorySearchBytes = 0;
+  let memorySearchCount = 0;
+  let sessionId = fallbackSessionId;
+  let endedAt = "";
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed)
+      continue;
+    let entry;
+    try {
+      entry = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof entry.timestamp === "string")
+      endedAt = entry.timestamp;
+    if (typeof entry.sessionId === "string" && entry.sessionId)
+      sessionId = entry.sessionId;
+    const msg = entry.message;
+    if (!msg || !Array.isArray(msg.content))
+      continue;
+    if (msg.role === "assistant") {
+      for (const c of msg.content) {
+        if (c && c.type === "tool_use" && c.name === "Bash" && c.input && typeof c.input.command === "string" && isMemoryLookupCommand(c.input.command)) {
+          memorySearchCount += 1;
+          if (typeof c.id === "string")
+            memoryLookupToolUseIds.add(c.id);
+        }
+      }
+    } else if (msg.role === "user") {
+      for (const c of msg.content) {
+        if (c && c.type === "tool_result" && typeof c.tool_use_id === "string" && memoryLookupToolUseIds.has(c.tool_use_id)) {
+          memorySearchBytes += toolResultByteLength(c.content);
+        }
+      }
+    }
+  }
+  return {
+    endedAt: endedAt || now.toISOString(),
+    sessionId,
+    memorySearchBytes,
+    memorySearchCount
+  };
+}
+function isMemoryLookupCommand(command) {
+  return command.includes(".deeplake/memory");
+}
+function toolResultByteLength(content) {
+  if (typeof content === "string")
+    return Buffer.byteLength(content, "utf-8");
+  if (Array.isArray(content)) {
+    let n = 0;
+    for (const part of content) {
+      if (part && typeof part === "object") {
+        const txt = part.text;
+        if (typeof txt === "string")
+          n += Buffer.byteLength(txt, "utf-8");
+      }
+    }
+    return n;
+  }
+  try {
+    return Buffer.byteLength(JSON.stringify(content ?? ""), "utf-8");
+  } catch {
+    return 0;
+  }
+}
+
+// dist/src/notifications/usage-tracker.js
+import { appendFileSync as appendFileSync4, existsSync as existsSync8, mkdirSync as mkdirSync7, readFileSync as readFileSync7, readdirSync } from "node:fs";
+import { dirname as dirname4, join as join12 } from "node:path";
+import { homedir as homedir10 } from "node:os";
+var log3 = (msg) => log("usage-tracker", msg);
+function statsFilePath() {
+  return join12(homedir10(), ".deeplake", "usage-stats.jsonl");
+}
+function ensureStatsDir() {
+  const dir = dirname4(statsFilePath());
+  if (!existsSync8(dir))
+    mkdirSync7(dir, { recursive: true });
+}
+function appendUsageRecord(record) {
+  try {
+    ensureStatsDir();
+    appendFileSync4(statsFilePath(), JSON.stringify(record) + "\n", "utf-8");
+    log3(`appended record session=${record.sessionId} memBytes=${record.memorySearchBytes} memCount=${record.memorySearchCount}`);
+  } catch (e) {
+    log3(`appendUsageRecord failed: ${e?.message ?? String(e)}`);
+  }
+}
+
 // dist/src/hooks/session-end.js
-var log2 = (msg) => log("session-end", msg);
+var log4 = (msg) => log("session-end", msg);
+function recordSessionUsage(transcriptPath, sessionId) {
+  if (!transcriptPath)
+    return;
+  try {
+    const record = parseTranscript(transcriptPath, sessionId);
+    if (record.memorySearchCount === 0 && record.memorySearchBytes === 0) {
+      log4(`no memory searches in session ${sessionId} \u2014 skipping usage record`);
+      return;
+    }
+    appendUsageRecord(record);
+  } catch (e) {
+    log4(`recordSessionUsage failed: ${e?.message ?? String(e)}`);
+  }
+}
 async function main() {
   if (process.env.HIVEMIND_WIKI_WORKER === "1")
     return;
@@ -647,9 +774,10 @@ async function main() {
     return;
   const config = loadConfig();
   if (!config) {
-    log2("no config");
+    log4("no config");
     return;
   }
+  recordSessionUsage(input.transcript_path, sessionId);
   if (!tryAcquireLock(sessionId)) {
     wikiLog(`SessionEnd: periodic worker already running for ${sessionId}, skipping`);
     return;
@@ -664,11 +792,11 @@ async function main() {
       reason: "SessionEnd"
     });
   } catch (e) {
-    log2(`spawn failed: ${e.message}`);
+    log4(`spawn failed: ${e.message}`);
     try {
       releaseLock(sessionId);
     } catch (releaseErr) {
-      log2(`releaseLock after spawn failure also failed: ${releaseErr.message}`);
+      log4(`releaseLock after spawn failure also failed: ${releaseErr.message}`);
     }
     throw e;
   }
@@ -681,6 +809,6 @@ async function main() {
   });
 }
 main().catch((e) => {
-  log2(`fatal: ${e.message}`);
+  log4(`fatal: ${e.message}`);
   process.exit(0);
 });

@@ -17,21 +17,21 @@ __export(index_marker_store_exports, {
   hasFreshIndexMarker: () => hasFreshIndexMarker,
   writeIndexMarker: () => writeIndexMarker
 });
-import { existsSync as existsSync11, mkdirSync as mkdirSync3, readFileSync as readFileSync8, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join14 } from "node:path";
+import { existsSync as existsSync12, mkdirSync as mkdirSync3, readFileSync as readFileSync9, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join15 } from "node:path";
 import { tmpdir } from "node:os";
 function getIndexMarkerDir() {
-  return process.env.HIVEMIND_INDEX_MARKER_DIR ?? join14(tmpdir(), "hivemind-deeplake-indexes");
+  return process.env.HIVEMIND_INDEX_MARKER_DIR ?? join15(tmpdir(), "hivemind-deeplake-indexes");
 }
 function buildIndexMarkerPath(workspaceId, orgId, table, suffix) {
   const markerKey = [workspaceId, orgId, table, suffix].join("__").replace(/[^a-zA-Z0-9_.-]/g, "_");
-  return join14(getIndexMarkerDir(), `${markerKey}.json`);
+  return join15(getIndexMarkerDir(), `${markerKey}.json`);
 }
 function hasFreshIndexMarker(markerPath) {
-  if (!existsSync11(markerPath))
+  if (!existsSync12(markerPath))
     return false;
   try {
-    const raw = JSON.parse(readFileSync8(markerPath, "utf-8"));
+    const raw = JSON.parse(readFileSync9(markerPath, "utf-8"));
     const updatedAt = raw.updatedAt ? new Date(raw.updatedAt).getTime() : NaN;
     if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > INDEX_MARKER_TTL_MS)
       return false;
@@ -42,7 +42,7 @@ function hasFreshIndexMarker(markerPath) {
 }
 function writeIndexMarker(markerPath) {
   mkdirSync3(getIndexMarkerDir(), { recursive: true });
-  writeFileSync5(markerPath, JSON.stringify({ updatedAt: (/* @__PURE__ */ new Date()).toISOString() }), "utf-8");
+  writeFileSync6(markerPath, JSON.stringify({ updatedAt: (/* @__PURE__ */ new Date()).toISOString() }), "utf-8");
 }
 var INDEX_MARKER_TTL_MS;
 var init_index_marker_store = __esm({
@@ -54,6 +54,9 @@ var init_index_marker_store = __esm({
 
 // dist/src/cli/install-claude.js
 import { execFileSync } from "node:child_process";
+import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
 
 // dist/src/cli/util.js
 import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, symlinkSync, unlinkSync, lstatSync } from "node:fs";
@@ -178,6 +181,75 @@ function pluginAlreadyInstalled() {
   return r.stdout.includes(PLUGIN_KEY);
 }
 var PLUGIN_SCOPES = ["user", "project", "local", "managed"];
+function resolvePluginRoot() {
+  return join2(homedir2(), ".claude", "plugins", "hivemind");
+}
+function marketplaceHooksJsonPath() {
+  return join2(homedir2(), ".claude", "plugins", "marketplaces", "hivemind", "claude-code", "hooks", "hooks.json");
+}
+function settingsJsonPath() {
+  return join2(homedir2(), ".claude", "settings.json");
+}
+function resolveCommand(command, pluginRoot) {
+  return command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot);
+}
+function isHivemindMatcher(matcher) {
+  return matcher.hooks?.some((h) => {
+    if (typeof h.command !== "string")
+      return false;
+    const normalized = h.command.replace(/\\/g, "/");
+    return normalized.includes("plugins/hivemind/bundle/");
+  }) ?? false;
+}
+function syncHivemindHooksToSettings() {
+  const hooksPath = marketplaceHooksJsonPath();
+  const settingsPath = settingsJsonPath();
+  if (!existsSync2(hooksPath))
+    return { changed: false, events: [] };
+  let canonical;
+  try {
+    canonical = JSON.parse(readFileSync2(hooksPath, "utf-8"));
+  } catch {
+    return { changed: false, events: [] };
+  }
+  if (!canonical.hooks)
+    return { changed: false, events: [] };
+  let settings = {};
+  if (existsSync2(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync2(settingsPath, "utf-8"));
+    } catch {
+      return { changed: false, events: [] };
+    }
+  }
+  settings.hooks = settings.hooks ?? {};
+  const pluginRoot = resolvePluginRoot();
+  const changedEvents = [];
+  let changed = false;
+  for (const [event, matchers] of Object.entries(canonical.hooks)) {
+    const resolvedMatchers = matchers.map((m) => ({
+      ...m.matcher !== void 0 ? { matcher: m.matcher } : {},
+      hooks: m.hooks.map((h) => ({
+        ...h.type !== void 0 ? { type: h.type } : {},
+        ...h.command !== void 0 ? { command: resolveCommand(h.command, pluginRoot) } : {},
+        ...h.timeout !== void 0 ? { timeout: h.timeout } : {},
+        ...h.async !== void 0 ? { async: h.async } : {}
+      }))
+    }));
+    const existing = settings.hooks[event] ?? [];
+    const preserved = existing.filter((m) => !isHivemindMatcher(m));
+    const next = [...preserved, ...resolvedMatchers];
+    if (JSON.stringify(next) !== JSON.stringify(existing)) {
+      settings.hooks[event] = next;
+      changedEvents.push(event);
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeFileSync2(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+  }
+  return { changed, events: changedEvents };
+}
 function installClaude() {
   requireClaudeCli();
   if (!marketplaceAlreadyAdded()) {
@@ -200,6 +272,14 @@ function installClaude() {
     log(`  Claude Code    refreshed via marketplace ${MARKETPLACE_SOURCE}`);
   }
   runClaude(["plugin", "enable", PLUGIN_KEY]);
+  try {
+    const sync = syncHivemindHooksToSettings();
+    if (sync.changed) {
+      log(`  Claude Code    settings.json hooks synced (${sync.events.join(", ")})`);
+    }
+  } catch (e) {
+    log(`  Claude Code    settings.json sync skipped: ${e?.message ?? String(e)}`);
+  }
 }
 function uninstallClaude() {
   try {
@@ -214,16 +294,16 @@ function uninstallClaude() {
 }
 
 // dist/src/cli/install-codex.js
-import { existsSync as existsSync2, readFileSync as readFileSync3, unlinkSync as unlinkSync2 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync4, unlinkSync as unlinkSync2 } from "node:fs";
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 
 // dist/src/cli/version.js
-import { readFileSync as readFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { readFileSync as readFileSync3 } from "node:fs";
+import { join as join3 } from "node:path";
 function getVersion() {
   try {
-    const pkg = JSON.parse(readFileSync2(join2(pkgRoot(), "package.json"), "utf-8"));
+    const pkg = JSON.parse(readFileSync3(join3(pkgRoot(), "package.json"), "utf-8"));
     return pkg.version ?? "0.0.0";
   } catch {
     return "0.0.0";
@@ -231,16 +311,16 @@ function getVersion() {
 }
 
 // dist/src/cli/install-codex.js
-var CODEX_HOME = join3(HOME, ".codex");
-var PLUGIN_DIR = join3(CODEX_HOME, "hivemind");
-var HOOKS_PATH = join3(CODEX_HOME, "hooks.json");
-var AGENTS_SKILLS_DIR = join3(HOME, ".agents", "skills");
-var SKILL_LINK = join3(AGENTS_SKILLS_DIR, "hivemind-memory");
+var CODEX_HOME = join4(HOME, ".codex");
+var PLUGIN_DIR = join4(CODEX_HOME, "hivemind");
+var HOOKS_PATH = join4(CODEX_HOME, "hooks.json");
+var AGENTS_SKILLS_DIR = join4(HOME, ".agents", "skills");
+var SKILL_LINK = join4(AGENTS_SKILLS_DIR, "hivemind-memory");
 function hookCmd(bundleFile, timeout, matcher) {
   const block = {
     hooks: [{
       type: "command",
-      command: `node "${join3(PLUGIN_DIR, "bundle", bundleFile)}"`,
+      command: `node "${join4(PLUGIN_DIR, "bundle", bundleFile)}"`,
       timeout
     }]
   };
@@ -314,8 +394,8 @@ function mergeHooks(existing, ours, pluginDir = PLUGIN_DIR) {
 function mergeHooksJson(ours) {
   let existing = {};
   try {
-    if (existsSync2(HOOKS_PATH)) {
-      const parsed = JSON.parse(readFileSync3(HOOKS_PATH, "utf-8"));
+    if (existsSync3(HOOKS_PATH)) {
+      const parsed = JSON.parse(readFileSync4(HOOKS_PATH, "utf-8"));
       if (parsed && typeof parsed === "object")
         existing = parsed;
     }
@@ -354,20 +434,20 @@ function tryEnableCodexHooks() {
   }
 }
 function installCodex() {
-  const srcBundle = join3(pkgRoot(), "codex", "bundle");
-  const srcSkills = join3(pkgRoot(), "codex", "skills");
-  if (!existsSync2(srcBundle)) {
+  const srcBundle = join4(pkgRoot(), "codex", "bundle");
+  const srcSkills = join4(pkgRoot(), "codex", "skills");
+  if (!existsSync3(srcBundle)) {
     throw new Error(`Codex bundle missing at ${srcBundle}. Run 'npm run build' first.`);
   }
   ensureDir(PLUGIN_DIR);
-  copyDir(srcBundle, join3(PLUGIN_DIR, "bundle"));
-  if (existsSync2(srcSkills))
-    copyDir(srcSkills, join3(PLUGIN_DIR, "skills"));
+  copyDir(srcBundle, join4(PLUGIN_DIR, "bundle"));
+  if (existsSync3(srcSkills))
+    copyDir(srcSkills, join4(PLUGIN_DIR, "skills"));
   tryEnableCodexHooks();
   writeJson(HOOKS_PATH, mergeHooksJson(buildHooksJson()));
   ensureDir(AGENTS_SKILLS_DIR);
-  const skillTarget = join3(PLUGIN_DIR, "skills", "deeplake-memory");
-  if (existsSync2(skillTarget)) {
+  const skillTarget = join4(PLUGIN_DIR, "skills", "deeplake-memory");
+  if (existsSync3(skillTarget)) {
     symlinkForce(skillTarget, SKILL_LINK);
   } else {
     warn(`  Codex          skill source missing at ${skillTarget}; skipping symlink`);
@@ -376,10 +456,10 @@ function installCodex() {
   log(`  Codex          installed -> ${PLUGIN_DIR}`);
 }
 function uninstallCodex() {
-  if (existsSync2(HOOKS_PATH)) {
+  if (existsSync3(HOOKS_PATH)) {
     let existing = {};
     try {
-      const raw = JSON.parse(readFileSync3(HOOKS_PATH, "utf-8"));
+      const raw = JSON.parse(readFileSync4(HOOKS_PATH, "utf-8"));
       if (raw && typeof raw === "object")
         existing = raw;
     } catch {
@@ -400,7 +480,7 @@ function uninstallCodex() {
       }
     }
   }
-  if (existsSync2(SKILL_LINK)) {
+  if (existsSync3(SKILL_LINK)) {
     unlinkSync2(SKILL_LINK);
     log(`  Codex          removed ${SKILL_LINK}`);
   }
@@ -408,30 +488,30 @@ function uninstallCodex() {
 }
 
 // dist/src/cli/install-openclaw.js
-import { existsSync as existsSync3, copyFileSync, rmSync } from "node:fs";
-import { join as join4 } from "node:path";
-var PLUGIN_DIR2 = join4(HOME, ".openclaw", "extensions", "hivemind");
+import { existsSync as existsSync4, copyFileSync, rmSync } from "node:fs";
+import { join as join5 } from "node:path";
+var PLUGIN_DIR2 = join5(HOME, ".openclaw", "extensions", "hivemind");
 function installOpenclaw() {
-  const srcDist = join4(pkgRoot(), "openclaw", "dist");
-  const srcManifest = join4(pkgRoot(), "openclaw", "openclaw.plugin.json");
-  const srcPkg = join4(pkgRoot(), "openclaw", "package.json");
-  const srcSkills = join4(pkgRoot(), "openclaw", "skills");
-  if (!existsSync3(srcDist)) {
+  const srcDist = join5(pkgRoot(), "openclaw", "dist");
+  const srcManifest = join5(pkgRoot(), "openclaw", "openclaw.plugin.json");
+  const srcPkg = join5(pkgRoot(), "openclaw", "package.json");
+  const srcSkills = join5(pkgRoot(), "openclaw", "skills");
+  if (!existsSync4(srcDist)) {
     throw new Error(`OpenClaw bundle missing at ${srcDist}. Run 'npm run build' first.`);
   }
   ensureDir(PLUGIN_DIR2);
-  copyDir(srcDist, join4(PLUGIN_DIR2, "dist"));
-  if (existsSync3(srcManifest))
-    copyFileSync(srcManifest, join4(PLUGIN_DIR2, "openclaw.plugin.json"));
-  if (existsSync3(srcPkg))
-    copyFileSync(srcPkg, join4(PLUGIN_DIR2, "package.json"));
-  if (existsSync3(srcSkills))
-    copyDir(srcSkills, join4(PLUGIN_DIR2, "skills"));
+  copyDir(srcDist, join5(PLUGIN_DIR2, "dist"));
+  if (existsSync4(srcManifest))
+    copyFileSync(srcManifest, join5(PLUGIN_DIR2, "openclaw.plugin.json"));
+  if (existsSync4(srcPkg))
+    copyFileSync(srcPkg, join5(PLUGIN_DIR2, "package.json"));
+  if (existsSync4(srcSkills))
+    copyDir(srcSkills, join5(PLUGIN_DIR2, "skills"));
   writeVersionStamp(PLUGIN_DIR2, getVersion());
   log(`  OpenClaw       installed -> ${PLUGIN_DIR2}`);
 }
 function uninstallOpenclaw() {
-  if (existsSync3(PLUGIN_DIR2)) {
+  if (existsSync4(PLUGIN_DIR2)) {
     rmSync(PLUGIN_DIR2, { recursive: true, force: true });
     log(`  OpenClaw       removed ${PLUGIN_DIR2}`);
   } else {
@@ -440,23 +520,23 @@ function uninstallOpenclaw() {
 }
 
 // dist/src/cli/install-cursor.js
-import { existsSync as existsSync4, unlinkSync as unlinkSync3 } from "node:fs";
-import { join as join5 } from "node:path";
-var CURSOR_HOME = join5(HOME, ".cursor");
-var PLUGIN_DIR3 = join5(CURSOR_HOME, "hivemind");
-var HOOKS_PATH2 = join5(CURSOR_HOME, "hooks.json");
+import { existsSync as existsSync5, unlinkSync as unlinkSync3 } from "node:fs";
+import { join as join6 } from "node:path";
+var CURSOR_HOME = join6(HOME, ".cursor");
+var PLUGIN_DIR3 = join6(CURSOR_HOME, "hivemind");
+var HOOKS_PATH2 = join6(CURSOR_HOME, "hooks.json");
 var HIVEMIND_MARKER_KEY = "_hivemindManaged";
 function buildHookCmd(bundleFile, timeout) {
   return {
     type: "command",
-    command: `node "${join5(PLUGIN_DIR3, "bundle", bundleFile)}"`,
+    command: `node "${join6(PLUGIN_DIR3, "bundle", bundleFile)}"`,
     timeout
   };
 }
 function buildHookCmdShellMatcher(bundleFile, timeout) {
   return {
     type: "command",
-    command: `node "${join5(PLUGIN_DIR3, "bundle", bundleFile)}"`,
+    command: `node "${join6(PLUGIN_DIR3, "bundle", bundleFile)}"`,
     timeout,
     matcher: "Shell"
   };
@@ -512,12 +592,12 @@ function stripHooksFromConfig(existing) {
   return existing;
 }
 function installCursor() {
-  const srcBundle = join5(pkgRoot(), "cursor", "bundle");
-  if (!existsSync4(srcBundle)) {
+  const srcBundle = join6(pkgRoot(), "cursor", "bundle");
+  if (!existsSync5(srcBundle)) {
     throw new Error(`Cursor bundle missing at ${srcBundle}. Run 'npm run build' first.`);
   }
   ensureDir(PLUGIN_DIR3);
-  copyDir(srcBundle, join5(PLUGIN_DIR3, "bundle"));
+  copyDir(srcBundle, join6(PLUGIN_DIR3, "bundle"));
   const existing = readJson(HOOKS_PATH2);
   const merged = mergeHooks2(existing);
   writeJson(HOOKS_PATH2, merged);
@@ -533,7 +613,7 @@ function uninstallCursor() {
   const stripped = stripHooksFromConfig(existing);
   const meaningfulKeys = stripped ? Object.keys(stripped).filter((k) => k !== "version").length : 0;
   if (!stripped || meaningfulKeys === 0) {
-    if (existsSync4(HOOKS_PATH2))
+    if (existsSync5(HOOKS_PATH2))
       unlinkSync3(HOOKS_PATH2);
   } else {
     writeJson(HOOKS_PATH2, stripped);
@@ -542,8 +622,8 @@ function uninstallCursor() {
 }
 
 // dist/src/cli/install-hermes.js
-import { existsSync as existsSync6, writeFileSync as writeFileSync2, readFileSync as readFileSync4, rmSync as rmSync2, unlinkSync as unlinkSync4 } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync7, writeFileSync as writeFileSync3, readFileSync as readFileSync5, rmSync as rmSync2, unlinkSync as unlinkSync4 } from "node:fs";
+import { join as join8 } from "node:path";
 
 // node_modules/js-yaml/dist/js-yaml.mjs
 function isNothing(subject) {
@@ -3132,15 +3212,15 @@ var safeLoadAll = renamed("safeLoadAll", "loadAll");
 var safeDump = renamed("safeDump", "dump");
 
 // dist/src/cli/install-mcp-shared.js
-import { existsSync as existsSync5 } from "node:fs";
-import { join as join6 } from "node:path";
-var HIVEMIND_DIR = join6(HOME, ".hivemind");
-var MCP_DIR = join6(HIVEMIND_DIR, "mcp");
-var MCP_SERVER_PATH = join6(MCP_DIR, "server.js");
-var MCP_PACKAGE_JSON = join6(MCP_DIR, "package.json");
+import { existsSync as existsSync6 } from "node:fs";
+import { join as join7 } from "node:path";
+var HIVEMIND_DIR = join7(HOME, ".hivemind");
+var MCP_DIR = join7(HIVEMIND_DIR, "mcp");
+var MCP_SERVER_PATH = join7(MCP_DIR, "server.js");
+var MCP_PACKAGE_JSON = join7(MCP_DIR, "package.json");
 function ensureMcpServerInstalled() {
-  const srcDir = join6(pkgRoot(), "mcp", "bundle");
-  if (!existsSync5(srcDir)) {
+  const srcDir = join7(pkgRoot(), "mcp", "bundle");
+  if (!existsSync6(srcDir)) {
     throw new Error(`MCP server bundle missing at ${srcDir}. Run 'npm run build' to produce it before installing Tier B consumers.`);
   }
   ensureDir(MCP_DIR);
@@ -3150,11 +3230,11 @@ function ensureMcpServerInstalled() {
 }
 
 // dist/src/cli/install-hermes.js
-var HERMES_HOME = join7(HOME, ".hermes");
-var SKILLS_DIR = join7(HERMES_HOME, "skills", "hivemind-memory");
-var HIVEMIND_DIR2 = join7(HERMES_HOME, "hivemind");
-var BUNDLE_DIR = join7(HIVEMIND_DIR2, "bundle");
-var CONFIG_PATH = join7(HERMES_HOME, "config.yaml");
+var HERMES_HOME = join8(HOME, ".hermes");
+var SKILLS_DIR = join8(HERMES_HOME, "skills", "hivemind-memory");
+var HIVEMIND_DIR2 = join8(HERMES_HOME, "hivemind");
+var BUNDLE_DIR = join8(HIVEMIND_DIR2, "bundle");
+var CONFIG_PATH = join8(HERMES_HOME, "config.yaml");
 var SERVER_KEY = "hivemind";
 var SKILL_BODY = `---
 name: hivemind-memory
@@ -3212,7 +3292,7 @@ function isHivemindHook(entry) {
 }
 function buildHookEntry(bundleFile, timeout, matcher) {
   const entry = {
-    command: `node ${join7(BUNDLE_DIR, bundleFile)}`,
+    command: `node ${join8(BUNDLE_DIR, bundleFile)}`,
     timeout
   };
   if (matcher)
@@ -3256,10 +3336,10 @@ function stripHivemindHooks(existing) {
   return Object.keys(out).length > 0 ? out : void 0;
 }
 function readConfig() {
-  if (!existsSync6(CONFIG_PATH))
+  if (!existsSync7(CONFIG_PATH))
     return {};
   try {
-    const raw = readFileSync4(CONFIG_PATH, "utf-8");
+    const raw = readFileSync5(CONFIG_PATH, "utf-8");
     const parsed = load(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed;
@@ -3272,15 +3352,15 @@ function readConfig() {
 function writeConfig(cfg) {
   ensureDir(HERMES_HOME);
   const dumped = dump(cfg, { lineWidth: 100, noRefs: true });
-  writeFileSync2(CONFIG_PATH, dumped);
+  writeFileSync3(CONFIG_PATH, dumped);
 }
 function installHermes() {
   ensureDir(SKILLS_DIR);
-  writeFileSync2(join7(SKILLS_DIR, "SKILL.md"), SKILL_BODY);
+  writeFileSync3(join8(SKILLS_DIR, "SKILL.md"), SKILL_BODY);
   writeVersionStamp(SKILLS_DIR, getVersion());
   log(`  Hermes         skill installed -> ${SKILLS_DIR}`);
-  const srcBundle = join7(pkgRoot(), "hermes", "bundle");
-  if (!existsSync6(srcBundle)) {
+  const srcBundle = join8(pkgRoot(), "hermes", "bundle");
+  if (!existsSync7(srcBundle)) {
     throw new Error(`Hermes bundle missing at ${srcBundle}. Run 'npm run build' first.`);
   }
   ensureDir(HIVEMIND_DIR2);
@@ -3301,15 +3381,15 @@ function installHermes() {
   log(`  Hermes         config updated -> ${CONFIG_PATH} (mcp_servers + hooks + hooks_auto_accept)`);
 }
 function uninstallHermes() {
-  if (existsSync6(SKILLS_DIR)) {
+  if (existsSync7(SKILLS_DIR)) {
     rmSync2(SKILLS_DIR, { recursive: true, force: true });
     log(`  Hermes         removed ${SKILLS_DIR}`);
   }
-  if (existsSync6(HIVEMIND_DIR2)) {
+  if (existsSync7(HIVEMIND_DIR2)) {
     rmSync2(HIVEMIND_DIR2, { recursive: true, force: true });
     log(`  Hermes         removed ${HIVEMIND_DIR2}`);
   }
-  if (existsSync6(CONFIG_PATH)) {
+  if (existsSync7(CONFIG_PATH)) {
     const cfg = readConfig();
     let touched = false;
     if (cfg.mcp_servers && typeof cfg.mcp_servers === "object" && SERVER_KEY in cfg.mcp_servers) {
@@ -3342,18 +3422,18 @@ function uninstallHermes() {
 }
 
 // dist/src/cli/install-pi.js
-import { existsSync as existsSync7, writeFileSync as writeFileSync3, rmSync as rmSync3, readFileSync as readFileSync5, copyFileSync as copyFileSync2 } from "node:fs";
-import { join as join8 } from "node:path";
-var PI_AGENT_DIR = join8(HOME, ".pi", "agent");
-var AGENTS_MD = join8(PI_AGENT_DIR, "AGENTS.md");
-var LEGACY_SKILL_DIR = join8(PI_AGENT_DIR, "skills", "hivemind-memory");
-var EXTENSIONS_DIR = join8(PI_AGENT_DIR, "extensions");
-var EXTENSION_PATH = join8(EXTENSIONS_DIR, "hivemind.ts");
-var VERSION_DIR = join8(PI_AGENT_DIR, ".hivemind");
-var WIKI_WORKER_DIR = join8(PI_AGENT_DIR, "hivemind");
-var WIKI_WORKER_PATH = join8(WIKI_WORKER_DIR, "wiki-worker.js");
-var SKILLIFY_WORKER_PATH = join8(WIKI_WORKER_DIR, "skillify-worker.js");
-var AUTOPULL_WORKER_PATH = join8(WIKI_WORKER_DIR, "autopull-worker.js");
+import { existsSync as existsSync8, writeFileSync as writeFileSync4, rmSync as rmSync3, readFileSync as readFileSync6, copyFileSync as copyFileSync2 } from "node:fs";
+import { join as join9 } from "node:path";
+var PI_AGENT_DIR = join9(HOME, ".pi", "agent");
+var AGENTS_MD = join9(PI_AGENT_DIR, "AGENTS.md");
+var LEGACY_SKILL_DIR = join9(PI_AGENT_DIR, "skills", "hivemind-memory");
+var EXTENSIONS_DIR = join9(PI_AGENT_DIR, "extensions");
+var EXTENSION_PATH = join9(EXTENSIONS_DIR, "hivemind.ts");
+var VERSION_DIR = join9(PI_AGENT_DIR, ".hivemind");
+var WIKI_WORKER_DIR = join9(PI_AGENT_DIR, "hivemind");
+var WIKI_WORKER_PATH = join9(WIKI_WORKER_DIR, "wiki-worker.js");
+var SKILLIFY_WORKER_PATH = join9(WIKI_WORKER_DIR, "skillify-worker.js");
+var AUTOPULL_WORKER_PATH = join9(WIKI_WORKER_DIR, "autopull-worker.js");
 var HIVEMIND_BLOCK_START = "<!-- BEGIN hivemind-memory -->";
 var HIVEMIND_BLOCK_END = "<!-- END hivemind-memory -->";
 var HIVEMIND_BLOCK_BODY = `${HIVEMIND_BLOCK_START}
@@ -3421,30 +3501,30 @@ ${after}`;
 }
 function installPi() {
   ensureDir(PI_AGENT_DIR);
-  if (existsSync7(LEGACY_SKILL_DIR)) {
+  if (existsSync8(LEGACY_SKILL_DIR)) {
     rmSync3(LEGACY_SKILL_DIR, { recursive: true, force: true });
   }
-  const prior = existsSync7(AGENTS_MD) ? readFileSync5(AGENTS_MD, "utf-8") : null;
+  const prior = existsSync8(AGENTS_MD) ? readFileSync6(AGENTS_MD, "utf-8") : null;
   const next = upsertHivemindBlock(prior);
-  writeFileSync3(AGENTS_MD, next);
-  const srcExtension = join8(pkgRoot(), "pi", "extension-source", "hivemind.ts");
-  if (!existsSync7(srcExtension)) {
+  writeFileSync4(AGENTS_MD, next);
+  const srcExtension = join9(pkgRoot(), "pi", "extension-source", "hivemind.ts");
+  if (!existsSync8(srcExtension)) {
     throw new Error(`pi extension source missing at ${srcExtension}. Reinstall the @deeplake/hivemind package.`);
   }
   ensureDir(EXTENSIONS_DIR);
   copyFileSync2(srcExtension, EXTENSION_PATH);
-  const srcWorker = join8(pkgRoot(), "pi", "bundle", "wiki-worker.js");
-  if (existsSync7(srcWorker)) {
+  const srcWorker = join9(pkgRoot(), "pi", "bundle", "wiki-worker.js");
+  if (existsSync8(srcWorker)) {
     ensureDir(WIKI_WORKER_DIR);
     copyFileSync2(srcWorker, WIKI_WORKER_PATH);
   }
-  const srcSkillifyWorker = join8(pkgRoot(), "pi", "bundle", "skillify-worker.js");
-  if (existsSync7(srcSkillifyWorker)) {
+  const srcSkillifyWorker = join9(pkgRoot(), "pi", "bundle", "skillify-worker.js");
+  if (existsSync8(srcSkillifyWorker)) {
     ensureDir(WIKI_WORKER_DIR);
     copyFileSync2(srcSkillifyWorker, SKILLIFY_WORKER_PATH);
   }
-  const srcAutopullWorker = join8(pkgRoot(), "pi", "bundle", "autopull-worker.js");
-  if (existsSync7(srcAutopullWorker)) {
+  const srcAutopullWorker = join9(pkgRoot(), "pi", "bundle", "autopull-worker.js");
+  if (existsSync8(srcAutopullWorker)) {
     ensureDir(WIKI_WORKER_DIR);
     copyFileSync2(srcAutopullWorker, AUTOPULL_WORKER_PATH);
   }
@@ -3452,82 +3532,82 @@ function installPi() {
   writeVersionStamp(VERSION_DIR, getVersion());
   log(`  pi             AGENTS.md updated -> ${AGENTS_MD}`);
   log(`  pi             extension installed -> ${EXTENSION_PATH}`);
-  if (existsSync7(WIKI_WORKER_PATH)) {
+  if (existsSync8(WIKI_WORKER_PATH)) {
     log(`  pi             wiki-worker installed -> ${WIKI_WORKER_PATH}`);
   }
-  if (existsSync7(SKILLIFY_WORKER_PATH)) {
+  if (existsSync8(SKILLIFY_WORKER_PATH)) {
     log(`  pi             skillify-worker installed -> ${SKILLIFY_WORKER_PATH}`);
   }
-  if (existsSync7(AUTOPULL_WORKER_PATH)) {
+  if (existsSync8(AUTOPULL_WORKER_PATH)) {
     log(`  pi             autopull-worker installed -> ${AUTOPULL_WORKER_PATH}`);
   }
 }
 function uninstallPi() {
-  if (existsSync7(LEGACY_SKILL_DIR)) {
+  if (existsSync8(LEGACY_SKILL_DIR)) {
     rmSync3(LEGACY_SKILL_DIR, { recursive: true, force: true });
     log(`  pi             removed ${LEGACY_SKILL_DIR}`);
   }
-  if (existsSync7(EXTENSION_PATH)) {
+  if (existsSync8(EXTENSION_PATH)) {
     rmSync3(EXTENSION_PATH, { force: true });
     log(`  pi             removed extension ${EXTENSION_PATH}`);
   }
-  if (existsSync7(WIKI_WORKER_DIR)) {
+  if (existsSync8(WIKI_WORKER_DIR)) {
     rmSync3(WIKI_WORKER_DIR, { recursive: true, force: true });
     log(`  pi             removed wiki-worker dir ${WIKI_WORKER_DIR}`);
   }
-  if (existsSync7(AGENTS_MD)) {
-    const prior = readFileSync5(AGENTS_MD, "utf-8");
+  if (existsSync8(AGENTS_MD)) {
+    const prior = readFileSync6(AGENTS_MD, "utf-8");
     const stripped = stripHivemindBlock(prior);
     if (stripped.trim().length === 0) {
       rmSync3(AGENTS_MD, { force: true });
       log(`  pi             removed empty ${AGENTS_MD}`);
     } else {
-      writeFileSync3(AGENTS_MD, stripped);
+      writeFileSync4(AGENTS_MD, stripped);
       log(`  pi             stripped hivemind block from ${AGENTS_MD}`);
     }
   }
-  if (existsSync7(VERSION_DIR)) {
+  if (existsSync8(VERSION_DIR)) {
     rmSync3(VERSION_DIR, { recursive: true, force: true });
   }
 }
 
 // dist/src/cli/embeddings.js
-import { copyFileSync as copyFileSync3, chmodSync, existsSync as existsSync8, lstatSync as lstatSync2, readdirSync, readlinkSync, rmSync as rmSync4, statSync, unlinkSync as unlinkSync5 } from "node:fs";
+import { copyFileSync as copyFileSync3, chmodSync, existsSync as existsSync9, lstatSync as lstatSync2, readdirSync, readlinkSync, rmSync as rmSync4, statSync, unlinkSync as unlinkSync5 } from "node:fs";
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { join as join9 } from "node:path";
-var SHARED_DIR = join9(HOME, ".hivemind", "embed-deps");
-var SHARED_NODE_MODULES = join9(SHARED_DIR, "node_modules");
-var SHARED_DAEMON_PATH = join9(SHARED_DIR, "embed-daemon.js");
+import { join as join10 } from "node:path";
+var SHARED_DIR = join10(HOME, ".hivemind", "embed-deps");
+var SHARED_NODE_MODULES = join10(SHARED_DIR, "node_modules");
+var SHARED_DAEMON_PATH = join10(SHARED_DIR, "embed-daemon.js");
 var TRANSFORMERS_PKG = "@huggingface/transformers";
 var TRANSFORMERS_RANGE = "^3.0.0";
 function findHivemindInstalls(home = HOME) {
   const out = [];
   const fixed = [
-    { id: "codex", pluginDir: join9(home, ".codex", "hivemind") },
-    { id: "cursor", pluginDir: join9(home, ".cursor", "hivemind") },
-    { id: "hermes", pluginDir: join9(home, ".hermes", "hivemind") }
+    { id: "codex", pluginDir: join10(home, ".codex", "hivemind") },
+    { id: "cursor", pluginDir: join10(home, ".cursor", "hivemind") },
+    { id: "hermes", pluginDir: join10(home, ".hermes", "hivemind") }
   ];
   for (const inst of fixed) {
-    if (existsSync8(join9(inst.pluginDir, "bundle")))
+    if (existsSync9(join10(inst.pluginDir, "bundle")))
       out.push(inst);
   }
-  const ccCache = join9(home, ".claude", "plugins", "cache", "hivemind", "hivemind");
-  if (existsSync8(ccCache)) {
+  const ccCache = join10(home, ".claude", "plugins", "cache", "hivemind", "hivemind");
+  if (existsSync9(ccCache)) {
     let entries = [];
     try {
       entries = readdirSync(ccCache);
     } catch {
     }
     for (const ver of entries) {
-      const dir = join9(ccCache, ver);
+      const dir = join10(ccCache, ver);
       try {
         if (!statSync(dir).isDirectory())
           continue;
       } catch {
         continue;
       }
-      const candidates = [join9(dir, "bundle"), join9(dir, "claude-code", "bundle")];
-      if (candidates.some((p) => existsSync8(p))) {
+      const candidates = [join10(dir, "bundle"), join10(dir, "claude-code", "bundle")];
+      if (candidates.some((p) => existsSync9(p))) {
         out.push({ id: `claude (${ver})`, pluginDir: dir });
       }
     }
@@ -3535,10 +3615,10 @@ function findHivemindInstalls(home = HOME) {
   return out;
 }
 function isSharedDepsInstalled(sharedNodeModules = SHARED_NODE_MODULES) {
-  return existsSync8(join9(sharedNodeModules, TRANSFORMERS_PKG));
+  return existsSync9(join10(sharedNodeModules, TRANSFORMERS_PKG));
 }
 function isSymlinkToSharedDeps(linkPath, sharedNodeModules) {
-  if (!existsSync8(linkPath))
+  if (!existsSync9(linkPath))
     return false;
   try {
     if (!lstatSync2(linkPath).isSymbolicLink())
@@ -3549,8 +3629,8 @@ function isSymlinkToSharedDeps(linkPath, sharedNodeModules) {
   }
 }
 function linkStateFor(install, sharedNodeModules = SHARED_NODE_MODULES) {
-  const link = join9(install.pluginDir, "node_modules");
-  if (!existsSync8(link) && !isSymbolicLink(link))
+  const link = join10(install.pluginDir, "node_modules");
+  if (!existsSync9(link) && !isSymbolicLink(link))
     return { kind: "no-node-modules" };
   try {
     if (lstatSync2(link).isSymbolicLink()) {
@@ -3574,7 +3654,7 @@ function ensureSharedDeps() {
     log(`  Embeddings     installing ${TRANSFORMERS_PKG}@${TRANSFORMERS_RANGE} into ${SHARED_DIR}`);
     log(`                 (~600 MB; first install only \u2014 every agent will share this)`);
     ensureDir(SHARED_DIR);
-    writeJson(join9(SHARED_DIR, "package.json"), {
+    writeJson(join10(SHARED_DIR, "package.json"), {
       name: "hivemind-embed-deps",
       version: "1.0.0",
       private: true,
@@ -3588,8 +3668,8 @@ function ensureSharedDeps() {
     log(`  Embeddings     shared deps already present at ${SHARED_DIR}`);
   }
   ensureDir(SHARED_DIR);
-  const src = join9(pkgRoot(), "embeddings", "embed-daemon.js");
-  if (existsSync8(src)) {
+  const src = join10(pkgRoot(), "embeddings", "embed-daemon.js");
+  if (existsSync9(src)) {
     copyFileSync3(src, SHARED_DAEMON_PATH);
     chmodSync(SHARED_DAEMON_PATH, 493);
   } else {
@@ -3597,7 +3677,7 @@ function ensureSharedDeps() {
   }
 }
 function linkAgent(install) {
-  const link = join9(install.pluginDir, "node_modules");
+  const link = join10(install.pluginDir, "node_modules");
   symlinkForce(SHARED_NODE_MODULES, link);
   log(`  Embeddings     linked ${install.id.padEnd(20)} -> shared deps`);
 }
@@ -3616,13 +3696,13 @@ function enableEmbeddings() {
 function disableEmbeddings(opts) {
   const installs = findHivemindInstalls();
   for (const inst of installs) {
-    const link = join9(inst.pluginDir, "node_modules");
+    const link = join10(inst.pluginDir, "node_modules");
     if (isSymlinkToSharedDeps(link, SHARED_NODE_MODULES)) {
       unlinkSync5(link);
       log(`  Embeddings     unlinked ${inst.id}`);
     }
   }
-  if (opts?.prune && existsSync8(SHARED_DIR)) {
+  if (opts?.prune && existsSync9(SHARED_DIR)) {
     rmSync4(SHARED_DIR, { recursive: true, force: true });
     log(`  Embeddings     pruned ${SHARED_DIR}`);
   }
@@ -3630,7 +3710,7 @@ function disableEmbeddings(opts) {
 function statusEmbeddings() {
   log(`Shared deps:   ${SHARED_DIR}`);
   log(`Installed:     ${isSharedDepsInstalled() ? "yes" : "no"}`);
-  log(`Daemon:        ${existsSync8(SHARED_DAEMON_PATH) ? SHARED_DAEMON_PATH : "(not present)"}`);
+  log(`Daemon:        ${existsSync9(SHARED_DAEMON_PATH) ? SHARED_DAEMON_PATH : "(not present)"}`);
   log("");
   log(`Agent installs:`);
   const installs = findHivemindInstalls();
@@ -3661,8 +3741,8 @@ function statusEmbeddings() {
 }
 
 // dist/src/cli/auth.js
-import { existsSync as existsSync9 } from "node:fs";
-import { join as join11 } from "node:path";
+import { existsSync as existsSync10 } from "node:fs";
+import { join as join12 } from "node:path";
 
 // dist/src/commands/auth.js
 import { execSync } from "node:child_process";
@@ -3677,25 +3757,25 @@ function deeplakeClientHeader() {
 }
 
 // dist/src/commands/auth-creds.js
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync4, mkdirSync as mkdirSync2, unlinkSync as unlinkSync6 } from "node:fs";
-import { join as join10 } from "node:path";
-import { homedir as homedir2 } from "node:os";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync5, mkdirSync as mkdirSync2, unlinkSync as unlinkSync6 } from "node:fs";
+import { join as join11 } from "node:path";
+import { homedir as homedir3 } from "node:os";
 function configDir() {
-  return join10(homedir2(), ".deeplake");
+  return join11(homedir3(), ".deeplake");
 }
 function credsPath() {
-  return join10(configDir(), "credentials.json");
+  return join11(configDir(), "credentials.json");
 }
 function loadCredentials() {
   try {
-    return JSON.parse(readFileSync6(credsPath(), "utf-8"));
+    return JSON.parse(readFileSync7(credsPath(), "utf-8"));
   } catch {
     return null;
   }
 }
 function saveCredentials(creds) {
   mkdirSync2(configDir(), { recursive: true, mode: 448 });
-  writeFileSync4(credsPath(), JSON.stringify({ ...creds, savedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2), { mode: 384 });
+  writeFileSync5(credsPath(), JSON.stringify({ ...creds, savedAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2), { mode: 384 });
 }
 function deleteCredentials() {
   try {
@@ -3884,9 +3964,9 @@ Using: ${orgName}
 }
 
 // dist/src/cli/auth.js
-var CREDS_PATH = join11(HOME, ".deeplake", "credentials.json");
+var CREDS_PATH = join12(HOME, ".deeplake", "credentials.json");
 function isLoggedIn() {
-  return existsSync9(CREDS_PATH) && loadCredentials() !== null;
+  return existsSync10(CREDS_PATH) && loadCredentials() !== null;
 }
 async function ensureLoggedIn() {
   if (isLoggedIn())
@@ -3919,16 +3999,16 @@ async function maybeShowOrgChoice() {
 }
 
 // dist/src/config.js
-import { readFileSync as readFileSync7, existsSync as existsSync10 } from "node:fs";
-import { join as join12 } from "node:path";
-import { homedir as homedir3, userInfo } from "node:os";
+import { readFileSync as readFileSync8, existsSync as existsSync11 } from "node:fs";
+import { join as join13 } from "node:path";
+import { homedir as homedir4, userInfo } from "node:os";
 function loadConfig() {
-  const home = homedir3();
-  const credPath = join12(home, ".deeplake", "credentials.json");
+  const home = homedir4();
+  const credPath = join13(home, ".deeplake", "credentials.json");
   let creds = null;
-  if (existsSync10(credPath)) {
+  if (existsSync11(credPath)) {
     try {
-      creds = JSON.parse(readFileSync7(credPath, "utf-8"));
+      creds = JSON.parse(readFileSync8(credPath, "utf-8"));
     } catch {
       return null;
     }
@@ -3947,7 +4027,7 @@ function loadConfig() {
     tableName: process.env.HIVEMIND_TABLE ?? "memory",
     sessionsTableName: process.env.HIVEMIND_SESSIONS_TABLE ?? "sessions",
     skillsTableName: process.env.HIVEMIND_SKILLS_TABLE ?? "skills",
-    memoryPath: process.env.HIVEMIND_MEMORY_PATH ?? join12(home, ".deeplake", "memory")
+    memoryPath: process.env.HIVEMIND_MEMORY_PATH ?? join13(home, ".deeplake", "memory")
   };
 }
 
@@ -3956,10 +4036,10 @@ import { randomUUID } from "node:crypto";
 
 // dist/src/utils/debug.js
 import { appendFileSync } from "node:fs";
-import { join as join13 } from "node:path";
-import { homedir as homedir4 } from "node:os";
+import { join as join14 } from "node:path";
+import { homedir as homedir5 } from "node:os";
 var DEBUG = process.env.HIVEMIND_DEBUG === "1";
-var LOG = join13(homedir4(), ".deeplake", "hook-debug.log");
+var LOG = join14(homedir5(), ".deeplake", "hook-debug.log");
 function log2(tag, msg) {
   if (!DEBUG)
     return;
@@ -4721,31 +4801,31 @@ if (process.argv[1] && process.argv[1].endsWith("auth-login.js")) {
 }
 
 // dist/src/commands/skillify.js
-import { readdirSync as readdirSync4, existsSync as existsSync19, readFileSync as readFileSync13, mkdirSync as mkdirSync8, renameSync as renameSync4 } from "node:fs";
-import { homedir as homedir12 } from "node:os";
-import { dirname as dirname4, join as join22 } from "node:path";
+import { readdirSync as readdirSync4, existsSync as existsSync20, readFileSync as readFileSync14, mkdirSync as mkdirSync8, renameSync as renameSync4 } from "node:fs";
+import { homedir as homedir13 } from "node:os";
+import { dirname as dirname4, join as join23 } from "node:path";
 
 // dist/src/skillify/scope-config.js
-import { existsSync as existsSync13, mkdirSync as mkdirSync4, readFileSync as readFileSync9, writeFileSync as writeFileSync6 } from "node:fs";
-import { homedir as homedir6 } from "node:os";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync14, mkdirSync as mkdirSync4, readFileSync as readFileSync10, writeFileSync as writeFileSync7 } from "node:fs";
+import { homedir as homedir7 } from "node:os";
+import { join as join17 } from "node:path";
 
 // dist/src/skillify/legacy-migration.js
-import { existsSync as existsSync12, renameSync } from "node:fs";
-import { homedir as homedir5 } from "node:os";
-import { join as join15 } from "node:path";
+import { existsSync as existsSync13, renameSync } from "node:fs";
+import { homedir as homedir6 } from "node:os";
+import { join as join16 } from "node:path";
 var dlog = (msg) => log2("skillify-migrate", msg);
 var attempted = false;
 function migrateLegacyStateDir() {
   if (attempted)
     return;
   attempted = true;
-  const root = join15(homedir5(), ".deeplake", "state");
-  const legacy = join15(root, "skilify");
-  const current = join15(root, "skillify");
-  if (!existsSync12(legacy))
+  const root = join16(homedir6(), ".deeplake", "state");
+  const legacy = join16(root, "skilify");
+  const current = join16(root, "skillify");
+  if (!existsSync13(legacy))
     return;
-  if (existsSync12(current))
+  if (existsSync13(current))
     return;
   try {
     renameSync(legacy, current);
@@ -4761,16 +4841,16 @@ function migrateLegacyStateDir() {
 }
 
 // dist/src/skillify/scope-config.js
-var STATE_DIR = join16(homedir6(), ".deeplake", "state", "skillify");
-var CONFIG_PATH2 = join16(STATE_DIR, "config.json");
+var STATE_DIR = join17(homedir7(), ".deeplake", "state", "skillify");
+var CONFIG_PATH2 = join17(STATE_DIR, "config.json");
 var DEFAULT = { scope: "me", team: [], install: "project" };
 function loadScopeConfig() {
   migrateLegacyStateDir();
-  if (!existsSync13(CONFIG_PATH2))
+  if (!existsSync14(CONFIG_PATH2))
     return DEFAULT;
   try {
-    const raw = JSON.parse(readFileSync9(CONFIG_PATH2, "utf-8"));
-    const scope = raw.scope === "team" || raw.scope === "org" ? raw.scope : "me";
+    const raw = JSON.parse(readFileSync10(CONFIG_PATH2, "utf-8"));
+    const scope = raw.scope === "team" ? "team" : raw.scope === "org" ? "team" : "me";
     const team = Array.isArray(raw.team) ? raw.team.filter((s) => typeof s === "string") : [];
     const install = raw.install === "global" ? "global" : "project";
     return { scope, team, install };
@@ -4781,18 +4861,18 @@ function loadScopeConfig() {
 function saveScopeConfig(cfg) {
   migrateLegacyStateDir();
   mkdirSync4(STATE_DIR, { recursive: true });
-  writeFileSync6(CONFIG_PATH2, JSON.stringify(cfg, null, 2));
+  writeFileSync7(CONFIG_PATH2, JSON.stringify(cfg, null, 2));
 }
 
 // dist/src/skillify/pull.js
-import { existsSync as existsSync17, readFileSync as readFileSync12, writeFileSync as writeFileSync9, mkdirSync as mkdirSync7, renameSync as renameSync3, lstatSync as lstatSync4, readlinkSync as readlinkSync2, symlinkSync as symlinkSync2, unlinkSync as unlinkSync8 } from "node:fs";
-import { homedir as homedir10 } from "node:os";
-import { dirname as dirname3, join as join20 } from "node:path";
+import { existsSync as existsSync18, readFileSync as readFileSync13, writeFileSync as writeFileSync10, mkdirSync as mkdirSync7, renameSync as renameSync3, lstatSync as lstatSync4, readlinkSync as readlinkSync2, symlinkSync as symlinkSync2, unlinkSync as unlinkSync8 } from "node:fs";
+import { homedir as homedir11 } from "node:os";
+import { dirname as dirname3, join as join21 } from "node:path";
 
 // dist/src/skillify/skill-writer.js
-import { existsSync as existsSync14, mkdirSync as mkdirSync5, readFileSync as readFileSync10, readdirSync as readdirSync2, statSync as statSync2, writeFileSync as writeFileSync7 } from "node:fs";
-import { homedir as homedir7 } from "node:os";
-import { join as join17 } from "node:path";
+import { existsSync as existsSync15, mkdirSync as mkdirSync5, readFileSync as readFileSync11, readdirSync as readdirSync2, statSync as statSync2, writeFileSync as writeFileSync8 } from "node:fs";
+import { homedir as homedir8 } from "node:os";
+import { join as join18 } from "node:path";
 function assertValidSkillName(name) {
   if (typeof name !== "string" || name.length === 0) {
     throw new Error(`invalid skill name: empty or non-string`);
@@ -4816,18 +4896,25 @@ function parseFrontmatter(text) {
   const head = text.slice(4, end).trim();
   const body = text.slice(end + 4).replace(/^\r?\n/, "");
   const fm = { source_sessions: [] };
-  let mode = "kv";
+  let arrayKey = null;
   for (const raw of head.split(/\r?\n/)) {
-    if (mode === "sources") {
+    if (arrayKey) {
       const m2 = raw.match(/^\s+-\s+(.+)$/);
       if (m2) {
-        fm.source_sessions.push(m2[1].trim());
+        const arr = fm[arrayKey] ?? [];
+        arr.push(m2[1].trim());
+        fm[arrayKey] = arr;
         continue;
       }
-      mode = "kv";
+      arrayKey = null;
     }
     if (raw.startsWith("source_sessions:")) {
-      mode = "sources";
+      arrayKey = "source_sessions";
+      continue;
+    }
+    if (raw.startsWith("contributors:")) {
+      arrayKey = "contributors";
+      fm.contributors = [];
       continue;
     }
     const m = raw.match(/^([a-zA-Z_]+):\s*(.*)$/);
@@ -4851,22 +4938,22 @@ function parseFrontmatter(text) {
 }
 
 // dist/src/skillify/manifest.js
-import { existsSync as existsSync15, lstatSync as lstatSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync11, renameSync as renameSync2, unlinkSync as unlinkSync7, writeFileSync as writeFileSync8 } from "node:fs";
-import { homedir as homedir8 } from "node:os";
-import { dirname as dirname2, join as join18 } from "node:path";
+import { existsSync as existsSync16, lstatSync as lstatSync3, mkdirSync as mkdirSync6, readFileSync as readFileSync12, renameSync as renameSync2, unlinkSync as unlinkSync7, writeFileSync as writeFileSync9 } from "node:fs";
+import { homedir as homedir9 } from "node:os";
+import { dirname as dirname2, join as join19 } from "node:path";
 function emptyManifest() {
   return { version: 1, entries: [] };
 }
 function manifestPath() {
-  return join18(homedir8(), ".deeplake", "state", "skillify", "pulled.json");
+  return join19(homedir9(), ".deeplake", "state", "skillify", "pulled.json");
 }
 function loadManifest(path = manifestPath()) {
   migrateLegacyStateDir();
-  if (!existsSync15(path))
+  if (!existsSync16(path))
     return emptyManifest();
   let raw;
   try {
-    raw = readFileSync11(path, "utf-8");
+    raw = readFileSync12(path, "utf-8");
   } catch {
     return emptyManifest();
   }
@@ -4915,7 +5002,7 @@ function saveManifest(m, path = manifestPath()) {
   migrateLegacyStateDir();
   mkdirSync6(dirname2(path), { recursive: true });
   const tmp = `${path}.tmp`;
-  writeFileSync8(tmp, JSON.stringify(m, null, 2) + "\n", { mode: 384 });
+  writeFileSync9(tmp, JSON.stringify(m, null, 2) + "\n", { mode: 384 });
   renameSync2(tmp, path);
 }
 function recordPull(entry, path = manifestPath()) {
@@ -4958,7 +5045,7 @@ function pruneOrphanedEntries(path = manifestPath()) {
   const live = [];
   let pruned = 0;
   for (const e of m.entries) {
-    if (existsSync15(join18(e.installRoot, e.dirName))) {
+    if (existsSync16(join19(e.installRoot, e.dirName))) {
       live.push(e);
       continue;
     }
@@ -4971,26 +5058,26 @@ function pruneOrphanedEntries(path = manifestPath()) {
 }
 
 // dist/src/skillify/agent-roots.js
-import { existsSync as existsSync16 } from "node:fs";
-import { homedir as homedir9 } from "node:os";
-import { join as join19 } from "node:path";
+import { existsSync as existsSync17 } from "node:fs";
+import { homedir as homedir10 } from "node:os";
+import { join as join20 } from "node:path";
 function resolveDetected(home) {
   const out = [];
-  const codexInstalled = existsSync16(join19(home, ".codex"));
-  const piInstalled = existsSync16(join19(home, ".pi", "agent"));
-  const hermesInstalled = existsSync16(join19(home, ".hermes"));
+  const codexInstalled = existsSync17(join20(home, ".codex"));
+  const piInstalled = existsSync17(join20(home, ".pi", "agent"));
+  const hermesInstalled = existsSync17(join20(home, ".hermes"));
   if (codexInstalled || piInstalled) {
-    out.push(join19(home, ".agents", "skills"));
+    out.push(join20(home, ".agents", "skills"));
   }
   if (hermesInstalled) {
-    out.push(join19(home, ".hermes", "skills"));
+    out.push(join20(home, ".hermes", "skills"));
   }
   if (piInstalled) {
-    out.push(join19(home, ".pi", "agent", "skills"));
+    out.push(join20(home, ".pi", "agent", "skills"));
   }
   return out;
 }
-function detectAgentSkillsRoots(canonicalRoot, home = homedir9()) {
+function detectAgentSkillsRoots(canonicalRoot, home = homedir10()) {
   return resolveDetected(home).filter((p) => p !== canonicalRoot);
 }
 
@@ -5017,24 +5104,32 @@ function buildPullSql(args) {
     where.push(`name = '${esc(args.skillName)}'`);
   }
   const whereClause = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
-  return `SELECT name, project, project_key, body, version, source_agent, scope, author, description, trigger_text, source_sessions, install, created_at, updated_at FROM "${args.tableName}"${whereClause} ORDER BY project_key ASC, name ASC, version DESC`;
+  const contributorsCol = args.includeContributors === false ? "" : "contributors, ";
+  return `SELECT name, project, project_key, body, version, source_agent, scope, author, ${contributorsCol}description, trigger_text, source_sessions, install, created_at, updated_at FROM "${args.tableName}"${whereClause} ORDER BY project_key ASC, name ASC, version DESC`;
+}
+function isMissingContributorsColumnError(message) {
+  if (!message)
+    return false;
+  return /contributors.*(?:does not exist|not found|unknown)/i.test(message) || /(?:does not exist|unknown column).*contributors/i.test(message);
 }
 function isMissingTableError(message) {
   if (!message)
+    return false;
+  if (/\bcolumn\b/i.test(message))
     return false;
   return /Table does not exist|relation .* does not exist|no such table/i.test(message);
 }
 function resolvePullDestination(install, cwd) {
   if (install === "global")
-    return join20(homedir10(), ".claude", "skills");
+    return join21(homedir11(), ".claude", "skills");
   if (!cwd)
     throw new Error("install=project requires a cwd");
-  return join20(cwd, ".claude", "skills");
+  return join21(cwd, ".claude", "skills");
 }
 function fanOutSymlinks(canonicalDir, dirName, agentRoots) {
   const out = [];
   for (const root of agentRoots) {
-    const link = join20(root, dirName);
+    const link = join21(root, dirName);
     let existing;
     try {
       existing = lstatSync4(link);
@@ -5077,8 +5172,8 @@ function backfillSymlinks(installRoot) {
     return;
   const detected = detectAgentSkillsRoots(installRoot);
   for (const entry of entries) {
-    const canonical = join20(entry.installRoot, entry.dirName);
-    if (!existsSync17(canonical))
+    const canonical = join21(entry.installRoot, entry.dirName);
+    if (!existsSync18(canonical))
       continue;
     const fresh = fanOutSymlinks(canonical, entry.dirName, detected);
     if (sameSorted(fresh, entry.symlinks))
@@ -5117,11 +5212,16 @@ function selectLatestPerName(rows) {
 }
 function renderSkillFile(row) {
   const sources = parseSourceSessions(row.source_sessions);
+  const author = typeof row.author === "string" && row.author.length > 0 ? row.author : void 0;
+  const contributors = parseContributors(row.contributors);
+  const renderedContributors = contributors.length > 0 ? contributors : author ? [author] : [];
   const fm = {
     name: String(row.name ?? ""),
     description: String(row.description ?? ""),
     trigger: typeof row.trigger_text === "string" && row.trigger_text.length > 0 ? String(row.trigger_text) : void 0,
+    author,
     source_sessions: sources,
+    contributors: renderedContributors,
     version: Number(row.version ?? 1),
     created_by_agent: String(row.source_agent ?? "unknown"),
     created_at: String(row.created_at ?? (/* @__PURE__ */ new Date()).toISOString()),
@@ -5146,15 +5246,35 @@ function parseSourceSessions(v) {
   }
   return [];
 }
+function parseContributors(v) {
+  if (Array.isArray(v))
+    return v.map(String);
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed))
+        return parsed.map(String);
+    } catch {
+    }
+  }
+  return [];
+}
 function renderFrontmatter(fm) {
   const lines = ["---"];
   lines.push(`name: ${fm.name}`);
   lines.push(`description: ${JSON.stringify(fm.description)}`);
   if (fm.trigger)
     lines.push(`trigger: ${JSON.stringify(fm.trigger)}`);
+  if (fm.author)
+    lines.push(`author: ${fm.author}`);
   lines.push(`source_sessions:`);
   for (const s of fm.source_sessions)
     lines.push(`  - ${s}`);
+  if (fm.contributors && fm.contributors.length > 0) {
+    lines.push(`contributors:`);
+    for (const c of fm.contributors)
+      lines.push(`  - ${c}`);
+  }
   lines.push(`version: ${fm.version}`);
   lines.push(`created_by_agent: ${fm.created_by_agent}`);
   lines.push(`created_at: ${fm.created_at}`);
@@ -5163,10 +5283,10 @@ function renderFrontmatter(fm) {
   return lines.join("\n");
 }
 function readLocalVersion(path) {
-  if (!existsSync17(path))
+  if (!existsSync18(path))
     return null;
   try {
-    const text = readFileSync12(path, "utf-8");
+    const text = readFileSync13(path, "utf-8");
     const parsed = parseFrontmatter(text);
     if (!parsed)
       return null;
@@ -5194,10 +5314,19 @@ async function runPull(opts) {
   try {
     rows = await opts.query(sql);
   } catch (e) {
-    if (isMissingTableError(e?.message))
+    if (isMissingTableError(e?.message)) {
       rows = [];
-    else
+    } else if (isMissingContributorsColumnError(e?.message)) {
+      const legacySql = buildPullSql({
+        tableName: opts.tableName,
+        users: opts.users,
+        skillName: opts.skillName,
+        includeContributors: false
+      });
+      rows = await opts.query(legacySql);
+    } else {
       throw e;
+    }
   }
   const latest = selectLatestPerName(rows);
   const root = resolvePullDestination(opts.install, opts.cwd);
@@ -5252,8 +5381,8 @@ async function runPull(opts) {
       summary.skipped++;
       continue;
     }
-    const skillDir = join20(root, dirName);
-    const skillFile = join20(skillDir, "SKILL.md");
+    const skillDir = join21(root, dirName);
+    const skillFile = join21(skillDir, "SKILL.md");
     const remoteVersion = Number(row.version ?? 1);
     const localVersion = readLocalVersion(skillFile);
     const action = decideAction({
@@ -5265,13 +5394,13 @@ async function runPull(opts) {
     let manifestError;
     if (action === "wrote") {
       mkdirSync7(skillDir, { recursive: true });
-      if (existsSync17(skillFile)) {
+      if (existsSync18(skillFile)) {
         try {
           renameSync3(skillFile, `${skillFile}.bak`);
         } catch {
         }
       }
-      writeFileSync9(skillFile, renderSkillFile(row));
+      writeFileSync10(skillFile, renderSkillFile(row));
       const symlinks = opts.install === "global" ? fanOutSymlinks(skillDir, dirName, detectAgentSkillsRoots(root)) : [];
       try {
         recordPull({
@@ -5313,15 +5442,15 @@ async function runPull(opts) {
 }
 
 // dist/src/skillify/unpull.js
-import { existsSync as existsSync18, readdirSync as readdirSync3, rmSync as rmSync5, statSync as statSync3 } from "node:fs";
-import { homedir as homedir11 } from "node:os";
-import { join as join21 } from "node:path";
+import { existsSync as existsSync19, readdirSync as readdirSync3, rmSync as rmSync5, statSync as statSync3 } from "node:fs";
+import { homedir as homedir12 } from "node:os";
+import { join as join22 } from "node:path";
 function resolveUnpullRoot(install, cwd) {
   if (install === "global")
-    return join21(homedir11(), ".claude", "skills");
+    return join22(homedir12(), ".claude", "skills");
   if (!cwd)
     throw new Error("cwd required when install === 'project'");
-  return join21(cwd, ".claude", "skills");
+  return join22(cwd, ".claude", "skills");
 }
 function runUnpull(opts) {
   const root = resolveUnpullRoot(opts.install, opts.cwd);
@@ -5344,8 +5473,8 @@ function runUnpull(opts) {
   const entries = entriesForRoot(manifest, opts.install, root);
   for (const entry of entries) {
     summary.scanned++;
-    const path = join21(root, entry.dirName);
-    if (!existsSync18(path)) {
+    const path = join22(root, entry.dirName);
+    if (!existsSync19(path)) {
       if (!opts.dryRun) {
         unlinkSymlinks(entry.symlinks);
         removePullEntry(opts.install, entry.installRoot, entry.dirName);
@@ -5398,12 +5527,12 @@ function runUnpull(opts) {
     }
     summary.entries.push(result);
   }
-  if (existsSync18(root) && (opts.all || opts.legacyCleanup)) {
+  if (existsSync19(root) && (opts.all || opts.legacyCleanup)) {
     const manifestDirNames = new Set(entries.map((e) => e.dirName));
     for (const dirName of readdirSync3(root)) {
       if (manifestDirNames.has(dirName))
         continue;
-      const path = join21(root, dirName);
+      const path = join22(root, dirName);
       let st;
       try {
         st = statSync3(path);
@@ -5482,7 +5611,7 @@ function decideTargetForManifestEntry(entry, opts, userFilter, haveUserFilter) {
 
 // dist/src/commands/skillify.js
 function stateDir() {
-  return join22(homedir12(), ".deeplake", "state", "skillify");
+  return join23(homedir13(), ".deeplake", "state", "skillify");
 }
 function showStatus() {
   const cfg = loadScopeConfig();
@@ -5490,7 +5619,7 @@ function showStatus() {
   console.log(`team:    ${cfg.team.length === 0 ? "(empty)" : cfg.team.join(", ")}`);
   console.log(`install: ${cfg.install}  (${cfg.install === "global" ? "~/.claude/skills/" : "<project>/.claude/skills/"})`);
   const dir = stateDir();
-  if (!existsSync19(dir)) {
+  if (!existsSync20(dir)) {
     console.log(`state: (no projects tracked yet)`);
     return;
   }
@@ -5502,7 +5631,7 @@ function showStatus() {
   console.log(`state: ${files.length} project(s) tracked`);
   for (const f of files) {
     try {
-      const s = JSON.parse(readFileSync13(join22(dir, f), "utf-8"));
+      const s = JSON.parse(readFileSync14(join23(dir, f), "utf-8"));
       const last = typeof s.updatedAt === "number" ? new Date(s.updatedAt).toISOString() : s.lastDate ?? "never";
       const skills = Array.isArray(s.skillsGenerated) && s.skillsGenerated.length > 0 ? s.skillsGenerated.join(", ") : "none";
       console.log(`  - ${s.project} (counter=${s.counter}, last=${last}, skills=${skills})`);
@@ -5511,8 +5640,8 @@ function showStatus() {
   }
 }
 function setScope(scope) {
-  if (scope !== "me" && scope !== "team" && scope !== "org") {
-    console.error(`Invalid scope '${scope}'. Use one of: me, team, org`);
+  if (scope !== "me" && scope !== "team") {
+    console.error(`Invalid scope '${scope}'. Use one of: me, team`);
     process.exit(1);
   }
   const cfg = loadScopeConfig();
@@ -5529,7 +5658,7 @@ function setInstall(loc) {
   }
   const cfg = loadScopeConfig();
   saveScopeConfig({ ...cfg, install: loc });
-  const path = loc === "global" ? join22(homedir12(), ".claude", "skills") : "<cwd>/.claude/skills";
+  const path = loc === "global" ? join23(homedir13(), ".claude", "skills") : "<cwd>/.claude/skills";
   console.log(`Install location set to '${loc}'. New skills will be written to ${path}/<name>/SKILL.md.`);
 }
 function promoteSkill(name, cwd) {
@@ -5537,13 +5666,13 @@ function promoteSkill(name, cwd) {
     console.error("Usage: hivemind skillify promote <skill-name>");
     process.exit(1);
   }
-  const projectPath = join22(cwd, ".claude", "skills", name);
-  const globalPath = join22(homedir12(), ".claude", "skills", name);
-  if (!existsSync19(join22(projectPath, "SKILL.md"))) {
+  const projectPath = join23(cwd, ".claude", "skills", name);
+  const globalPath = join23(homedir13(), ".claude", "skills", name);
+  if (!existsSync20(join23(projectPath, "SKILL.md"))) {
     console.error(`Skill '${name}' not found at ${projectPath}/SKILL.md`);
     process.exit(1);
   }
-  if (existsSync19(join22(globalPath, "SKILL.md"))) {
+  if (existsSync20(join23(globalPath, "SKILL.md"))) {
     console.error(`Skill '${name}' already exists at ${globalPath}/SKILL.md \u2014 refusing to overwrite. Remove it first or rename the project skill.`);
     process.exit(1);
   }
@@ -5591,7 +5720,7 @@ function teamList() {
 function usage() {
   console.log("Usage:");
   console.log("  hivemind skillify                            show current scope, team, install, and per-project state");
-  console.log("  hivemind skillify scope <me|team|org>        set the mining scope");
+  console.log("  hivemind skillify scope <me|team>            set the mining scope");
   console.log("  hivemind skillify install <project|global>   set where new skills are written");
   console.log("  hivemind skillify promote <skill-name>       move a project skill to the global location");
   console.log("  hivemind skillify team add <username>        add a username to the team list");
@@ -5678,7 +5807,7 @@ async function pullSkills(args) {
     console.error(`pull failed: ${e?.message ?? e}`);
     process.exit(1);
   }
-  const dest = toRaw === "global" ? join22(homedir12(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
+  const dest = toRaw === "global" ? join23(homedir13(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
   const filterDesc = users.length === 0 ? "all users" : users.join(", ");
   console.log(`Destination: ${dest}`);
   console.log(`Filter:      ${filterDesc}${skillName ? ` \xB7 skill='${skillName}'` : ""}${dryRun ? " \xB7 dry-run" : ""}${force ? " \xB7 force" : ""}`);
@@ -5728,7 +5857,7 @@ async function unpullSkills(args) {
     all,
     legacyCleanup
   });
-  const dest = toRaw === "global" ? join22(homedir12(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
+  const dest = toRaw === "global" ? join23(homedir13(), ".claude", "skills") : `${process.cwd()}/.claude/skills`;
   const filterParts = [];
   if (users.length > 0)
     filterParts.push(`users=${users.join(",")}`);
@@ -5817,13 +5946,13 @@ if (process.argv[1] && process.argv[1].endsWith("skillify.js")) {
 
 // dist/src/cli/update.js
 import { execFileSync as execFileSync4 } from "node:child_process";
-import { existsSync as existsSync20, readFileSync as readFileSync15, realpathSync } from "node:fs";
+import { existsSync as existsSync21, readFileSync as readFileSync16, realpathSync } from "node:fs";
 import { dirname as dirname6, sep } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // dist/src/utils/version-check.js
-import { readFileSync as readFileSync14 } from "node:fs";
-import { dirname as dirname5, join as join23 } from "node:path";
+import { readFileSync as readFileSync15 } from "node:fs";
+import { dirname as dirname5, join as join24 } from "node:path";
 function isNewer(latest, current) {
   const parse = (v) => v.split(".").map(Number);
   const [la, lb, lc] = parse(latest);
@@ -5847,7 +5976,7 @@ function detectInstallKind(argv1) {
   for (let i = 0; i < 10; i++) {
     const pkgPath = `${dir}${sep}package.json`;
     try {
-      const pkg = JSON.parse(readFileSync15(pkgPath, "utf-8"));
+      const pkg = JSON.parse(readFileSync16(pkgPath, "utf-8"));
       if (pkg.name === PKG_NAME || pkg.name === "hivemind") {
         installDir = dir;
         break;
@@ -5868,7 +5997,7 @@ function detectInstallKind(argv1) {
   }
   let gitDir = installDir;
   for (let i = 0; i < 6; i++) {
-    if (existsSync20(`${gitDir}${sep}.git`)) {
+    if (existsSync21(`${gitDir}${sep}.git`)) {
       return { kind: "local-dev", installDir };
     }
     const parent = dirname6(gitDir);
@@ -6041,7 +6170,7 @@ Skill management (mine + share reusable Claude skills across the org):
                                            --to <project|global>, --dry-run,
                                            --all (also locally-mined),
                                            --legacy-cleanup (pre-suffix-author dirs).
-  hivemind skillify scope <me|team|org>     Set the sharing scope for newly mined skills.
+  hivemind skillify scope <me|team>         Set the sharing scope for newly mined skills.
   hivemind skillify install <project|global>  Set where new skills are written.
   hivemind skillify promote <name>          Move a project skill to the global location.
   hivemind skillify team add <username>     Add a username to the team list.
