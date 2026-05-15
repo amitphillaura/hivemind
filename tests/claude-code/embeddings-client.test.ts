@@ -1,14 +1,24 @@
 // Unit tests for the embedding client — avoid loading the model by spinning up
 // a tiny fake daemon that speaks the protocol.
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
-import { EmbedClient, getEmbedClient } from "../../src/embeddings/client.js";
+
+const enqueueNotificationMock = vi.fn();
+vi.mock("../../src/notifications/queue.js", async () => {
+  const actual = await vi.importActual<typeof import("../../src/notifications/queue.js")>(
+    "../../src/notifications/queue.js",
+  );
+  return { ...actual, enqueueNotification: (...a: unknown[]) => enqueueNotificationMock(...a) };
+});
+
+import { EmbedClient, getEmbedClient, isTransformersMissingError, _resetClientStateForTesting } from "../../src/embeddings/client.js";
 import type { DaemonRequest, DaemonResponse } from "../../src/embeddings/protocol.js";
+import { _setEnabledReaderForTesting, _resetForTesting as _resetDisableForTesting } from "../../src/embeddings/disable.js";
 
 let servers: Server[] = [];
 let tmpDirs: string[] = [];
@@ -352,5 +362,211 @@ describe("EmbedClient", () => {
 
     // Cleanup the spawned daemon process.
     try { execSync(`pkill -f ${daemonScript}`); } catch { /* already exited */ }
+  });
+});
+
+describe("isTransformersMissingError", () => {
+  it("matches the Node MODULE_NOT_FOUND form", () => {
+    expect(isTransformersMissingError("Cannot find module '@huggingface/transformers'")).toBe(true);
+    expect(isTransformersMissingError("MODULE_NOT_FOUND while loading whatever")).toBe(true);
+  });
+
+  it("matches the actionable wrapper thrown by defaultImportTransformers", () => {
+    expect(isTransformersMissingError(
+      "@huggingface/transformers is not installed anywhere reachable. Run `hivemind embeddings install`...",
+    )).toBe(true);
+  });
+
+  it("does not match unrelated daemon errors", () => {
+    expect(isTransformersMissingError("model load timeout")).toBe(false);
+    expect(isTransformersMissingError("unknown op")).toBe(false);
+    expect(isTransformersMissingError("")).toBe(false);
+  });
+});
+
+describe("EmbedClient — transformers-missing handling", () => {
+  beforeEach(() => {
+    enqueueNotificationMock.mockReset();
+    _resetClientStateForTesting();
+    _resetDisableForTesting();
+  });
+
+  afterEach(() => {
+    _resetClientStateForTesting();
+    _resetDisableForTesting();
+  });
+
+  it("enqueues an embed-deps-missing notification when daemon reports the transformers wrapper error", async () => {
+    _setEnabledReaderForTesting(() => true);
+    const dir = makeTmpDir();
+    await startFakeDaemon(dir, (req) => {
+      if (req.op === "hello") return { id: req.id, daemonPath: "/somewhere", pid: 1, protocolVersion: 1 };
+      return { id: req.id, error: "@huggingface/transformers is not installed anywhere reachable. Run `hivemind embeddings install`" };
+    });
+    const client = new EmbedClient({ socketDir: dir, timeoutMs: 500, autoSpawn: false });
+    const vec = await client.embed("hello");
+    expect(vec).toBeNull();
+    expect(enqueueNotificationMock).toHaveBeenCalledTimes(1);
+    const arg = enqueueNotificationMock.mock.calls[0][0];
+    expect(arg.id).toBe("embed-deps-missing");
+    expect(arg.severity).toBe("warn");
+    expect(arg.body).toMatch(/hivemind embeddings install/);
+    expect(arg.dedupKey.reason).toBe("transformers-missing");
+  });
+
+  it("does NOT enqueue when the user has disabled embeddings (no nag for explicit opt-out)", async () => {
+    _setEnabledReaderForTesting(() => false);
+    const dir = makeTmpDir();
+    await startFakeDaemon(dir, (req) => {
+      if (req.op === "hello") return { id: req.id, daemonPath: "/somewhere", pid: 1, protocolVersion: 1 };
+      return { id: req.id, error: "MODULE_NOT_FOUND @huggingface/transformers" };
+    });
+    const client = new EmbedClient({ socketDir: dir, timeoutMs: 500, autoSpawn: false });
+    await client.embed("hello");
+    expect(enqueueNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates within a single process: second failing call does not double-enqueue", async () => {
+    _setEnabledReaderForTesting(() => true);
+    const dir = makeTmpDir();
+    await startFakeDaemon(dir, (req) => {
+      if (req.op === "hello") return { id: req.id, daemonPath: "/somewhere", pid: 1, protocolVersion: 1 };
+      return { id: req.id, error: "Cannot find package '@huggingface/transformers'" };
+    });
+    const c1 = new EmbedClient({ socketDir: dir, timeoutMs: 500, autoSpawn: false });
+    const c2 = new EmbedClient({ socketDir: dir, timeoutMs: 500, autoSpawn: false });
+    await c1.embed("a");
+    await c2.embed("b");
+    expect(enqueueNotificationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not enqueue on a generic daemon error unrelated to transformers", async () => {
+    _setEnabledReaderForTesting(() => true);
+    const dir = makeTmpDir();
+    await startFakeDaemon(dir, (req) => {
+      if (req.op === "hello") return { id: req.id, daemonPath: "/somewhere", pid: 1, protocolVersion: 1 };
+      return { id: req.id, error: "model load timeout" };
+    });
+    const client = new EmbedClient({ socketDir: dir, timeoutMs: 500, autoSpawn: false });
+    await client.embed("hello");
+    expect(enqueueNotificationMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("EmbedClient — hello handshake / stuck daemon recycle", () => {
+  beforeEach(() => {
+    enqueueNotificationMock.mockReset();
+    _resetClientStateForTesting();
+  });
+
+  afterEach(() => {
+    _resetClientStateForTesting();
+  });
+
+  it("does NOT recycle the daemon when hello returns the expected daemonPath", async () => {
+    const dir = makeTmpDir();
+    const expectedPath = "/expected/daemon.js";
+    let lastReq: DaemonRequest | null = null;
+    await startFakeDaemon(dir, (req) => {
+      lastReq = req;
+      if (req.op === "hello") {
+        return { id: req.id, daemonPath: expectedPath, pid: 99999, protocolVersion: 1 };
+      }
+      if (req.op === "embed") return { id: req.id, embedding: [0.1, 0.2] };
+      return { id: req.id, error: "unknown" };
+    });
+    const client = new EmbedClient({
+      socketDir: dir,
+      timeoutMs: 500,
+      autoSpawn: false,
+      daemonEntry: expectedPath,
+    });
+    const vec = await client.embed("hi");
+    expect(vec).toEqual([0.1, 0.2]);
+    expect(lastReq).not.toBeNull();
+    // pidfile / sockfile should be untouched (we created the sock via the fake daemon)
+    const uid = String(process.getuid?.() ?? "test");
+    expect(existsSync(join(dir, `hivemind-embed-${uid}.sock`))).toBe(true);
+  });
+
+  it("recycles the daemon (SIGTERM + clear sock/pid) when hello returns a mismatched daemonPath", async () => {
+    const dir = makeTmpDir();
+    const uid = String(process.getuid?.() ?? "test");
+    const sockPath = join(dir, `hivemind-embed-${uid}.sock`);
+    const pidPath = join(dir, `hivemind-embed-${uid}.pid`);
+    // Pre-write a fake pidfile so the recycle path has something to read.
+    // PID 1 is the init process — SIGTERM to it will fail silently (good
+    // for test: we don't actually want to kill anything).
+    writeFileSync(pidPath, "1");
+
+    await startFakeDaemon(dir, (req) => {
+      if (req.op === "hello") {
+        // Pretend the running daemon came from an old bundle path.
+        return { id: req.id, daemonPath: "/old/bundle/embed-daemon.js", pid: 1, protocolVersion: 1 };
+      }
+      if (req.op === "embed") return { id: req.id, embedding: [0.5] };
+      return { id: req.id, error: "unknown" };
+    });
+
+    const client = new EmbedClient({
+      socketDir: dir,
+      timeoutMs: 500,
+      autoSpawn: false,
+      daemonEntry: "/new/bundle/embed-daemon.js",
+    });
+    await client.embed("hi");
+    // After recycle, both the pid file and the sock file should be gone.
+    expect(existsSync(pidPath)).toBe(false);
+    expect(existsSync(sockPath)).toBe(false);
+  });
+
+  it("only verifies hello once per EmbedClient instance (subsequent calls skip)", async () => {
+    const dir = makeTmpDir();
+    let helloCount = 0;
+    let embedCount = 0;
+    await startFakeDaemon(dir, (req) => {
+      if (req.op === "hello") {
+        helloCount += 1;
+        return { id: req.id, daemonPath: "/match", pid: 1, protocolVersion: 1 };
+      }
+      if (req.op === "embed") {
+        embedCount += 1;
+        return { id: req.id, embedding: [0.1] };
+      }
+      return { id: req.id, error: "unknown" };
+    });
+    const client = new EmbedClient({
+      socketDir: dir,
+      timeoutMs: 500,
+      autoSpawn: false,
+      daemonEntry: "/match",
+    });
+    await client.embed("a");
+    await client.embed("b");
+    await client.embed("c");
+    expect(helloCount).toBe(1);
+    expect(embedCount).toBe(3);
+  });
+
+  it("does not send hello when daemonEntry is empty (nothing to compare against)", async () => {
+    // Force the resolver to land on a falsy daemonEntry by setting the env
+    // override to empty — env wins over the SHARED_DAEMON_PATH fallback,
+    // and "" is falsy, so verifyDaemonOnce returns early.
+    const prev = process.env.HIVEMIND_EMBED_DAEMON;
+    process.env.HIVEMIND_EMBED_DAEMON = "";
+    try {
+      const dir = makeTmpDir();
+      let helloCount = 0;
+      await startFakeDaemon(dir, (req) => {
+        if (req.op === "hello") { helloCount += 1; return { id: req.id, daemonPath: "/x", pid: 1, protocolVersion: 1 }; }
+        return { id: req.id, embedding: [0.1] };
+      });
+      const client = new EmbedClient({ socketDir: dir, timeoutMs: 500, autoSpawn: false });
+      await client.embed("hi");
+      expect(helloCount).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.HIVEMIND_EMBED_DAEMON;
+      else process.env.HIVEMIND_EMBED_DAEMON = prev;
+    }
   });
 });

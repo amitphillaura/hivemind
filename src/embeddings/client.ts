@@ -14,8 +14,12 @@ import {
   type DaemonResponse,
   type EmbedKind,
   type EmbedRequest,
+  type HelloRequest,
+  type HelloResponse,
 } from "./protocol.js";
 import { log as _log } from "../utils/debug.js";
+import { enqueueNotification } from "../notifications/queue.js";
+import { embeddingsStatus } from "./disable.js";
 
 // Canonical location for the standalone daemon bundle, deposited by
 // `hivemind embeddings install`. Used as the auto-spawn fallback when
@@ -39,6 +43,15 @@ export interface ClientOptions {
   spawnWaitMs?: number;
 }
 
+// Process-local flags so an embed-deps-missing notification fires at most
+// once per process AND the stuck-daemon kill+recycle path runs at most once
+// per process (it's idempotent but the SIGTERM is wasted on every retry).
+let _signalledMissingDeps = false;
+let _recycledStuckDaemon = false;
+// Hello handshake runs at most once per (process, EmbedClient instance).
+// Stored on the instance, not module-global, because tests construct
+// many clients and each one needs its own verification cycle.
+
 export class EmbedClient {
   private socketPath: string;
   private pidPath: string;
@@ -47,6 +60,7 @@ export class EmbedClient {
   private autoSpawn: boolean;
   private spawnWaitMs: number;
   private nextId = 0;
+  private helloVerified = false;
 
   constructor(opts: ClientOptions = {}) {
     const uid = getUid();
@@ -72,6 +86,13 @@ export class EmbedClient {
    *
    * Fire-and-forget spawn on miss: if the daemon isn't up, this call returns
    * null AND kicks off a background spawn. The next call finds a ready daemon.
+   *
+   * Stuck-daemon recycle: if the daemon returns a transformers-missing
+   * error (typical after a marketplace upgrade left an older daemon process
+   * alive but with no node_modules accessible from its bundle path), we
+   * SIGTERM it and clear its sock/pid so the very next call spawns a fresh
+   * daemon from the current bundle. Without this, the stuck daemon would
+   * keep poisoning every session until its 10-minute idle-out fires.
    */
   async embed(text: string, kind: EmbedKind = "document"): Promise<number[] | null> {
     let sock: Socket;
@@ -82,11 +103,16 @@ export class EmbedClient {
       return null;
     }
     try {
+      await this.verifyDaemonOnce(sock);
       const id = String(++this.nextId);
       const req: EmbedRequest = { op: "embed", id, kind, text };
       const resp = await this.sendAndWait(sock, req);
       if (resp.error || !("embedding" in resp) || !resp.embedding) {
-        log(`embed err: ${resp.error ?? "no embedding"}`);
+        const err = resp.error ?? "no embedding";
+        log(`embed err: ${err}`);
+        if (isTransformersMissingError(err)) {
+          this.handleTransformersMissing(err);
+        }
         return null;
       }
       return resp.embedding;
@@ -97,6 +123,94 @@ export class EmbedClient {
     } finally {
       try { sock.end(); } catch { /* best-effort */ }
     }
+  }
+
+  /**
+   * Send a `hello` on first successful connect per EmbedClient instance.
+   * If the daemon answers with a path that doesn't match our configured
+   * daemonEntry — typical after a marketplace upgrade replaced the bundle
+   * — SIGTERM the daemon + clear sock/pid so the next call spawns from the
+   * current bundle. We mark `helloVerified` even on mismatch so we don't
+   * re-issue the hello against the next, fresh connection.
+   */
+  private async verifyDaemonOnce(sock: Socket): Promise<void> {
+    if (this.helloVerified) return;
+    this.helloVerified = true;
+    if (!this.daemonEntry) return; // no expectation to verify against
+    const id = String(++this.nextId);
+    const req: HelloRequest = { op: "hello", id };
+    let resp: DaemonResponse;
+    try {
+      resp = await this.sendAndWait(sock, req);
+    } catch (e: unknown) {
+      // Daemon doesn't understand `hello` (older protocol) or connection
+      // hiccup. Don't kill on a transient — let embed proceed and surface
+      // any real problem there.
+      log(`hello probe failed (treating as compatible): ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const hello = resp as HelloResponse;
+    if (!hello.daemonPath) {
+      log(`hello returned no daemonPath; skipping mismatch check`);
+      return;
+    }
+    if (hello.daemonPath === this.daemonEntry) return;
+    if (_recycledStuckDaemon) return; // already recycled this process
+    _recycledStuckDaemon = true;
+    log(`daemon path mismatch — running=${hello.daemonPath} expected=${this.daemonEntry}; recycling`);
+    this.recycleDaemon(hello.pid);
+  }
+
+  /**
+   * On a transformers-missing error from the daemon, SIGTERM the stuck
+   * daemon (the bundle daemon that can't find its deps) and clear
+   * sock/pid so the next call spawns fresh. Also enqueue a one-time
+   * notification telling the user to run `hivemind embeddings install`
+   * — but only when the user has opted in. Suppressed when
+   * embeddingsStatus() === "user-disabled" so we don't nag users who
+   * explicitly chose to turn embeddings off.
+   */
+  private handleTransformersMissing(detail: string): void {
+    if (!_recycledStuckDaemon) {
+      _recycledStuckDaemon = true;
+      this.recycleDaemon(null);
+    }
+    if (_signalledMissingDeps) return;
+    _signalledMissingDeps = true;
+    let status: string;
+    try { status = embeddingsStatus(); } catch { status = "enabled"; }
+    if (status === "user-disabled") return; // user said no, don't nag
+    try {
+      enqueueNotification({
+        id: "embed-deps-missing",
+        severity: "warn",
+        title: "Hivemind embeddings disabled — deps missing",
+        body: `Semantic memory search is off because @huggingface/transformers is not installed where the daemon can find it. Run \`hivemind embeddings install\` to enable.`,
+        dedupKey: { reason: "transformers-missing", detail: detail.slice(0, 200) },
+      });
+    } catch (e: unknown) {
+      // Best-effort: never let a notification write failure escape into
+      // the capture hot path.
+      log(`enqueue embed-deps-missing failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Best-effort SIGTERM + sock/pid cleanup. Tolerant of every missing-file
+   * combination and dead-PID cases.
+   */
+  private recycleDaemon(reportedPid: number | null): void {
+    let pid: number | null = reportedPid;
+    if (pid === null) {
+      try {
+        pid = Number.parseInt(readFileSync(this.pidPath, "utf-8").trim(), 10);
+      } catch { /* no pidfile */ }
+    }
+    if (Number.isFinite(pid) && pid !== null && pid > 0) {
+      try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+    }
+    try { unlinkSync(this.socketPath); } catch { /* not present */ }
+    try { unlinkSync(this.pidPath); } catch { /* not present */ }
   }
 
   /**
@@ -221,7 +335,7 @@ export class EmbedClient {
     throw new Error("daemon did not become ready within spawnWaitMs");
   }
 
-  private sendAndWait(sock: Socket, req: EmbedRequest): Promise<DaemonResponse> {
+  private sendAndWait(sock: Socket, req: EmbedRequest | HelloRequest): Promise<DaemonResponse> {
     return new Promise((resolve, reject) => {
       let buf = "";
       const to = setTimeout(() => {
@@ -254,6 +368,23 @@ export class EmbedClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+/**
+ * Detect daemon-side errors that indicate `@huggingface/transformers` is
+ * not resolvable from the daemon's bundle location. Matches both Node's
+ * MODULE_NOT_FOUND form and the actionable wrapper we throw from
+ * `defaultImportTransformers`.
+ */
+export function isTransformersMissingError(err: string): boolean {
+  return /(@huggingface\/transformers|hivemind embeddings install|MODULE_NOT_FOUND)/i.test(err);
+}
+
+// ── Test helpers ────────────────────────────────────────────────────────────
+
+export function _resetClientStateForTesting(): void {
+  _signalledMissingDeps = false;
+  _recycledStuckDaemon = false;
 }
 
 let singleton: EmbedClient | null = null;
