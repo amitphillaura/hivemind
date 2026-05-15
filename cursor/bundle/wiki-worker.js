@@ -423,19 +423,20 @@ var EmbedClient = class {
       return;
     }
     const hello = resp;
-    const noProtocolSupport = !hello.daemonPath;
-    const mismatch = !noProtocolSupport && hello.daemonPath !== this.daemonEntry;
-    if (!noProtocolSupport && !mismatch)
-      return;
     if (_recycledStuckDaemon)
       return;
-    _recycledStuckDaemon = true;
-    if (noProtocolSupport) {
+    if (!hello.daemonPath) {
+      _recycledStuckDaemon = true;
       log3(`daemon does not implement hello (older protocol); recycling`);
-    } else {
-      log3(`daemon path mismatch \u2014 running=${hello.daemonPath} expected=${this.daemonEntry}; recycling`);
+      this.recycleDaemon(hello.pid);
+      return;
     }
-    this.recycleDaemon(hello.pid);
+    if (hello.daemonPath !== this.daemonEntry && !existsSync3(hello.daemonPath)) {
+      _recycledStuckDaemon = true;
+      log3(`daemon path no longer on disk \u2014 running=${hello.daemonPath} (gone) expected=${this.daemonEntry}; recycling`);
+      this.recycleDaemon(hello.pid);
+      return;
+    }
   }
   /**
    * On a transformers-missing error from the daemon, SIGTERM the stuck
