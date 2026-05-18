@@ -294,17 +294,16 @@ describe("enqueueNotification cross-process safety", () => {
   const modPath = new URL("../../src/notifications/queue.ts", import.meta.url).pathname;
 
   it("cross-process producers with identical (id, dedupKey) collapse to one queue entry", async () => {
-    // Regression for CodeRabbit #8/#12: previously the dedup gate
-    // (`_signalledMissingDeps`) lived in-process, so every fresh hook
-    // process would re-enqueue the same `embed-deps-missing` warning
-    // until the next drain. Two subprocesses with identical
-    // (id, dedupKey) must now produce exactly one entry in the queue.
+    // Regression for CodeRabbit #8/#12: previously fresh hook processes
+    // would re-enqueue the same notification until the next drain. Two
+    // subprocesses with identical (id, dedupKey) must now produce exactly
+    // one entry in the queue.
     const code =
       `import("${modPath}").then(async m => { ` +
       `  await m.enqueueNotification({ ` +
-      `    id: "embed-deps-missing", ` +
+      `    id: "dedup-fixture", ` +
       `    title: "T", body: "B", ` +
-      `    dedupKey: { reason: "transformers-missing", detail: "same" } ` +
+      `    dedupKey: { reason: "same-key", detail: "same" } ` +
       `  }); ` +
       `  process.stdout.write("ok"); ` +
       `});`;
@@ -318,7 +317,7 @@ describe("enqueueNotification cross-process safety", () => {
     }
     const q = readQueue().queue;
     expect(q.length).toBe(1);
-    expect(q[0].id).toBe("embed-deps-missing");
+    expect(q[0].id).toBe("dedup-fixture");
   }, 60_000);
 
   it("N parallel producers each append exactly once (no lost writes)", async () => {

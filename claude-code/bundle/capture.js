@@ -54,13 +54,13 @@ var init_index_marker_store = __esm({
 
 // dist/src/utils/stdin.js
 function readStdin() {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve, reject) => {
     let data = "";
     process.stdin.setEncoding("utf-8");
     process.stdin.on("data", (chunk) => data += chunk);
     process.stdin.on("end", () => {
       try {
-        resolve2(JSON.parse(data));
+        resolve(JSON.parse(data));
       } catch (err) {
         reject(new Error(`Failed to parse hook input: ${err}`));
       }
@@ -176,7 +176,7 @@ function getQueryTimeoutMs() {
   return Number(process.env.HIVEMIND_QUERY_TIMEOUT_MS ?? 1e4);
 }
 function sleep(ms) {
-  return new Promise((resolve2) => setTimeout(resolve2, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function isTimeoutError(error) {
   const name = error instanceof Error ? error.name.toLowerCase() : "";
@@ -206,7 +206,7 @@ var Semaphore = class {
       this.active++;
       return;
     }
-    await new Promise((resolve2) => this.waiting.push(resolve2));
+    await new Promise((resolve) => this.waiting.push(resolve));
   }
   release() {
     this.active--;
@@ -1272,9 +1272,9 @@ function tryStopCounterTrigger(opts) {
 // dist/src/embeddings/client.js
 import { connect } from "node:net";
 import { spawn as spawn3 } from "node:child_process";
-import { openSync as openSync4, closeSync as closeSync4, writeSync as writeSync3, unlinkSync as unlinkSync4, existsSync as existsSync9, readFileSync as readFileSync9 } from "node:fs";
-import { homedir as homedir13 } from "node:os";
-import { join as join16 } from "node:path";
+import { openSync as openSync3, closeSync as closeSync3, writeSync as writeSync3, unlinkSync as unlinkSync3, existsSync as existsSync8, readFileSync as readFileSync7 } from "node:fs";
+import { homedir as homedir10 } from "node:os";
+import { join as join13 } from "node:path";
 
 // dist/src/embeddings/protocol.js
 var DEFAULT_SOCKET_DIR = "/tmp";
@@ -1287,105 +1287,384 @@ function pidPathFor(uid, dir = DEFAULT_SOCKET_DIR) {
   return `${dir}/hivemind-embed-${uid}.pid`;
 }
 
-// dist/src/notifications/queue.js
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync7, renameSync as renameSync4, mkdirSync as mkdirSync8, openSync as openSync3, closeSync as closeSync3, unlinkSync as unlinkSync3, statSync } from "node:fs";
-import { join as join13, resolve } from "node:path";
-import { homedir as homedir10 } from "node:os";
-import { setTimeout as sleep2 } from "node:timers/promises";
-var log3 = (msg) => log("notifications-queue", msg);
-var LOCK_RETRY_MAX = 50;
-var LOCK_RETRY_BASE_MS = 5;
-var LOCK_STALE_MS = 5e3;
-function queuePath() {
-  return join13(homedir10(), ".deeplake", "notifications-queue.json");
+// dist/src/embeddings/client.js
+var SHARED_DAEMON_PATH = join13(homedir10(), ".hivemind", "embed-deps", "embed-daemon.js");
+var log3 = (m) => log("embed-client", m);
+function getUid() {
+  const uid = typeof process.getuid === "function" ? process.getuid() : void 0;
+  return uid !== void 0 ? String(uid) : process.env.USER ?? "default";
 }
-function lockPath3() {
-  return `${queuePath()}.lock`;
-}
-function readQueue() {
-  try {
-    const raw = readFileSync7(queuePath(), "utf-8");
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.queue)) {
-      log3(`queue malformed \u2192 treating as empty`);
-      return { queue: [] };
-    }
-    return { queue: parsed.queue };
-  } catch {
-    return { queue: [] };
+var _recycledStuckDaemon = false;
+var EmbedClient = class {
+  socketPath;
+  pidPath;
+  timeoutMs;
+  daemonEntry;
+  autoSpawn;
+  spawnWaitMs;
+  nextId = 0;
+  helloVerified = false;
+  constructor(opts = {}) {
+    const uid = getUid();
+    const dir = opts.socketDir ?? "/tmp";
+    this.socketPath = socketPathFor(uid, dir);
+    this.pidPath = pidPathFor(uid, dir);
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_CLIENT_TIMEOUT_MS;
+    this.daemonEntry = opts.daemonEntry ?? process.env.HIVEMIND_EMBED_DAEMON ?? (existsSync8(SHARED_DAEMON_PATH) ? SHARED_DAEMON_PATH : void 0);
+    this.autoSpawn = opts.autoSpawn ?? true;
+    this.spawnWaitMs = opts.spawnWaitMs ?? 5e3;
   }
-}
-function _isQueuePathInsideHome(path, home) {
-  const r = resolve(path);
-  const h = resolve(home);
-  return r.startsWith(h + "/") || r === h;
-}
-function writeQueue(q) {
-  const path = queuePath();
-  const home = resolve(homedir10());
-  if (!_isQueuePathInsideHome(path, home)) {
-    throw new Error(`notifications-queue write blocked: ${path} is outside ${home}`);
+  /**
+   * Returns an embedding vector, or null on timeout/failure. Hooks MUST treat
+   * null as "skip embedding column" — never block the write path on us.
+   *
+   * Fire-and-forget spawn on miss: if the daemon isn't up, this call returns
+   * null AND kicks off a background spawn. The next call finds a ready daemon.
+   *
+   * Stuck-daemon recycle: if the daemon returns a transformers-missing
+   * error (typical after a marketplace upgrade left an older daemon process
+   * alive but with no node_modules accessible from its bundle path), we
+   * SIGTERM it and clear its sock/pid so the very next call spawns a fresh
+   * daemon from the current bundle. Without this, the stuck daemon would
+   * keep poisoning every session until its 10-minute idle-out fires.
+   */
+  async embed(text, kind = "document") {
+    const v = await this.embedAttempt(text, kind);
+    if (v !== "recycled")
+      return v;
+    if (!this.autoSpawn)
+      return null;
+    this.trySpawnDaemon();
+    await this.waitForDaemonReady();
+    const retry = await this.embedAttempt(text, kind);
+    return retry === "recycled" ? null : retry;
   }
-  mkdirSync8(join13(home, ".deeplake"), { recursive: true, mode: 448 });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync7(tmp, JSON.stringify(q, null, 2), { mode: 384 });
-  renameSync4(tmp, path);
-}
-async function withQueueLock(fn) {
-  const path = lockPath3();
-  mkdirSync8(join13(homedir10(), ".deeplake"), { recursive: true, mode: 448 });
-  let fd = null;
-  for (let attempt = 0; attempt < LOCK_RETRY_MAX; attempt++) {
+  /**
+   * One round-trip: connect → verify → embed. Returns:
+   *  - number[]  : embedding vector (happy path)
+   *  - null      : timeout / daemon error / transformers-missing
+   *  - "recycled": verifyDaemonOnce killed the daemon mid-call;
+   *                caller should respawn and retry once.
+   */
+  async embedAttempt(text, kind) {
+    let sock;
     try {
-      fd = openSync3(path, "wx", 384);
-      break;
-    } catch (e) {
-      const code = e.code;
-      if (code !== "EEXIST")
-        throw e;
-      try {
-        const age = Date.now() - statSync(path).mtimeMs;
-        if (age > LOCK_STALE_MS) {
-          unlinkSync3(path);
-          continue;
+      sock = await this.connectOnce();
+    } catch {
+      if (this.autoSpawn)
+        this.trySpawnDaemon();
+      return null;
+    }
+    try {
+      const recycled = await this.verifyDaemonOnce(sock);
+      if (recycled) {
+        return "recycled";
+      }
+      const id = String(++this.nextId);
+      const req = { op: "embed", id, kind, text };
+      const resp = await this.sendAndWait(sock, req);
+      if (resp.error || !("embedding" in resp) || !resp.embedding) {
+        const err = resp.error ?? "no embedding";
+        log3(`embed err: ${err}`);
+        if (isTransformersMissingError(err)) {
+          this.handleTransformersMissing(err);
         }
+        return null;
+      }
+      return resp.embedding;
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      log3(`embed failed: ${err}`);
+      return null;
+    } finally {
+      try {
+        sock.end();
       } catch {
       }
-      const delay = LOCK_RETRY_BASE_MS * (attempt + 1);
-      await sleep2(delay);
     }
   }
-  if (fd === null) {
-    log3(`lock acquisition gave up after ${LOCK_RETRY_MAX} attempts \u2014 proceeding unlocked (last-writer-wins)`);
-    return fn();
+  /**
+   * Poll for the sock file to come back after `trySpawnDaemon` — used by
+   * the recycle retry path. Best-effort: caps at `spawnWaitMs` and
+   * returns regardless so the retry attempt can run.
+   */
+  async waitForDaemonReady() {
+    const deadline = Date.now() + this.spawnWaitMs;
+    while (Date.now() < deadline) {
+      if (existsSync8(this.socketPath))
+        return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
-  try {
-    return fn();
-  } finally {
+  /**
+   * Send a `hello` on first successful connect per EmbedClient instance.
+   * If the daemon answers with a path that doesn't match our configured
+   * daemonEntry — typical after a marketplace upgrade replaced the bundle
+   * — SIGTERM the daemon + clear sock/pid so the next call spawns from the
+   * current bundle.
+   *
+   * `helloVerified` is set ONLY after we've seen a compatible response,
+   * so a transient probe failure or a recycle-triggering mismatch leaves
+   * the flag false; the next reconnect re-runs verification against
+   * whatever daemon is then live (typically the fresh spawn).
+   */
+  async verifyDaemonOnce(sock) {
+    if (this.helloVerified)
+      return false;
+    if (!this.daemonEntry) {
+      this.helloVerified = true;
+      return false;
+    }
+    const id = String(++this.nextId);
+    const req = { op: "hello", id };
+    let resp;
     try {
-      closeSync3(fd);
-    } catch {
+      resp = await this.sendAndWait(sock, req);
+    } catch (e) {
+      log3(`hello probe failed (inconclusive, will retry next connect): ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     }
-    try {
-      unlinkSync3(path);
-    } catch {
+    const hello = resp;
+    if (_recycledStuckDaemon) {
+      return false;
     }
-  }
-}
-function sameDedupKey(a, b) {
-  if (a.id !== b.id)
+    if (!hello.daemonPath) {
+      _recycledStuckDaemon = true;
+      log3(`daemon does not implement hello (older protocol); recycling`);
+      this.recycleDaemon(hello.pid);
+      return true;
+    }
+    if (hello.daemonPath !== this.daemonEntry && !existsSync8(hello.daemonPath)) {
+      _recycledStuckDaemon = true;
+      log3(`daemon path no longer on disk \u2014 running=${hello.daemonPath} (gone) expected=${this.daemonEntry}; recycling`);
+      this.recycleDaemon(hello.pid);
+      return true;
+    }
+    this.helloVerified = true;
     return false;
-  return JSON.stringify(a.dedupKey) === JSON.stringify(b.dedupKey);
-}
-async function enqueueNotification(n) {
-  await withQueueLock(() => {
-    const q = readQueue();
-    if (q.queue.some((existing) => sameDedupKey(existing, n))) {
+  }
+  /**
+   * On a transformers-missing error from the daemon, SIGTERM the stuck
+   * daemon (the bundle daemon that can't find its deps) and clear
+   * sock/pid so the next call spawns fresh.
+   *
+   * Previously this also enqueued a user-visible "Hivemind embeddings
+   * disabled — deps missing" notification telling the user to run
+   * `hivemind embeddings install`. The notification was removed because
+   * (a) the recycle alone often fixes the issue silently, and (b) the
+   * warning kept stacking on top of the primary session-start banner
+   * which clashed with the single-slot priority model. The `detail`
+   * argument is retained for future telemetry / debug logging.
+   */
+  handleTransformersMissing(_detail) {
+    if (!_recycledStuckDaemon) {
+      _recycledStuckDaemon = true;
+      this.recycleDaemon(null);
+    }
+  }
+  /**
+   * Best-effort SIGTERM + sock/pid cleanup. Tolerant of every missing-file
+   * combination and dead-PID cases.
+   *
+   * Identity check: gate the SIGTERM on the daemon's socket file still
+   * existing. We know the daemon was alive moments ago (we either just
+   * got a hello response or the caller saw a transformers-missing error
+   * the daemon emitted), but if the socket file is gone by the time we
+   * try to kill, the daemon process is also gone and the PID we
+   * captured may already have been recycled by the OS to an unrelated
+   * user process. Mirrors the gate added to `killEmbedDaemon` in the
+   * CLI — same failure mode, rarer trigger.
+   */
+  recycleDaemon(reportedPid) {
+    let pid = reportedPid;
+    if (pid === null) {
+      try {
+        pid = Number.parseInt(readFileSync7(this.pidPath, "utf-8").trim(), 10);
+      } catch {
+      }
+    }
+    if (Number.isFinite(pid) && pid !== null && pid > 0 && existsSync8(this.socketPath)) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+      }
+    } else if (pid !== null) {
+      log3(`recycle: socket gone, skipping SIGTERM on possibly-stale pid ${pid}`);
+    }
+    try {
+      unlinkSync3(this.socketPath);
+    } catch {
+    }
+    try {
+      unlinkSync3(this.pidPath);
+    } catch {
+    }
+  }
+  /**
+   * Wait up to spawnWaitMs for the daemon to accept connections, spawning if
+   * necessary. Meant for SessionStart / long-running batches — not the hot path.
+   */
+  async warmup() {
+    try {
+      const s = await this.connectOnce();
+      s.end();
+      return true;
+    } catch {
+      if (!this.autoSpawn)
+        return false;
+      this.trySpawnDaemon();
+      try {
+        const s = await this.waitForSocket();
+        s.end();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+  connectOnce() {
+    return new Promise((resolve, reject) => {
+      const sock = connect(this.socketPath);
+      const to = setTimeout(() => {
+        sock.destroy();
+        reject(new Error("connect timeout"));
+      }, this.timeoutMs);
+      sock.once("connect", () => {
+        clearTimeout(to);
+        resolve(sock);
+      });
+      sock.once("error", (e) => {
+        clearTimeout(to);
+        reject(e);
+      });
+    });
+  }
+  trySpawnDaemon() {
+    let fd;
+    try {
+      fd = openSync3(this.pidPath, "wx", 384);
+      writeSync3(fd, String(process.pid));
+    } catch (e) {
+      if (this.isPidFileStale()) {
+        try {
+          unlinkSync3(this.pidPath);
+        } catch {
+        }
+        try {
+          fd = openSync3(this.pidPath, "wx", 384);
+          writeSync3(fd, String(process.pid));
+        } catch {
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+    if (!this.daemonEntry || !existsSync8(this.daemonEntry)) {
+      log3(`daemonEntry not configured or missing: ${this.daemonEntry}`);
+      try {
+        closeSync3(fd);
+        unlinkSync3(this.pidPath);
+      } catch {
+      }
       return;
     }
-    q.queue.push(n);
-    writeQueue(q);
-  });
+    try {
+      const child = spawn3(process.execPath, [this.daemonEntry], {
+        detached: true,
+        stdio: "ignore",
+        env: process.env
+      });
+      child.unref();
+      log3(`spawned daemon pid=${child.pid}`);
+    } finally {
+      closeSync3(fd);
+    }
+  }
+  isPidFileStale() {
+    try {
+      const raw = readFileSync7(this.pidPath, "utf-8").trim();
+      const pid = Number(raw);
+      if (!pid || Number.isNaN(pid))
+        return true;
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+  async waitForSocket() {
+    const deadline = Date.now() + this.spawnWaitMs;
+    let delay = 30;
+    while (Date.now() < deadline) {
+      await sleep2(delay);
+      delay = Math.min(delay * 1.5, 300);
+      if (!existsSync8(this.socketPath))
+        continue;
+      try {
+        return await this.connectOnce();
+      } catch {
+      }
+    }
+    throw new Error("daemon did not become ready within spawnWaitMs");
+  }
+  sendAndWait(sock, req) {
+    return new Promise((resolve, reject) => {
+      let buf = "";
+      const to = setTimeout(() => {
+        sock.destroy();
+        reject(new Error("request timeout"));
+      }, this.timeoutMs);
+      sock.setEncoding("utf-8");
+      sock.on("data", (chunk) => {
+        buf += chunk;
+        const nl = buf.indexOf("\n");
+        if (nl === -1)
+          return;
+        const line = buf.slice(0, nl);
+        clearTimeout(to);
+        try {
+          resolve(JSON.parse(line));
+        } catch (e) {
+          reject(e);
+        }
+      });
+      sock.on("error", (e) => {
+        clearTimeout(to);
+        reject(e);
+      });
+      sock.on("end", () => {
+        clearTimeout(to);
+        reject(new Error("connection closed without response"));
+      });
+      sock.write(JSON.stringify(req) + "\n");
+    });
+  }
+};
+function sleep2(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+function isTransformersMissingError(err) {
+  if (/hivemind embeddings install/i.test(err))
+    return true;
+  return /@huggingface\/transformers/i.test(err);
+}
+
+// dist/src/embeddings/sql.js
+function embeddingSqlLiteral(vec) {
+  if (!vec || vec.length === 0)
+    return "NULL";
+  const parts = [];
+  for (const v of vec) {
+    if (!Number.isFinite(v))
+      return "NULL";
+    parts.push(String(v));
+  }
+  return `ARRAY[${parts.join(",")}]::float4[]`;
 }
 
 // dist/src/embeddings/disable.js
@@ -1395,7 +1674,7 @@ import { join as join15 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // dist/src/user-config.js
-import { existsSync as existsSync8, mkdirSync as mkdirSync9, readFileSync as readFileSync8, renameSync as renameSync5, writeFileSync as writeFileSync8 } from "node:fs";
+import { existsSync as existsSync9, mkdirSync as mkdirSync8, readFileSync as readFileSync8, renameSync as renameSync4, writeFileSync as writeFileSync7 } from "node:fs";
 import { homedir as homedir11 } from "node:os";
 import { dirname as dirname4, join as join14 } from "node:path";
 var _configPath = () => process.env.HIVEMIND_CONFIG_PATH ?? join14(homedir11(), ".deeplake", "config.json");
@@ -1405,7 +1684,7 @@ function readUserConfig() {
   if (_cache !== null)
     return _cache;
   const path = _configPath();
-  if (!existsSync8(path)) {
+  if (!existsSync9(path)) {
     _cache = {};
     return _cache;
   }
@@ -1423,11 +1702,11 @@ function writeUserConfig(patch) {
   const merged = deepMerge(current, patch);
   const path = _configPath();
   const dir = dirname4(path);
-  if (!existsSync8(dir))
-    mkdirSync9(dir, { recursive: true });
+  if (!existsSync9(dir))
+    mkdirSync8(dir, { recursive: true });
   const tmp = `${path}.tmp.${process.pid}`;
-  writeFileSync8(tmp, JSON.stringify(merged, null, 2) + "\n", "utf-8");
-  renameSync5(tmp, path);
+  writeFileSync7(tmp, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+  renameSync4(tmp, path);
   _cache = merged;
   return merged;
 }
@@ -1506,414 +1785,17 @@ function embeddingsDisabled() {
   return embeddingsStatus() !== "enabled";
 }
 
-// dist/src/embeddings/client.js
-var SHARED_DAEMON_PATH = join16(homedir13(), ".hivemind", "embed-deps", "embed-daemon.js");
-var log4 = (m) => log("embed-client", m);
-function getUid() {
-  const uid = typeof process.getuid === "function" ? process.getuid() : void 0;
-  return uid !== void 0 ? String(uid) : process.env.USER ?? "default";
-}
-var _signalledMissingDeps = false;
-var _recycledStuckDaemon = false;
-var EmbedClient = class {
-  socketPath;
-  pidPath;
-  timeoutMs;
-  daemonEntry;
-  autoSpawn;
-  spawnWaitMs;
-  nextId = 0;
-  helloVerified = false;
-  constructor(opts = {}) {
-    const uid = getUid();
-    const dir = opts.socketDir ?? "/tmp";
-    this.socketPath = socketPathFor(uid, dir);
-    this.pidPath = pidPathFor(uid, dir);
-    this.timeoutMs = opts.timeoutMs ?? DEFAULT_CLIENT_TIMEOUT_MS;
-    this.daemonEntry = opts.daemonEntry ?? process.env.HIVEMIND_EMBED_DAEMON ?? (existsSync9(SHARED_DAEMON_PATH) ? SHARED_DAEMON_PATH : void 0);
-    this.autoSpawn = opts.autoSpawn ?? true;
-    this.spawnWaitMs = opts.spawnWaitMs ?? 5e3;
-  }
-  /**
-   * Returns an embedding vector, or null on timeout/failure. Hooks MUST treat
-   * null as "skip embedding column" — never block the write path on us.
-   *
-   * Fire-and-forget spawn on miss: if the daemon isn't up, this call returns
-   * null AND kicks off a background spawn. The next call finds a ready daemon.
-   *
-   * Stuck-daemon recycle: if the daemon returns a transformers-missing
-   * error (typical after a marketplace upgrade left an older daemon process
-   * alive but with no node_modules accessible from its bundle path), we
-   * SIGTERM it and clear its sock/pid so the very next call spawns a fresh
-   * daemon from the current bundle. Without this, the stuck daemon would
-   * keep poisoning every session until its 10-minute idle-out fires.
-   */
-  async embed(text, kind = "document") {
-    const v = await this.embedAttempt(text, kind);
-    if (v !== "recycled")
-      return v;
-    if (!this.autoSpawn)
-      return null;
-    this.trySpawnDaemon();
-    await this.waitForDaemonReady();
-    const retry = await this.embedAttempt(text, kind);
-    return retry === "recycled" ? null : retry;
-  }
-  /**
-   * One round-trip: connect → verify → embed. Returns:
-   *  - number[]  : embedding vector (happy path)
-   *  - null      : timeout / daemon error / transformers-missing
-   *  - "recycled": verifyDaemonOnce killed the daemon mid-call;
-   *                caller should respawn and retry once.
-   */
-  async embedAttempt(text, kind) {
-    let sock;
-    try {
-      sock = await this.connectOnce();
-    } catch {
-      if (this.autoSpawn)
-        this.trySpawnDaemon();
-      return null;
-    }
-    try {
-      const recycled = await this.verifyDaemonOnce(sock);
-      if (recycled) {
-        return "recycled";
-      }
-      const id = String(++this.nextId);
-      const req = { op: "embed", id, kind, text };
-      const resp = await this.sendAndWait(sock, req);
-      if (resp.error || !("embedding" in resp) || !resp.embedding) {
-        const err = resp.error ?? "no embedding";
-        log4(`embed err: ${err}`);
-        if (isTransformersMissingError(err)) {
-          this.handleTransformersMissing(err);
-        }
-        return null;
-      }
-      return resp.embedding;
-    } catch (e) {
-      const err = e instanceof Error ? e.message : String(e);
-      log4(`embed failed: ${err}`);
-      return null;
-    } finally {
-      try {
-        sock.end();
-      } catch {
-      }
-    }
-  }
-  /**
-   * Poll for the sock file to come back after `trySpawnDaemon` — used by
-   * the recycle retry path. Best-effort: caps at `spawnWaitMs` and
-   * returns regardless so the retry attempt can run.
-   */
-  async waitForDaemonReady() {
-    const deadline = Date.now() + this.spawnWaitMs;
-    while (Date.now() < deadline) {
-      if (existsSync9(this.socketPath))
-        return;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-  /**
-   * Send a `hello` on first successful connect per EmbedClient instance.
-   * If the daemon answers with a path that doesn't match our configured
-   * daemonEntry — typical after a marketplace upgrade replaced the bundle
-   * — SIGTERM the daemon + clear sock/pid so the next call spawns from the
-   * current bundle.
-   *
-   * `helloVerified` is set ONLY after we've seen a compatible response,
-   * so a transient probe failure or a recycle-triggering mismatch leaves
-   * the flag false; the next reconnect re-runs verification against
-   * whatever daemon is then live (typically the fresh spawn).
-   */
-  async verifyDaemonOnce(sock) {
-    if (this.helloVerified)
-      return false;
-    if (!this.daemonEntry) {
-      this.helloVerified = true;
-      return false;
-    }
-    const id = String(++this.nextId);
-    const req = { op: "hello", id };
-    let resp;
-    try {
-      resp = await this.sendAndWait(sock, req);
-    } catch (e) {
-      log4(`hello probe failed (inconclusive, will retry next connect): ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    }
-    const hello = resp;
-    if (_recycledStuckDaemon) {
-      return false;
-    }
-    if (!hello.daemonPath) {
-      _recycledStuckDaemon = true;
-      log4(`daemon does not implement hello (older protocol); recycling`);
-      this.recycleDaemon(hello.pid);
-      return true;
-    }
-    if (hello.daemonPath !== this.daemonEntry && !existsSync9(hello.daemonPath)) {
-      _recycledStuckDaemon = true;
-      log4(`daemon path no longer on disk \u2014 running=${hello.daemonPath} (gone) expected=${this.daemonEntry}; recycling`);
-      this.recycleDaemon(hello.pid);
-      return true;
-    }
-    this.helloVerified = true;
-    return false;
-  }
-  /**
-   * On a transformers-missing error from the daemon, SIGTERM the stuck
-   * daemon (the bundle daemon that can't find its deps) and clear
-   * sock/pid so the next call spawns fresh. Also enqueue a one-time
-   * notification telling the user to run `hivemind embeddings install`
-   * — but only when the user has opted in. Suppressed when
-   * embeddingsStatus() === "user-disabled" so we don't nag users who
-   * explicitly chose to turn embeddings off.
-   */
-  handleTransformersMissing(detail) {
-    if (!_recycledStuckDaemon) {
-      _recycledStuckDaemon = true;
-      this.recycleDaemon(null);
-    }
-    if (_signalledMissingDeps)
-      return;
-    _signalledMissingDeps = true;
-    let status;
-    try {
-      status = embeddingsStatus();
-    } catch {
-      status = "enabled";
-    }
-    if (status === "user-disabled")
-      return;
-    enqueueNotification({
-      id: "embed-deps-missing",
-      severity: "warn",
-      title: "Hivemind embeddings disabled \u2014 deps missing",
-      body: `Semantic memory search is off because @huggingface/transformers is not installed where the daemon can find it. Run \`hivemind embeddings install\` to enable.`,
-      dedupKey: { reason: "transformers-missing", detail: detail.slice(0, 200) }
-    }).catch((e) => {
-      log4(`enqueue embed-deps-missing failed: ${e instanceof Error ? e.message : String(e)}`);
-    });
-  }
-  /**
-   * Best-effort SIGTERM + sock/pid cleanup. Tolerant of every missing-file
-   * combination and dead-PID cases.
-   *
-   * Identity check: gate the SIGTERM on the daemon's socket file still
-   * existing. We know the daemon was alive moments ago (we either just
-   * got a hello response or the caller saw a transformers-missing error
-   * the daemon emitted), but if the socket file is gone by the time we
-   * try to kill, the daemon process is also gone and the PID we
-   * captured may already have been recycled by the OS to an unrelated
-   * user process. Mirrors the gate added to `killEmbedDaemon` in the
-   * CLI — same failure mode, rarer trigger.
-   */
-  recycleDaemon(reportedPid) {
-    let pid = reportedPid;
-    if (pid === null) {
-      try {
-        pid = Number.parseInt(readFileSync9(this.pidPath, "utf-8").trim(), 10);
-      } catch {
-      }
-    }
-    if (Number.isFinite(pid) && pid !== null && pid > 0 && existsSync9(this.socketPath)) {
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-      }
-    } else if (pid !== null) {
-      log4(`recycle: socket gone, skipping SIGTERM on possibly-stale pid ${pid}`);
-    }
-    try {
-      unlinkSync4(this.socketPath);
-    } catch {
-    }
-    try {
-      unlinkSync4(this.pidPath);
-    } catch {
-    }
-  }
-  /**
-   * Wait up to spawnWaitMs for the daemon to accept connections, spawning if
-   * necessary. Meant for SessionStart / long-running batches — not the hot path.
-   */
-  async warmup() {
-    try {
-      const s = await this.connectOnce();
-      s.end();
-      return true;
-    } catch {
-      if (!this.autoSpawn)
-        return false;
-      this.trySpawnDaemon();
-      try {
-        const s = await this.waitForSocket();
-        s.end();
-        return true;
-      } catch {
-        return false;
-      }
-    }
-  }
-  connectOnce() {
-    return new Promise((resolve2, reject) => {
-      const sock = connect(this.socketPath);
-      const to = setTimeout(() => {
-        sock.destroy();
-        reject(new Error("connect timeout"));
-      }, this.timeoutMs);
-      sock.once("connect", () => {
-        clearTimeout(to);
-        resolve2(sock);
-      });
-      sock.once("error", (e) => {
-        clearTimeout(to);
-        reject(e);
-      });
-    });
-  }
-  trySpawnDaemon() {
-    let fd;
-    try {
-      fd = openSync4(this.pidPath, "wx", 384);
-      writeSync3(fd, String(process.pid));
-    } catch (e) {
-      if (this.isPidFileStale()) {
-        try {
-          unlinkSync4(this.pidPath);
-        } catch {
-        }
-        try {
-          fd = openSync4(this.pidPath, "wx", 384);
-          writeSync3(fd, String(process.pid));
-        } catch {
-          return;
-        }
-      } else {
-        return;
-      }
-    }
-    if (!this.daemonEntry || !existsSync9(this.daemonEntry)) {
-      log4(`daemonEntry not configured or missing: ${this.daemonEntry}`);
-      try {
-        closeSync4(fd);
-        unlinkSync4(this.pidPath);
-      } catch {
-      }
-      return;
-    }
-    try {
-      const child = spawn3(process.execPath, [this.daemonEntry], {
-        detached: true,
-        stdio: "ignore",
-        env: process.env
-      });
-      child.unref();
-      log4(`spawned daemon pid=${child.pid}`);
-    } finally {
-      closeSync4(fd);
-    }
-  }
-  isPidFileStale() {
-    try {
-      const raw = readFileSync9(this.pidPath, "utf-8").trim();
-      const pid = Number(raw);
-      if (!pid || Number.isNaN(pid))
-        return true;
-      try {
-        process.kill(pid, 0);
-        return false;
-      } catch {
-        return true;
-      }
-    } catch {
-      return true;
-    }
-  }
-  async waitForSocket() {
-    const deadline = Date.now() + this.spawnWaitMs;
-    let delay = 30;
-    while (Date.now() < deadline) {
-      await sleep3(delay);
-      delay = Math.min(delay * 1.5, 300);
-      if (!existsSync9(this.socketPath))
-        continue;
-      try {
-        return await this.connectOnce();
-      } catch {
-      }
-    }
-    throw new Error("daemon did not become ready within spawnWaitMs");
-  }
-  sendAndWait(sock, req) {
-    return new Promise((resolve2, reject) => {
-      let buf = "";
-      const to = setTimeout(() => {
-        sock.destroy();
-        reject(new Error("request timeout"));
-      }, this.timeoutMs);
-      sock.setEncoding("utf-8");
-      sock.on("data", (chunk) => {
-        buf += chunk;
-        const nl = buf.indexOf("\n");
-        if (nl === -1)
-          return;
-        const line = buf.slice(0, nl);
-        clearTimeout(to);
-        try {
-          resolve2(JSON.parse(line));
-        } catch (e) {
-          reject(e);
-        }
-      });
-      sock.on("error", (e) => {
-        clearTimeout(to);
-        reject(e);
-      });
-      sock.on("end", () => {
-        clearTimeout(to);
-        reject(new Error("connection closed without response"));
-      });
-      sock.write(JSON.stringify(req) + "\n");
-    });
-  }
-};
-function sleep3(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-function isTransformersMissingError(err) {
-  if (/hivemind embeddings install/i.test(err))
-    return true;
-  return /@huggingface\/transformers/i.test(err);
-}
-
-// dist/src/embeddings/sql.js
-function embeddingSqlLiteral(vec) {
-  if (!vec || vec.length === 0)
-    return "NULL";
-  const parts = [];
-  for (const v of vec) {
-    if (!Number.isFinite(v))
-      return "NULL";
-    parts.push(String(v));
-  }
-  return `ARRAY[${parts.join(",")}]::float4[]`;
-}
-
 // dist/src/embeddings/self-heal.js
-import { existsSync as existsSync10, lstatSync, mkdirSync as mkdirSync10, readlinkSync, renameSync as renameSync6, rmSync, symlinkSync, statSync as statSync2 } from "node:fs";
-import { homedir as homedir14 } from "node:os";
-import { basename as basename2, dirname as dirname5, join as join17 } from "node:path";
+import { existsSync as existsSync10, lstatSync, mkdirSync as mkdirSync9, readlinkSync, renameSync as renameSync5, rmSync, symlinkSync, statSync } from "node:fs";
+import { homedir as homedir13 } from "node:os";
+import { basename as basename2, dirname as dirname5, join as join16 } from "node:path";
 function ensurePluginNodeModulesLink(opts) {
   if (basename2(opts.bundleDir) !== "bundle") {
     return { kind: "not-bundle-layout", bundleDir: opts.bundleDir };
   }
-  const target = opts.sharedNodeModules ?? join17(homedir14(), ".hivemind", "embed-deps", "node_modules");
+  const target = opts.sharedNodeModules ?? join16(homedir13(), ".hivemind", "embed-deps", "node_modules");
   const pluginDir = dirname5(opts.bundleDir);
-  const link = join17(pluginDir, "node_modules");
+  const link = join16(pluginDir, "node_modules");
   if (!existsSync10(target)) {
     return { kind: "shared-deps-missing", target };
   }
@@ -1934,7 +1816,7 @@ function ensurePluginNodeModulesLink(opts) {
       return { kind: "already-linked", target, link };
     }
     try {
-      statSync2(link);
+      statSync(link);
       return { kind: "linked-elsewhere", link, existingTarget };
     } catch {
       try {
@@ -1954,14 +1836,14 @@ function createSymlinkAtomic(target, link) {
   try {
     const parent = dirname5(link);
     if (!existsSync10(parent))
-      mkdirSync10(parent, { recursive: true });
+      mkdirSync9(parent, { recursive: true });
     const tmp = `${link}.tmp.${process.pid}`;
     try {
       rmSync(tmp, { force: true });
     } catch {
     }
     symlinkSync(target, tmp);
-    renameSync6(tmp, link);
+    renameSync5(tmp, link);
     return { kind: "linked", target, link };
   } catch (e) {
     return { kind: "error", detail: e instanceof Error ? e.message : String(e) };
@@ -1970,10 +1852,10 @@ function createSymlinkAtomic(target, link) {
 
 // dist/src/hooks/capture.js
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { dirname as dirname6, join as join18 } from "node:path";
-var log5 = (msg) => log("capture", msg);
+import { dirname as dirname6, join as join17 } from "node:path";
+var log4 = (msg) => log("capture", msg);
 function resolveEmbedDaemonPath() {
-  return join18(dirname6(fileURLToPath3(import.meta.url)), "embeddings", "embed-daemon.js");
+  return join17(dirname6(fileURLToPath3(import.meta.url)), "embeddings", "embed-daemon.js");
 }
 var __bundleDir = dirname6(fileURLToPath3(import.meta.url));
 var PLUGIN_VERSION = getInstalledVersion(__bundleDir, ".claude-plugin") ?? "";
@@ -1990,7 +1872,7 @@ async function main() {
   const input = await readStdin();
   const config = loadConfig();
   if (!config) {
-    log5("no config");
+    log4("no config");
     return;
   }
   const sessionsTable = config.sessionsTableName;
@@ -2008,7 +1890,7 @@ async function main() {
   };
   let entry;
   if (input.prompt !== void 0) {
-    log5(`user session=${input.session_id}`);
+    log4(`user session=${input.session_id}`);
     entry = {
       id: crypto.randomUUID(),
       ...meta,
@@ -2016,7 +1898,7 @@ async function main() {
       content: input.prompt
     };
   } else if (input.tool_name !== void 0) {
-    log5(`tool=${input.tool_name} session=${input.session_id}`);
+    log4(`tool=${input.tool_name} session=${input.session_id}`);
     entry = {
       id: crypto.randomUUID(),
       ...meta,
@@ -2027,7 +1909,7 @@ async function main() {
       tool_response: JSON.stringify(input.tool_response)
     };
   } else if (input.last_assistant_message !== void 0) {
-    log5(`assistant session=${input.session_id}`);
+    log4(`assistant session=${input.session_id}`);
     entry = {
       id: crypto.randomUUID(),
       ...meta,
@@ -2036,12 +1918,12 @@ async function main() {
       ...input.agent_transcript_path ? { agent_transcript_path: input.agent_transcript_path } : {}
     };
   } else {
-    log5("unknown event, skipping");
+    log4("unknown event, skipping");
     return;
   }
   const sessionPath = buildSessionPath(config, input.session_id);
   const line = JSON.stringify(entry);
-  log5(`writing to ${sessionPath}`);
+  log4(`writing to ${sessionPath}`);
   const projectName = (input.cwd ?? "").split("/").pop() || "unknown";
   const filename = sessionPath.split("/").pop() ?? "";
   const jsonForSql = line.replace(/'/g, "''");
@@ -2052,14 +1934,14 @@ async function main() {
     await api.query(insertSql);
   } catch (e) {
     if (e.message?.includes("permission denied") || e.message?.includes("does not exist")) {
-      log5("table missing, creating and retrying");
+      log4("table missing, creating and retrying");
       await api.ensureSessionsTable(sessionsTable);
       await api.query(insertSql);
     } else {
       throw e;
     }
   }
-  log5("capture ok \u2192 cloud");
+  log4("capture ok \u2192 cloud");
   maybeTriggerPeriodicSummary(input.session_id, input.cwd ?? "", config);
   if (input.hook_event_name === "Stop") {
     if (process.env.HIVEMIND_WIKI_WORKER === "1")
@@ -2082,7 +1964,7 @@ function maybeTriggerPeriodicSummary(sessionId, cwd, config) {
     if (!shouldTrigger(state, cfg))
       return;
     if (!tryAcquireLock(sessionId)) {
-      log5(`periodic trigger suppressed (lock held) session=${sessionId}`);
+      log4(`periodic trigger suppressed (lock held) session=${sessionId}`);
       return;
     }
     wikiLog(`Periodic: threshold hit (total=${state.totalCount}, since=${state.totalCount - state.lastSummaryCount}, N=${cfg.everyNMessages}, hours=${cfg.everyHours})`);
@@ -2095,19 +1977,19 @@ function maybeTriggerPeriodicSummary(sessionId, cwd, config) {
         reason: "Periodic"
       });
     } catch (e) {
-      log5(`periodic spawn failed: ${e.message}`);
+      log4(`periodic spawn failed: ${e.message}`);
       try {
         releaseLock(sessionId);
       } catch (releaseErr) {
-        log5(`releaseLock after periodic spawn failure also failed: ${releaseErr.message}`);
+        log4(`releaseLock after periodic spawn failure also failed: ${releaseErr.message}`);
       }
       throw e;
     }
   } catch (e) {
-    log5(`periodic trigger error: ${e.message}`);
+    log4(`periodic trigger error: ${e.message}`);
   }
 }
 main().catch((e) => {
-  log5(`fatal: ${e.message}`);
+  log4(`fatal: ${e.message}`);
   process.exit(0);
 });
