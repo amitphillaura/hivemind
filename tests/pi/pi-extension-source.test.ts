@@ -39,7 +39,29 @@ describe("pi extension — embedding wiring", () => {
   });
 
   it("uses the same UID-keyed socket convention as EmbedClient", () => {
-    expect(PI_SRC).toMatch(/\/tmp\/hivemind-embed-\$\{uid\}\.sock/);
+    // Pattern: /tmp/hivemind-embed-${SOMETHING_UID}.sock — the UID identifier
+    // moved from a closure-scoped `uid` to the module-level `EMBED_UID` when
+    // the spawn-on-miss helper was added (issue #178), but the convention
+    // itself — UID-keyed per-user socket under /tmp — must stay locked.
+    expect(PI_SRC).toMatch(/\/tmp\/hivemind-embed-\$\{[A-Z_a-z]*[Uu][Ii][Dd][A-Z_a-z]*\}\.sock/);
+  });
+
+  it("uses an O_EXCL pidfile lock to prevent duplicate daemon spawns", () => {
+    // Without this, two pi turns (or pi + another agent) racing to embed
+    // would both call spawn() and the second daemon would crash on bind.
+    // The fix for issue #178 routes spawn through openSync(pidPath, "wx").
+    expect(PI_SRC).toMatch(/openSync\(\s*EMBED_PID_PATH\s*,\s*"wx"/);
+  });
+
+  it("respects an alive pidfile owner instead of SIGTERMing it", () => {
+    // PR #168's lesson, mirrored here: a stale-looking pidfile with a
+    // live PID is most likely another agent in the middle of bringing
+    // the daemon up. Killing it would race with a possibly-recycled OS
+    // pid (PR #168 reproduced the exact harm in src/embeddings/client.ts).
+    // We require the inline helper to call isPidAlive but never SIGTERM
+    // the daemon — the only allowed kill is the liveness probe `kill(pid, 0)`.
+    expect(PI_SRC).toContain("isPidAlive");
+    expect(PI_SRC).not.toMatch(/process\.kill\([^,]+,\s*["']?SIGTERM/);
   });
 
   it("speaks the daemon's protocol shape exactly: {op:'embed', id, kind, text}", () => {
