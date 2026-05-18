@@ -17,7 +17,7 @@
  */
 
 import {
-  readFileSync, writeFileSync, writeSync, mkdirSync, renameSync,
+  readFileSync, writeFileSync, writeSync, mkdirSync, renameSync, rmSync,
   existsSync, unlinkSync, openSync, closeSync,
 } from "node:fs";
 import { execSync } from "node:child_process";
@@ -39,7 +39,25 @@ export interface SkillifyState {
   updatedAt: number;
 }
 
-const STATE_DIR = join(homedir(), ".deeplake", "state", "skillify");
+/**
+ * Resolve the on-disk state directory. Computed lazily on every call so
+ * tests (and any other caller that swaps `process.env.HOME` or
+ * `HIVEMIND_STATE_DIR` between operations) actually affect the path. A
+ * module-level `const` would capture the developer's real home at import
+ * time and bypass any isolation, causing tests to read & pollute the
+ * real `~/.deeplake/state/skillify` — that anti-pattern is exactly what
+ * accumulated 80+ orphaned `<key>.lock` directories on dev machines
+ * (every `skillify-state.test.ts` run that the cleanup `rmdirSync`
+ * couldn't reach left one behind).
+ *
+ * `HIVEMIND_STATE_DIR` is honoured first so tests can point the whole
+ * subsystem at a `mkdtempSync()` directory without monkey-patching
+ * `os.homedir`. Falls back to `~/.deeplake/state/skillify`.
+ */
+export function getStateDir(): string {
+  return process.env.HIVEMIND_STATE_DIR ?? join(homedir(), ".deeplake", "state", "skillify");
+}
+
 const YIELD_BUF = new Int32Array(new SharedArrayBuffer(4));
 
 export const TRIGGER_THRESHOLD = (() => {
@@ -48,11 +66,11 @@ export const TRIGGER_THRESHOLD = (() => {
 })();
 
 export function statePath(projectKey: string): string {
-  return join(STATE_DIR, `${projectKey}.json`);
+  return join(getStateDir(), `${projectKey}.json`);
 }
 
 function lockPath(projectKey: string): string {
-  return join(STATE_DIR, `${projectKey}.lock`);
+  return join(getStateDir(), `${projectKey}.lock`);
 }
 
 /**
@@ -148,7 +166,7 @@ export function readState(projectKey: string): SkillifyState | null {
 
 export function writeState(projectKey: string, state: SkillifyState): void {
   migrateLegacyStateDir();
-  mkdirSync(STATE_DIR, { recursive: true });
+  mkdirSync(getStateDir(), { recursive: true });
   const p = statePath(projectKey);
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, JSON.stringify(state, null, 2));
@@ -157,7 +175,7 @@ export function writeState(projectKey: string, state: SkillifyState): void {
 
 export function withRmwLock<T>(projectKey: string, fn: () => T): T {
   migrateLegacyStateDir();
-  mkdirSync(STATE_DIR, { recursive: true });
+  mkdirSync(getStateDir(), { recursive: true });
   const rmw = lockPath(projectKey) + ".rmw";
   const deadline = Date.now() + 2000;
   let fd: number | null = null;
@@ -265,7 +283,7 @@ export function advanceWatermark(
 /** Cross-project lock so a single worker fires at a time per project. */
 export function tryAcquireWorkerLock(projectKey: string, maxAgeMs = 10 * 60 * 1000): boolean {
   migrateLegacyStateDir();
-  mkdirSync(STATE_DIR, { recursive: true });
+  mkdirSync(getStateDir(), { recursive: true });
   const p = lockPath(projectKey);
   if (existsSync(p)) {
     try {
@@ -275,8 +293,24 @@ export function tryAcquireWorkerLock(projectKey: string, maxAgeMs = 10 * 60 * 10
       dlog(`worker lock unreadable for ${projectKey}, treating as stale: ${readErr.message}`);
     }
     try { unlinkSync(p); } catch (unlinkErr: any) {
-      dlog(`could not unlink stale worker lock for ${projectKey}: ${unlinkErr.message}`);
-      return false;
+      // Self-heal for stale lock-as-directory: an interrupted run of
+      // tests/claude-code/skillify-state.test.ts ("treats an unreadable
+      // lock file as stale") leaves `<key>.lock` as an empty directory
+      // when its `rmdirSync` cleanup is killed before firing. Once that
+      // happens, every subsequent `unlinkSync` fails with EISDIR and the
+      // project's Stop-counter trigger silently no-ops forever. `rmSync`
+      // with `recursive: true, force: true` removes both files and
+      // directories without complaint, so the recovery path also covers
+      // the dir case without privileging it.
+      if (unlinkErr?.code === "EISDIR") {
+        try { rmSync(p, { recursive: true, force: true }); } catch (rmErr: any) {
+          dlog(`could not remove stale dir-lock for ${projectKey}: ${rmErr.message}`);
+          return false;
+        }
+      } else {
+        dlog(`could not unlink stale worker lock for ${projectKey}: ${unlinkErr.message}`);
+        return false;
+      }
     }
   }
   try {
