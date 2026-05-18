@@ -60,9 +60,26 @@ vi.mock("../../src/embeddings/disable.js", () => ({
 const originalFetch = global.fetch;
 const fetchMock = vi.fn();
 
+// Env keys touched by tests in this file. Recorded so afterEach() can
+// restore them — without this, a test that sets e.g.
+// EMBEDDINGS_DISABLED_FOR_TEST=1 would leak the disabled state into
+// every later test in the same vitest worker (next runHook() call without
+// that key wouldn't clear it, since runHook() only updates the keys
+// passed in). That's exactly the order-dependence CodeRabbit flagged.
+const TOUCHED_ENV_KEYS = [
+  "HIVEMIND_WIKI_WORKER",
+  "HIVEMIND_EMBED_WARMUP",
+  "EMBEDDINGS_DISABLED_FOR_TEST",
+] as const;
+const _origEnv: Record<string, string | undefined> = {};
+
 async function runHook(env: Record<string, string | undefined> = {}): Promise<void> {
+  for (const k of TOUCHED_ENV_KEYS) {
+    if (!(k in _origEnv)) _origEnv[k] = process.env[k];
+  }
   delete process.env.HIVEMIND_WIKI_WORKER;
   for (const [k, v] of Object.entries(env)) {
+    if (!(k in _origEnv)) _origEnv[k] = process.env[k];
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
@@ -100,6 +117,14 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   global.fetch = originalFetch;
+  // Restore env keys the tests may have mutated via runHook(), so later
+  // tests in this file (and other test files in the same worker) start
+  // from a clean process.env.
+  for (const [k, v] of Object.entries(_origEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  for (const k of Object.keys(_origEnv)) delete _origEnv[k];
 });
 
 describe("session-start-setup hook — guards", () => {

@@ -41,9 +41,26 @@ const validConfig = {
   sessionsTableName: "sessions",
 };
 
+// Env keys + tmp dirs that tests in this file mutate via runHook(). The
+// afterEach hook reads from these to restore the process env and clean
+// up any tmp dirs the user-disabled-embeddings test creates — without
+// it, the next test in the same vitest worker would inherit a stray
+// HIVEMIND_CONFIG_PATH pointing at a (deleted) tmp file, which silently
+// alters how the embeddings module resolves its on-disk config.
+const TOUCHED_ENV_KEYS = [
+  "HIVEMIND_CAPTURE",
+  "HIVEMIND_CONFIG_PATH",
+] as const;
+const _origEnv: Record<string, string | undefined> = {};
+const _tmpDirsToClean: string[] = [];
+
 async function runHook(env: Record<string, string | undefined> = {}): Promise<void> {
+  for (const k of TOUCHED_ENV_KEYS) {
+    if (!(k in _origEnv)) _origEnv[k] = process.env[k];
+  }
   delete process.env.HIVEMIND_CAPTURE;
   for (const [k, v] of Object.entries(env)) {
+    if (!(k in _origEnv)) _origEnv[k] = process.env[k];
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
@@ -62,7 +79,21 @@ beforeEach(() => {
   buildSessionPathMock.mockReset().mockReturnValue("/sessions/alice/foo.jsonl");
 });
 
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(async () => {
+  vi.restoreAllMocks();
+  // Restore env keys touched by runHook() so later tests start clean.
+  for (const [k, v] of Object.entries(_origEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  for (const k of Object.keys(_origEnv)) delete _origEnv[k];
+  // Clean any tmp dirs the user-disabled test created.
+  if (_tmpDirsToClean.length > 0) {
+    const { rmSync } = await import("node:fs");
+    for (const d of _tmpDirsToClean) try { rmSync(d, { recursive: true, force: true }); } catch { /* */ }
+    _tmpDirsToClean.length = 0;
+  }
+});
 
 describe("hermes capture hook — guards", () => {
   it("HIVEMIND_CAPTURE=false → no stdin read", async () => {
@@ -276,6 +307,7 @@ describe("hermes capture hook — message_embedding column", () => {
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const dir = mkdtempSync(join(tmpdir(), "hermes-cap-disabled-"));
+    _tmpDirsToClean.push(dir);
     const cfgPath = join(dir, "config.json");
     writeFileSync(cfgPath, JSON.stringify({ embeddings: { enabled: false } }), "utf-8");
     await runHook({ HIVEMIND_CONFIG_PATH: cfgPath });
