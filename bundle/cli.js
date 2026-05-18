@@ -3573,7 +3573,7 @@ function uninstallPi() {
 
 // dist/src/cli/embeddings.js
 import { copyFileSync as copyFileSync3, chmodSync, existsSync as existsSync10, lstatSync as lstatSync2, readdirSync, readFileSync as readFileSync8, readlinkSync, rmSync as rmSync4, statSync, unlinkSync as unlinkSync5 } from "node:fs";
-import { execFileSync as execFileSync3 } from "node:child_process";
+import { execFileSync as execFileSync3, spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
 import { join as join11 } from "node:path";
 
@@ -3834,13 +3834,15 @@ function killEmbedDaemon() {
   let pid = null;
   try {
     pid = Number.parseInt(readFileSync8(pidPath, "utf-8").trim(), 10);
-    if (Number.isFinite(pid)) {
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-      }
-    }
   } catch {
+  }
+  if (pid !== null && Number.isFinite(pid) && _isDaemonAliveOnSocket(sockPath)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+    }
+  } else if (pid !== null) {
+    log(`  Embeddings     pidfile present but socket dead \u2014 skipping SIGTERM on possibly-stale pid ${pid}`);
   }
   try {
     unlinkSync5(sockPath);
@@ -3849,6 +3851,19 @@ function killEmbedDaemon() {
   try {
     unlinkSync5(pidPath);
   } catch {
+  }
+}
+function _isDaemonAliveOnSocket(sockPath, timeoutMs = 200) {
+  if (!existsSync10(sockPath))
+    return false;
+  try {
+    const child = spawnSync("node", [
+      "-e",
+      `const n=require("node:net");const s=n.connect(${JSON.stringify(sockPath)});s.once("connect",()=>{s.end();process.exit(0)});s.once("error",()=>process.exit(2));setTimeout(()=>process.exit(3),${timeoutMs});`
+    ], { timeout: timeoutMs + 1e3, stdio: "ignore" });
+    return child.status === 0;
+  } catch {
+    return false;
   }
 }
 function statusEmbeddings() {

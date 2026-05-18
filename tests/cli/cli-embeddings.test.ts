@@ -210,6 +210,60 @@ describe("killEmbedDaemon", () => {
 
 // ── uninstall: writes config:false even when shared deps absent ───────────
 
+describe("killEmbedDaemon — verifies socket before SIGTERM (#2)", () => {
+  // Regression for CodeRabbit #2: previously killEmbedDaemon read the PID
+  // from the pidfile and blindly SIGTERMed it. If the daemon had crashed
+  // and the OS recycled that PID to an unrelated user process,
+  // `hivemind embeddings disable` would silently kill that process. The
+  // fix gates the SIGTERM on `_isDaemonAliveOnSocket` — if the UDS path
+  // doesn't accept a connect within a short timeout, the daemon is dead
+  // and the PID in the file is stale, so we only clean up sock+pid.
+  it("skips SIGTERM when the socket is dead (stale pidfile path)", async () => {
+    const { killEmbedDaemon: kill, _isDaemonAliveOnSocket } = await import(
+      "../../src/cli/embeddings.js"
+    );
+
+    // Simulate a stale pidfile: write our own pid number (so kill would
+    // succeed by SIGTERM permissions) without a live socket binding.
+    // Use the per-uid pidfile path the function expects.
+    const { pidPathFor, socketPathFor } = await import("../../src/embeddings/protocol.js");
+    const uid = String(process.getuid?.() ?? 0);
+    const pidPath = pidPathFor(uid);
+    const sockPath = socketPathFor(uid);
+
+    // Save any pre-existing artifacts to restore after the test.
+    let prevPid: string | undefined;
+    let prevSock = false;
+    try { prevPid = readFileSync(pidPath, "utf-8"); } catch { /* none */ }
+    try { prevSock = existsSync(sockPath); } catch { /* none */ }
+
+    try {
+      // Write the *current process's* pid into the file. If the broken
+      // code ran, our test runner would receive SIGTERM and die. With
+      // the fix, the socket-alive probe sees no socket bound and
+      // killEmbedDaemon should skip the SIGTERM step entirely.
+      writeFileSync(pidPath, String(process.pid));
+      try { rmSync(sockPath); } catch { /* not present */ }
+
+      // Probe asserts the socket isn't alive.
+      expect(_isDaemonAliveOnSocket(sockPath, 100)).toBe(false);
+
+      // The call must NOT crash the test runner (i.e. we must NOT
+      // receive SIGTERM). If we get past the next line, the fix held.
+      kill();
+
+      // Sock+pid file cleanup still runs.
+      expect(existsSync(pidPath)).toBe(false);
+      expect(existsSync(sockPath)).toBe(false);
+    } finally {
+      if (prevPid !== undefined) writeFileSync(pidPath, prevPid);
+      // (we deliberately don't restore the socket — it's a UDS, not a
+      //  file, and the test machine recreates it on next daemon start)
+      if (!prevSock) try { rmSync(sockPath); } catch { /* none */ }
+    }
+  }, 30_000);
+});
+
 describe("linkAgent — preserves real node_modules directory (#1)", () => {
   // Regression for CodeRabbit #1: previously `linkAgent` went straight
   // through `symlinkForce` → `unlinkSync` on whatever existed at

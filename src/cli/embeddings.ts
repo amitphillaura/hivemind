@@ -1,5 +1,5 @@
 import { copyFileSync, chmodSync, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, unlinkSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { HOME, ensureDir, log, pkgRoot, symlinkForce, warn, writeJson } from "./util.js";
@@ -239,6 +239,13 @@ export function disableEmbeddings(): void {
  * Best-effort SIGTERM on the running embed daemon for this UID, then
  * unlink its socket and pidfile. Tolerant of any combination of missing
  * pidfile, missing socket, dead PID, or insufficient permissions.
+ *
+ * Identity check: before sending SIGTERM, we probe the socket the PID
+ * is claimed to own. If the socket doesn't exist OR a short connect
+ * fails, the daemon is already dead and the PID in the file is stale —
+ * the OS may have recycled it to a totally unrelated process, so
+ * SIGTERMing it would be a `disable` killing the user's text editor.
+ * In that case we skip the kill and only clean up the file artifacts.
  */
 export function killEmbedDaemon(): void {
   const uid = typeof process.getuid === "function" ? process.getuid() : userInfo().uid;
@@ -247,12 +254,44 @@ export function killEmbedDaemon(): void {
   let pid: number | null = null;
   try {
     pid = Number.parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
-    if (Number.isFinite(pid)) {
-      try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
-    }
   } catch { /* no pidfile */ }
+
+  if (pid !== null && Number.isFinite(pid) && _isDaemonAliveOnSocket(sockPath)) {
+    try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+  } else if (pid !== null) {
+    // Pidfile present but socket isn't live — daemon crashed; the PID
+    // value may now belong to an unrelated process. Skip the kill.
+    log(`  Embeddings     pidfile present but socket dead — skipping SIGTERM on possibly-stale pid ${pid}`);
+  }
+
   try { unlinkSync(sockPath); } catch { /* not present */ }
   try { unlinkSync(pidPath); } catch { /* not present */ }
+}
+
+/**
+ * Probe whether the embed daemon socket is alive: try to connect with a
+ * short timeout. Doesn't send any payload — a successful TCP/UDS handshake
+ * is proof that some process is listening on this UDS path, and since
+ * UDS paths are filesystem-rooted (not PID-rooted), the listener is
+ * almost certainly the daemon whose pidfile sits next to it. Anything
+ * else (file missing, ECONNREFUSED, ENOENT, timeout) means the daemon
+ * isn't actually there.
+ */
+export function _isDaemonAliveOnSocket(sockPath: string, timeoutMs: number = 200): boolean {
+  if (!existsSync(sockPath)) return false;
+  try {
+    const child = spawnSync("node", [
+      "-e",
+      `const n=require("node:net");` +
+      `const s=n.connect(${JSON.stringify(sockPath)});` +
+      `s.once("connect",()=>{s.end();process.exit(0)});` +
+      `s.once("error",()=>process.exit(2));` +
+      `setTimeout(()=>process.exit(3),${timeoutMs});`,
+    ], { timeout: timeoutMs + 1000, stdio: "ignore" });
+    return child.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 export function statusEmbeddings(): void {
