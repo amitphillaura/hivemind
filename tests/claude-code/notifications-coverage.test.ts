@@ -334,5 +334,42 @@ describe("drainSessionStart — queue drained even when nothing fresh", () => {
     // Critical: queue still drained even though nothing emitted
     expect(readQueue().queue.length).toBe(0);
   });
+
+  it("all claimed by another process: queue drained, returns without emitting", async () => {
+    // Plant a notification on queue. Mark its claim file as already taken
+    // (simulate the sibling SessionStart hook winning the race) by mocking
+    // tryClaim to return false for every notification.
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
+      writes.push(typeof c === "string" ? c : c.toString());
+      return true;
+    });
+    const stateModule = await import("../../src/notifications/state.js");
+    vi.spyOn(stateModule, "tryClaim").mockReturnValue(false);
+
+    const n: Notification = { id: "y", title: "T2", body: "B2", dedupKey: { v: 99 } };
+    enqueueNotification(n);
+    await drainSessionStart({ agent: "claude-code", creds: null });
+    expect(writes.length).toBe(0);
+    expect(readQueue().queue.length).toBe(0); // drained anyway
+  });
+
+  it("catches and logs error if rule evaluation throws", async () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
+      writes.push(typeof c === "string" ? c : c.toString());
+      return true;
+    });
+    // Force readState to throw — drainSessionStart wraps everything in try/catch
+    // and must not propagate the error.
+    const stateModule = await import("../../src/notifications/state.js");
+    vi.spyOn(stateModule, "readState").mockImplementation(() => {
+      throw new Error("synthetic readState failure");
+    });
+    await expect(
+      drainSessionStart({ agent: "claude-code", creds: null }),
+    ).resolves.toBeUndefined();
+    expect(writes.length).toBe(0);
+  });
 });
 
