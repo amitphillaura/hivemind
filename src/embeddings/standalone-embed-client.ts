@@ -38,10 +38,20 @@ import {
 /** Canonical location populated by `hivemind embeddings install`. */
 export const SHARED_DAEMON_PATH = join(homedir(), ".hivemind", "embed-deps", "embed-daemon.js");
 
-// Swappable spawn implementation. Tests replace it via _setSpawnForTesting
-// because ESM bindings for `node:child_process.spawn` can't be spied on
-// directly (the namespace is non-configurable). Production calls the real
-// node:child_process.spawn via this indirection.
+// Swappable spawn implementation. Has two legitimate callers:
+//
+//   1. Unit tests, because ESM bindings for `node:child_process.spawn`
+//      can't be spied on directly (the namespace is non-configurable).
+//
+//   2. Bundle environments that stub out `node:child_process` (most
+//      notably the openclaw plugin — see esbuild.config.mjs's
+//      `stub-unused-child-process` plugin). Those bundles must call
+//      `_setSpawnImpl(realSpawn)` once at startup with the real
+//      function obtained via `createRequire`, otherwise spawn() is a
+//      no-op stub and the daemon never starts.
+//
+// Default is the statically-imported `realSpawn` — correct for any
+// non-stubbed environment.
 type SpawnFn = (cmd: string, args: ReadonlyArray<string>, opts: SpawnOptions) => ChildProcess;
 let _spawn: SpawnFn = realSpawn as SpawnFn;
 
@@ -271,9 +281,17 @@ export async function tryEmbedStandalone(
   }
 }
 
-// ── Test helpers ────────────────────────────────────────────────────────────
+// ── Spawn-impl injection ────────────────────────────────────────────────────
 
-/** Replace the internal spawn impl. Underscore-prefixed; tests only. */
-export function _setSpawnForTesting(fn: SpawnFn | null): void {
+/**
+ * Replace the internal spawn implementation. Underscore-prefixed and NOT
+ * part of the public API. See the comment on `_spawn` for the two
+ * legitimate callers (unit tests + bundle environments stubbing
+ * `node:child_process`).
+ *
+ * Pass `null` to reset to the statically-imported default (used by tests
+ * in their `afterEach`).
+ */
+export function _setSpawnImpl(fn: SpawnFn | null): void {
   _spawn = fn ?? (realSpawn as SpawnFn);
 }

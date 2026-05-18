@@ -25,7 +25,7 @@ import type { ChildProcess } from "node:child_process";
 import {
   tryEmbedStandalone,
   SHARED_DAEMON_PATH,
-  _setSpawnForTesting,
+  _setSpawnImpl,
 } from "../../src/embeddings/standalone-embed-client.js";
 import type { DaemonRequest, DaemonResponse } from "../../src/embeddings/protocol.js";
 
@@ -37,7 +37,7 @@ afterEach(() => {
   servers = [];
   for (const d of tmpDirs) try { rmSync(d, { recursive: true, force: true }); } catch { /* */ }
   tmpDirs = [];
-  _setSpawnForTesting(null);
+  _setSpawnImpl(null);
   vi.restoreAllMocks();
 });
 
@@ -109,7 +109,7 @@ describe("tryEmbedStandalone", () => {
   it("returns null and never spawns when the daemon entry does not exist", async () => {
     const dir = makeTmpDir();
     let spawnCalls = 0;
-    _setSpawnForTesting(() => {
+    _setSpawnImpl(() => {
       spawnCalls += 1;
       return makeFakeChild();
     });
@@ -137,7 +137,7 @@ describe("tryEmbedStandalone", () => {
     writeFileSync(fakeEntry, "// placeholder so existsSync() is true");
 
     let spawnCalls = 0;
-    _setSpawnForTesting(() => {
+    _setSpawnImpl(() => {
       spawnCalls += 1;
       // Bring the fake daemon up after a short delay so waitForSocket has to poll.
       setTimeout(() => {
@@ -170,7 +170,7 @@ describe("tryEmbedStandalone", () => {
     writeFileSync(fakeEntry, "");
 
     let spawnCalls = 0;
-    _setSpawnForTesting(() => {
+    _setSpawnImpl(() => {
       spawnCalls += 1;
       setTimeout(() => {
         // Real daemon would unlink stale socket on bind. Simulate that.
@@ -202,7 +202,7 @@ describe("tryEmbedStandalone", () => {
     writeFileSync(fakeEntry, "");
 
     let spawnCalls = 0;
-    _setSpawnForTesting(() => {
+    _setSpawnImpl(() => {
       spawnCalls += 1;
       setTimeout(() => {
         void startFakeDaemon(dir, (req) =>
@@ -233,7 +233,7 @@ describe("tryEmbedStandalone", () => {
     writeFileSync(fakeEntry, "");
 
     let spawnCalls = 0;
-    _setSpawnForTesting(() => { spawnCalls += 1; return makeFakeChild(); });
+    _setSpawnImpl(() => { spawnCalls += 1; return makeFakeChild(); });
     const killSpy = vi.spyOn(process, "kill");
 
     const vec = await tryEmbedStandalone("x", "document", {
@@ -261,7 +261,7 @@ describe("tryEmbedStandalone", () => {
     writeFileSync(fakeEntry, "");
 
     let spawned = 0;
-    _setSpawnForTesting(() => {
+    _setSpawnImpl(() => {
       spawned += 1;
       if (spawned === 1) {
         setTimeout(() => {
@@ -300,7 +300,7 @@ describe("tryEmbedStandalone", () => {
     const fakeEntry = join(dir, "daemon-marker.js");
     writeFileSync(fakeEntry, "");
 
-    _setSpawnForTesting(() => { throw new Error("EAGAIN"); });
+    _setSpawnImpl(() => { throw new Error("EAGAIN"); });
 
     const vec = await tryEmbedStandalone("x", "document", {
       socketDir: dir,
@@ -320,7 +320,7 @@ describe("tryEmbedStandalone", () => {
     const fakeEntry = join(dir, "daemon-marker.js");
     writeFileSync(fakeEntry, "");
 
-    _setSpawnForTesting(() => {
+    _setSpawnImpl(() => {
       // Spawn "succeeds" but no daemon listens.
       return makeFakeChild();
     });
@@ -379,7 +379,7 @@ describe("tryEmbedStandalone", () => {
     writeFileSync(fakeEntry, "");
 
     let spawnCalls = 0;
-    _setSpawnForTesting(() => {
+    _setSpawnImpl(() => {
       spawnCalls += 1;
       setTimeout(() => {
         void startFakeDaemon(dir, (req) =>
