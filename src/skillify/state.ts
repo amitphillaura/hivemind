@@ -300,16 +300,18 @@ export function tryAcquireWorkerLock(projectKey: string, maxAgeMs = 10 * 60 * 10
       // Every error case is safe to ignore — the final `openSync(p,
       // "wx")` arbitrates atomically: exactly one process wins.
       //
-      // We accept both EISDIR and EPERM on the unlink to be portable
-      // (Linux/macOS use EISDIR for unlink-on-directory; Windows
-      // surfaces EPERM for the same operation). The `lstatSync` is
-      // then the actual confirmation that we're holding a directory
-      // before we hand off to `rmdirSync`. lstat errors are NOT
-      // terminal: a missing file means the race already cleared the
-      // path (great, openSync will win or lose as appropriate); a
-      // permission error means we can't tell, so we let `openSync`
-      // arbitrate instead of returning false eagerly.
-      if (unlinkErr?.code !== "EISDIR" && unlinkErr?.code !== "EPERM") {
+      // We accept EISDIR (POSIX unlink-on-directory), EPERM (Windows
+      // surfaces this for the same operation), and ENOENT (a racing
+      // process already cleaned the stale path between our `existsSync`
+      // check and the `unlinkSync` call — perfect, the atomic
+      // `openSync(p, "wx")` below will win or lose as appropriate).
+      // `lstat` errors are NOT terminal either: a missing file means
+      // the race already cleared the path; a permission error means
+      // we can't tell, so we let `openSync` arbitrate instead of
+      // returning false eagerly.
+      if (unlinkErr?.code !== "EISDIR"
+          && unlinkErr?.code !== "EPERM"
+          && unlinkErr?.code !== "ENOENT") {
         dlog(`could not unlink stale worker lock for ${projectKey}: ${unlinkErr.message}`);
         return false;
       }

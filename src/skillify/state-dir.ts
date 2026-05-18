@@ -25,5 +25,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export function getStateDir(): string {
-  return process.env.HIVEMIND_STATE_DIR ?? join(homedir(), ".deeplake", "state", "skillify");
+  // Trim before truthy-check so `HIVEMIND_STATE_DIR=""` or
+  // `HIVEMIND_STATE_DIR="   "` (forgotten value in CI config, accidental
+  // empty pass-through) does NOT win the `??` arm. An empty string is
+  // a perfectly valid env value — `??` would accept it — but downstream
+  // `join("", ".deeplake", ...)` resolves relative to the worker's cwd
+  // and silently pollutes whatever directory the process was started in.
+  // Treat blank as unset.
+  const override = process.env.HIVEMIND_STATE_DIR?.trim();
+  return override && override.length > 0
+    ? override
+    : join(homedir(), ".deeplake", "state", "skillify");
 }

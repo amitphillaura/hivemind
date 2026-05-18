@@ -28,13 +28,15 @@
  * dir so a test that runs back-to-back with different `HIVEMIND_STATE_DIR`
  * values doesn't silently skip the migration in the second run.
  *
- * Error policy: only swallow the documented fallback codes — `EXDEV`
- * (cross-device link, e.g. `~/.deeplake` on a different mount than `/tmp`)
- * and `EPERM` (sandboxed or read-only home). In those cases we leave the
- * legacy dir in place and the new dir starts fresh — `pull` will repopulate
- * `pulled.json` but pre-rename installs may need manual cleanup. Every
- * other failure (`EIO`, `ENOSPC`, anything else) re-throws so the caller
- * sees the I/O error instead of silently losing user state.
+ * Error policy: swallow the documented fallback codes — `EXDEV`
+ * (cross-device link, e.g. `~/.deeplake` on a different mount than `/tmp`),
+ * `EPERM` (sandboxed or read-only home), and the multi-process race codes
+ * `ENOENT` / `EEXIST` / `ENOTEMPTY` (another worker / hook / install
+ * raced past the existsSync checks and either migrated the dir or
+ * recreated the target between our stat and rename — both outcomes are
+ * "migration handled" from our point of view, not a failure to surface).
+ * Every other failure (`EIO`, `ENOSPC`, anything else) re-throws so the
+ * caller sees the I/O error instead of silently losing user state.
  */
 
 import { existsSync, renameSync } from "node:fs";
@@ -58,8 +60,15 @@ export function migrateLegacyStateDir(): void {
     dlog(`migrated ${legacy} -> ${current}`);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EXDEV" || code === "EPERM") {
-      dlog(`migration failed (${code}); leaving legacy dir in place`);
+    // EXDEV/EPERM: documented fallback, migration not possible — leave
+    // legacy dir for manual cleanup.
+    // ENOENT/EEXIST/ENOTEMPTY: another process raced past our
+    // existsSync checks and finished (or partially finished) the
+    // migration between our stat and the renameSync. The work is
+    // already done (or being done by the racer), so silently move on.
+    if (code === "EXDEV" || code === "EPERM"
+        || code === "ENOENT" || code === "EEXIST" || code === "ENOTEMPTY") {
+      dlog(`migration skipped (${code}); legacy dir left as-is or another process handled it`);
       return;
     }
     throw err;

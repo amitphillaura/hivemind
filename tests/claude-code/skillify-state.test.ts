@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -351,11 +351,20 @@ describe("HIVEMIND_STATE_DIR routing", () => {
     // the developer's real `~/.deeplake/state/skilify` despite the env
     // override on state.ts.
     //
+    // We `vi.resetModules()` before importing so this test truly
+    // exercises `migrateLegacyStateDir()` from scratch. Earlier tests
+    // in this file call it transitively (via `bumpStopCounter` → ...),
+    // which would otherwise leave the module-level `attemptedFor` Set
+    // already populated with STATE_DIR and short-circuit the function
+    // before any of its body runs — the test would pass trivially
+    // without proving anything about the function's behavior.
+    //
     // Two assertions establish the channel is closed:
     //   1) getStateDir() returns the tmp dir, NOT a path under homedir().
     //   2) Calling migrateLegacyStateDir() is a no-op in this tmp world
     //      — the `skilify` sibling derived from the tmp dir does not
     //      exist, so the function never touches real-home paths.
+    vi.resetModules();
     const { getStateDir } = await import("../../src/skillify/state-dir.js");
     const { migrateLegacyStateDir } = await import("../../src/skillify/legacy-migration.js");
     const { homedir } = await import("node:os");
@@ -369,6 +378,29 @@ describe("HIVEMIND_STATE_DIR routing", () => {
     expect(() => migrateLegacyStateDir()).not.toThrow();
     // Did not magic the legacy sibling into existence either.
     expect(fs.existsSync(tmpLegacy)).toBe(false);
+  });
+
+  it("empty/whitespace HIVEMIND_STATE_DIR is treated as unset", async () => {
+    // Defensive: a `HIVEMIND_STATE_DIR=` or `HIVEMIND_STATE_DIR="   "`
+    // (forgotten value in a shell script, accidental empty pass-through
+    // from CI config) used to win the `??` arm and force
+    // `join("", ".deeplake", ...)` to resolve relative to the worker's
+    // cwd — silently polluting whatever directory the process was
+    // started in. After the trim+truthy guard in state-dir.ts, blank
+    // values fall back to the homedir-based default.
+    vi.resetModules();
+    const { homedir } = await import("node:os");
+    const prior = process.env.HIVEMIND_STATE_DIR;
+    try {
+      const { getStateDir } = await import("../../src/skillify/state-dir.js");
+      process.env.HIVEMIND_STATE_DIR = "";
+      expect(getStateDir().startsWith(homedir())).toBe(true);
+      process.env.HIVEMIND_STATE_DIR = "   ";
+      expect(getStateDir().startsWith(homedir())).toBe(true);
+    } finally {
+      // Restore so the rest of the suite keeps using the tmp dir.
+      process.env.HIVEMIND_STATE_DIR = prior;
+    }
   });
 
   it("scope-config + manifest paths land in HIVEMIND_STATE_DIR", async () => {
