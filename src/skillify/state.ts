@@ -281,8 +281,8 @@ export function tryAcquireWorkerLock(projectKey: string, maxAgeMs = 10 * 60 * 10
       // lock file as stale") used to leave `<key>.lock` as an empty
       // directory when its `rmdirSync` cleanup was killed before
       // firing. Once that happens, every subsequent `unlinkSync` fails
-      // with EISDIR and the project's Stop-counter trigger silently
-      // no-ops forever.
+      // (POSIX: EISDIR, Windows: EPERM) and the project's Stop-counter
+      // trigger silently no-ops forever.
       //
       // TOCTOU defense: we use `rmdirSync(p)` for the recovery instead
       // of `rmSync(p, { recursive: true, force: true })`. A concurrent
@@ -292,27 +292,34 @@ export function tryAcquireWorkerLock(projectKey: string, maxAgeMs = 10 * 60 * 10
       // `rmSync` with `force/recursive` would happily unlink that
       // racing process's live lock, letting both processes' subsequent
       // `openSync(wx)` succeed and double-acquire the worker slot.
-      // `rmdirSync` is the right shape-aware primitive:
-      //   - regular file at the path → ENOTDIR, we bail
-      //   - non-empty directory      → ENOTEMPTY, we bail
-      //   - path gone                → ENOENT, we bail
+      // `rmdirSync` is shape-aware:
+      //   - regular file at the path → ENOTDIR (POSIX) / ENOENT (Win)
+      //   - non-empty directory      → ENOTEMPTY
+      //   - path gone                → ENOENT
       //   - empty directory          → removes it (the actual recovery)
-      // In every bail case the final `openSync(p, "wx")` arbitrates:
-      // exactly one process wins, the other returns false.
+      // Every error case is safe to ignore — the final `openSync(p,
+      // "wx")` arbitrates atomically: exactly one process wins.
       //
-      // The pre-stat with `lstatSync` is kept only as a cheap fast-path
-      // (skip the syscall entirely when the path is already a file).
-      // It is not safety-relevant — `rmdirSync` itself is the gate.
-      if (unlinkErr?.code !== "EISDIR") {
+      // We accept both EISDIR and EPERM on the unlink to be portable
+      // (Linux/macOS use EISDIR for unlink-on-directory; Windows
+      // surfaces EPERM for the same operation). The `lstatSync` is
+      // then the actual confirmation that we're holding a directory
+      // before we hand off to `rmdirSync`. lstat errors are NOT
+      // terminal: a missing file means the race already cleared the
+      // path (great, openSync will win or lose as appropriate); a
+      // permission error means we can't tell, so we let `openSync`
+      // arbitrate instead of returning false eagerly.
+      if (unlinkErr?.code !== "EISDIR" && unlinkErr?.code !== "EPERM") {
         dlog(`could not unlink stale worker lock for ${projectKey}: ${unlinkErr.message}`);
         return false;
       }
       let isDir = false;
-      try { isDir = lstatSync(p).isDirectory(); } catch { /* gone — fall through */ }
+      try { isDir = lstatSync(p).isDirectory(); } catch { /* stat unavailable — let openSync arbitrate */ }
       if (isDir) {
         try { rmdirSync(p); } catch (rmErr: any) {
-          dlog(`could not rmdir stale lock for ${projectKey}: ${rmErr.message}`);
-          return false;
+          // ENOTDIR / ENOTEMPTY / ENOENT / EACCES — all safe to ignore.
+          // openSync(p, "wx") below is the atomic arbiter.
+          dlog(`rmdir stale lock skipped for ${projectKey}: ${rmErr.message}`);
         }
       }
     }
