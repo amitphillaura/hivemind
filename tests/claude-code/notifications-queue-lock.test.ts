@@ -30,6 +30,7 @@ import {
   queuePath,
   readQueue,
   writeQueue,
+  _isQueuePathInsideHome,
   _setLockTimingForTesting,
   _resetLockTimingForTesting,
 } from "../../src/notifications/queue.js";
@@ -53,7 +54,7 @@ afterEach(() => {
 });
 
 describe("withQueueLock — stale-lock reclaim", () => {
-  it("reclaims a lock file older than LOCK_STALE_MS and proceeds with the enqueue", () => {
+  it("reclaims a lock file older than LOCK_STALE_MS and proceeds with the enqueue", async () => {
     mkdirSync(join(tmpHome, ".deeplake"), { recursive: true });
     const lockFile = `${queuePath()}.lock`;
     // Create the lock file and age it past the (test-shrunk) stale window.
@@ -62,7 +63,7 @@ describe("withQueueLock — stale-lock reclaim", () => {
     const ancient = (Date.now() - 5000) / 1000;
     utimesSync(lockFile, ancient, ancient);
 
-    enqueueNotification({
+    await enqueueNotification({
       id: "test-stale-reclaim",
       title: "T", body: "B",
       dedupKey: { tag: "stale" },
@@ -75,7 +76,7 @@ describe("withQueueLock — stale-lock reclaim", () => {
 });
 
 describe("withQueueLock — give up after MAX retries (degrades to unlocked)", () => {
-  it("when the lock can't be acquired, still runs fn and persists the enqueue", () => {
+  it("when the lock can't be acquired, still runs fn and persists the enqueue", async () => {
     mkdirSync(join(tmpHome, ".deeplake"), { recursive: true });
     const lockFile = `${queuePath()}.lock`;
     // Fresh, recently-mtime'd lock that the reclaim branch won't touch.
@@ -83,7 +84,7 @@ describe("withQueueLock — give up after MAX retries (degrades to unlocked)", (
     closeSync(fd);
     // mtime is "now" → not stale → every attempt hits EEXIST → exhausts retries.
 
-    enqueueNotification({
+    await enqueueNotification({
       id: "test-giveup",
       title: "T", body: "B",
       dedupKey: { tag: "giveup" },
@@ -112,26 +113,26 @@ describe("readQueue — malformed JSON branch", () => {
 });
 
 describe("enqueueNotification — sameDedupKey branches", () => {
-  it("skips append when an equivalent (id, dedupKey) is already queued (same-process dedup)", () => {
+  it("skips append when an equivalent (id, dedupKey) is already queued (same-process dedup)", async () => {
     const n = {
       id: "embed-deps-missing",
       title: "T",
       body: "B",
       dedupKey: { reason: "transformers-missing", detail: "exact" },
     };
-    enqueueNotification(n);
-    enqueueNotification(n);
-    enqueueNotification(n);
+    await enqueueNotification(n);
+    await enqueueNotification(n);
+    await enqueueNotification(n);
     expect(readQueue().queue.length).toBe(1);
   });
 
-  it("appends a second entry when id differs but dedupKey matches (id discriminates)", () => {
+  it("appends a second entry when id differs but dedupKey matches (id discriminates)", async () => {
     // Hits the `a.id !== b.id` early-return inside sameDedupKey.
-    enqueueNotification({
+    await enqueueNotification({
       id: "id-A", title: "T", body: "B",
       dedupKey: { v: 1 },
     });
-    enqueueNotification({
+    await enqueueNotification({
       id: "id-B", title: "T", body: "B",
       dedupKey: { v: 1 },
     });
@@ -139,40 +140,53 @@ describe("enqueueNotification — sameDedupKey branches", () => {
     expect(readQueue().queue.map(n => n.id).sort()).toEqual(["id-A", "id-B"]);
   });
 
-  it("appends a second entry when id matches but dedupKey differs (key discriminates)", () => {
+  it("appends a second entry when id matches but dedupKey differs (key discriminates)", async () => {
     // Hits the JSON.stringify comparison returning `false`.
-    enqueueNotification({ id: "shared", title: "T", body: "B", dedupKey: { v: 1 } });
-    enqueueNotification({ id: "shared", title: "T", body: "B", dedupKey: { v: 2 } });
+    await enqueueNotification({ id: "shared", title: "T", body: "B", dedupKey: { v: 1 } });
+    await enqueueNotification({ id: "shared", title: "T", body: "B", dedupKey: { v: 2 } });
     expect(readQueue().queue.length).toBe(2);
   });
 });
 
-describe("writeQueue — outside-HOME guard", () => {
-  it("throws when the resolved queue path escapes $HOME", () => {
-    // Point HOME at a sibling tmp dir so queuePath()'s output isn't
-    // under the real $HOME. The guard refuses to write outside $HOME.
-    const fakeHome = mkdtempSync(join(tmpdir(), "queue-lock-fake-home-"));
-    process.env.HOME = fakeHome;
+describe("_isQueuePathInsideHome — outside-HOME guard", () => {
+  // Defense-in-depth invariant: the guard inside writeQueue refuses to
+  // touch the filesystem if the resolved queue path would escape $HOME.
+  // The actual `writeQueue` call can only hit this branch via a homedir()
+  // race (ESM doesn't let us spy on os.homedir reliably), so we test the
+  // extracted predicate directly.
+
+  it("returns true when the path is a direct child of home", () => {
+    expect(_isQueuePathInsideHome("/home/u/.deeplake/notifications-queue.json", "/home/u")).toBe(true);
+  });
+
+  it("returns true when the path equals home itself", () => {
+    expect(_isQueuePathInsideHome("/home/u", "/home/u")).toBe(true);
+  });
+
+  it("returns true when home has a trailing slash (resolved normalizes)", () => {
+    expect(_isQueuePathInsideHome("/home/u/.deeplake/notifications-queue.json", "/home/u/")).toBe(true);
+  });
+
+  it("returns FALSE when the path is in a sibling directory of home", () => {
+    expect(_isQueuePathInsideHome("/etc/.deeplake/notifications-queue.json", "/home/u")).toBe(false);
+  });
+
+  it("returns FALSE on a prefix-match attack (path starts with home substring but differs)", () => {
+    // The naive `startsWith(home)` would let `/home/userspace/...` slip
+    // through when home is `/home/user`. Adding the explicit `home + "/"`
+    // separator (which the helper does internally) blocks it.
+    expect(_isQueuePathInsideHome("/home/userspace/.deeplake/notifications-queue.json", "/home/user")).toBe(false);
+  });
+
+  it("returns FALSE for a relative path that resolves outside home", () => {
+    // resolve("../../etc/passwd") relative to cwd lands somewhere far
+    // from a tmp home, so the guard rejects.
+    const outside = "/etc/.deeplake/notifications-queue.json";
+    const home = mkdtempSync(join(tmpdir(), "queue-outside-guard-"));
     try {
-      // Force a write to a path outside the new HOME by abusing the
-      // public writeQueue with a mutated cwd-relative env. Easier
-      // approach: directly call writeQueue and rely on `queuePath()`
-      // sitting under HOME → the guard passes. Then assert the
-      // negative path by overriding HOME mid-call to somewhere that
-      // makes queuePath() escape. Simplest: re-point HOME *between*
-      // computing the path and the write, which the production code
-      // doesn't do, so simulate with a plain write to a synthetic
-      // outside path via the guard's resolve check.
-      //
-      // Cleaner: assert the function does NOT throw on a legit HOME-
-      // rooted path (positive happy-path) — the negative branch is
-      // exercised at module level by inspection. Coverage tooling
-      // counts both the comparison's truthy and falsy outcomes via
-      // the test below.
-      writeQueue({ queue: [] });
-      expect(existsSync(queuePath())).toBe(true);
+      expect(_isQueuePathInsideHome(outside, home)).toBe(false);
     } finally {
-      rmSync(fakeHome, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

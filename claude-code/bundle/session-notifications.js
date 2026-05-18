@@ -62,6 +62,7 @@ function evaluateRules(trigger, ctx) {
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync, mkdirSync as mkdirSync2, openSync, closeSync, unlinkSync as unlinkSync2, statSync } from "node:fs";
 import { join as join3, resolve } from "node:path";
 import { homedir as homedir3 } from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 
 // dist/src/utils/debug.js
 import { appendFileSync } from "node:fs";
@@ -94,10 +95,15 @@ function readQueue() {
     return { queue: [] };
   }
 }
+function _isQueuePathInsideHome(path, home) {
+  const r = resolve(path);
+  const h = resolve(home);
+  return r.startsWith(h + "/") || r === h;
+}
 function writeQueue(q) {
   const path = queuePath();
   const home = resolve(homedir3());
-  if (!resolve(path).startsWith(home + "/") && resolve(path) !== home) {
+  if (!_isQueuePathInsideHome(path, home)) {
     throw new Error(`notifications-queue write blocked: ${path} is outside ${home}`);
   }
   mkdirSync2(join3(home, ".deeplake"), { recursive: true, mode: 448 });

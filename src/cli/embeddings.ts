@@ -247,10 +247,13 @@ export function disableEmbeddings(): void {
  * SIGTERMing it would be a `disable` killing the user's text editor.
  * In that case we skip the kill and only clean up the file artifacts.
  */
-export function killEmbedDaemon(): void {
+export function killEmbedDaemon(socketDir?: string): void {
   const uid = typeof process.getuid === "function" ? process.getuid() : userInfo().uid;
-  const pidPath = pidPathFor(String(uid));
-  const sockPath = socketPathFor(String(uid));
+  // socketDir override is for tests only — production always lives in /tmp
+  // (the protocol default). Tests pass mkdtemp dirs so they don't collide
+  // with any real daemon for the same uid on the same machine.
+  const pidPath = pidPathFor(String(uid), socketDir);
+  const sockPath = socketPathFor(String(uid), socketDir);
   let pid: number | null = null;
   try {
     pid = Number.parseInt(readFileSync(pidPath, "utf-8").trim(), 10);

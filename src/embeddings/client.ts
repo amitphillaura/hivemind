@@ -268,24 +268,33 @@ export class EmbedClient {
     let status: string;
     try { status = embeddingsStatus(); } catch { status = "enabled"; }
     if (status === "user-disabled") return; // user said no, don't nag
-    try {
-      enqueueNotification({
-        id: "embed-deps-missing",
-        severity: "warn",
-        title: "Hivemind embeddings disabled — deps missing",
-        body: `Semantic memory search is off because @huggingface/transformers is not installed where the daemon can find it. Run \`hivemind embeddings install\` to enable.`,
-        dedupKey: { reason: "transformers-missing", detail: detail.slice(0, 200) },
-      });
-    } catch (e: unknown) {
-      // Best-effort: never let a notification write failure escape into
-      // the capture hot path.
+    // Fire-and-forget. `enqueueNotification` is now async (it may yield
+    // the event loop on lock contention); we don't await it so we never
+    // block the capture hot path on a notification write. Errors land in
+    // the .catch instead of being swallowed silently by the outer caller.
+    enqueueNotification({
+      id: "embed-deps-missing",
+      severity: "warn",
+      title: "Hivemind embeddings disabled — deps missing",
+      body: `Semantic memory search is off because @huggingface/transformers is not installed where the daemon can find it. Run \`hivemind embeddings install\` to enable.`,
+      dedupKey: { reason: "transformers-missing", detail: detail.slice(0, 200) },
+    }).catch((e: unknown) => {
       log(`enqueue embed-deps-missing failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    });
   }
 
   /**
    * Best-effort SIGTERM + sock/pid cleanup. Tolerant of every missing-file
    * combination and dead-PID cases.
+   *
+   * Identity check: gate the SIGTERM on the daemon's socket file still
+   * existing. We know the daemon was alive moments ago (we either just
+   * got a hello response or the caller saw a transformers-missing error
+   * the daemon emitted), but if the socket file is gone by the time we
+   * try to kill, the daemon process is also gone and the PID we
+   * captured may already have been recycled by the OS to an unrelated
+   * user process. Mirrors the gate added to `killEmbedDaemon` in the
+   * CLI — same failure mode, rarer trigger.
    */
   private recycleDaemon(reportedPid: number | null): void {
     let pid: number | null = reportedPid;
@@ -294,8 +303,10 @@ export class EmbedClient {
         pid = Number.parseInt(readFileSync(this.pidPath, "utf-8").trim(), 10);
       } catch { /* no pidfile */ }
     }
-    if (Number.isFinite(pid) && pid !== null && pid > 0) {
+    if (Number.isFinite(pid) && pid !== null && pid > 0 && existsSync(this.socketPath)) {
       try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+    } else if (pid !== null) {
+      log(`recycle: socket gone, skipping SIGTERM on possibly-stale pid ${pid}`);
     }
     try { unlinkSync(this.socketPath); } catch { /* not present */ }
     try { unlinkSync(this.pidPath); } catch { /* not present */ }

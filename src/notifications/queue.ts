@@ -13,6 +13,7 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, openSync, closeSync, unlinkSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Notification, NotificationsQueue } from "./types.js";
 import { log as _log } from "../utils/debug.js";
 
@@ -62,10 +63,22 @@ export function readQueue(): NotificationsQueue {
   }
 }
 
+/**
+ * Defense-in-depth: refuse to write the queue if its resolved path
+ * escapes `$HOME`. Extracted so tests can exercise the guard directly
+ * without monkey-patching `homedir()` (vitest's ESM mode can't spy on
+ * `os.homedir`, and we don't want to mock the whole module).
+ */
+export function _isQueuePathInsideHome(path: string, home: string): boolean {
+  const r = resolve(path);
+  const h = resolve(home);
+  return r.startsWith(h + "/") || r === h;
+}
+
 export function writeQueue(q: NotificationsQueue): void {
   const path = queuePath();
   const home = resolve(homedir());
-  if (!resolve(path).startsWith(home + "/") && resolve(path) !== home) {
+  if (!_isQueuePathInsideHome(path, home)) {
     throw new Error(`notifications-queue write blocked: ${path} is outside ${home}`);
   }
   mkdirSync(join(home, ".deeplake"), { recursive: true, mode: 0o700 });
@@ -83,7 +96,7 @@ export function writeQueue(q: NotificationsQueue): void {
  * the caller (the only legitimate caller is `enqueueNotification`, and
  * the contract there is "best-effort, never throw into the hook hot path").
  */
-function withQueueLock<T>(fn: () => T): T {
+async function withQueueLock<T>(fn: () => T): Promise<T> {
   const path = lockPath();
   mkdirSync(join(homedir(), ".deeplake"), { recursive: true, mode: 0o700 });
   let fd: number | null = null;
@@ -104,12 +117,14 @@ function withQueueLock<T>(fn: () => T): T {
           continue;
         }
       } catch { /* stat/unlink may race with another reclaim — ignore */ }
-      // Standard contention: back off and retry.
+      // Standard contention: yield the event loop instead of spinning
+      // CPU. The earlier `while (Date.now() < end) {}` busy-wait could
+      // hold the loop for up to ~6 s at production defaults, freezing
+      // every other timer/IO callback in the hook process — including
+      // the in-flight embed daemon response. `await sleep(delay)` yields
+      // cleanly with the same backoff curve.
       const delay = LOCK_RETRY_BASE_MS * (attempt + 1);
-      const end = Date.now() + delay;
-      // Spin-wait synchronously; we hold no other resources and the lock
-      // is held for <1 ms typical, so total wait stays bounded.
-      while (Date.now() < end) { /* busy wait */ }
+      await sleep(delay);
     }
   }
   if (fd === null) {
@@ -151,8 +166,8 @@ function sameDedupKey(a: Notification, b: Notification): boolean {
  * process. The drain layer already dedups against the *shown* state in
  * state.ts; this guard prevents redundant queue growth between drains.
  */
-export function enqueueNotification(n: Notification): void {
-  withQueueLock(() => {
+export async function enqueueNotification(n: Notification): Promise<void> {
+  await withQueueLock(() => {
     const q = readQueue();
     if (q.queue.some(existing => sameDedupKey(existing, n))) {
       return;

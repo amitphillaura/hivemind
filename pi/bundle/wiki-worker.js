@@ -170,6 +170,7 @@ function pidPathFor(uid, dir = DEFAULT_SOCKET_DIR) {
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, renameSync as renameSync2, mkdirSync as mkdirSync2, openSync as openSync2, closeSync as closeSync2, unlinkSync as unlinkSync2, statSync } from "node:fs";
 import { join as join3, resolve } from "node:path";
 import { homedir as homedir3 } from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 var log2 = (msg) => log("notifications-queue", msg);
 var LOCK_RETRY_MAX = 50;
 var LOCK_RETRY_BASE_MS = 5;
@@ -193,10 +194,15 @@ function readQueue() {
     return { queue: [] };
   }
 }
+function _isQueuePathInsideHome(path, home) {
+  const r = resolve(path);
+  const h = resolve(home);
+  return r.startsWith(h + "/") || r === h;
+}
 function writeQueue(q) {
   const path = queuePath();
   const home = resolve(homedir3());
-  if (!resolve(path).startsWith(home + "/") && resolve(path) !== home) {
+  if (!_isQueuePathInsideHome(path, home)) {
     throw new Error(`notifications-queue write blocked: ${path} is outside ${home}`);
   }
   mkdirSync2(join3(home, ".deeplake"), { recursive: true, mode: 448 });
@@ -204,7 +210,7 @@ function writeQueue(q) {
   writeFileSync2(tmp, JSON.stringify(q, null, 2), { mode: 384 });
   renameSync2(tmp, path);
 }
-function withQueueLock(fn) {
+async function withQueueLock(fn) {
   const path = lockPath2();
   mkdirSync2(join3(homedir3(), ".deeplake"), { recursive: true, mode: 448 });
   let fd = null;
@@ -225,9 +231,7 @@ function withQueueLock(fn) {
       } catch {
       }
       const delay = LOCK_RETRY_BASE_MS * (attempt + 1);
-      const end = Date.now() + delay;
-      while (Date.now() < end) {
-      }
+      await sleep(delay);
     }
   }
   if (fd === null) {
@@ -252,8 +256,8 @@ function sameDedupKey(a, b) {
     return false;
   return JSON.stringify(a.dedupKey) === JSON.stringify(b.dedupKey);
 }
-function enqueueNotification(n) {
-  withQueueLock(() => {
+async function enqueueNotification(n) {
+  await withQueueLock(() => {
     const q = readQueue();
     if (q.queue.some((existing) => sameDedupKey(existing, n))) {
       return;
@@ -563,21 +567,28 @@ var EmbedClient = class {
     }
     if (status === "user-disabled")
       return;
-    try {
-      enqueueNotification({
-        id: "embed-deps-missing",
-        severity: "warn",
-        title: "Hivemind embeddings disabled \u2014 deps missing",
-        body: `Semantic memory search is off because @huggingface/transformers is not installed where the daemon can find it. Run \`hivemind embeddings install\` to enable.`,
-        dedupKey: { reason: "transformers-missing", detail: detail.slice(0, 200) }
-      });
-    } catch (e) {
+    enqueueNotification({
+      id: "embed-deps-missing",
+      severity: "warn",
+      title: "Hivemind embeddings disabled \u2014 deps missing",
+      body: `Semantic memory search is off because @huggingface/transformers is not installed where the daemon can find it. Run \`hivemind embeddings install\` to enable.`,
+      dedupKey: { reason: "transformers-missing", detail: detail.slice(0, 200) }
+    }).catch((e) => {
       log3(`enqueue embed-deps-missing failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    });
   }
   /**
    * Best-effort SIGTERM + sock/pid cleanup. Tolerant of every missing-file
    * combination and dead-PID cases.
+   *
+   * Identity check: gate the SIGTERM on the daemon's socket file still
+   * existing. We know the daemon was alive moments ago (we either just
+   * got a hello response or the caller saw a transformers-missing error
+   * the daemon emitted), but if the socket file is gone by the time we
+   * try to kill, the daemon process is also gone and the PID we
+   * captured may already have been recycled by the OS to an unrelated
+   * user process. Mirrors the gate added to `killEmbedDaemon` in the
+   * CLI — same failure mode, rarer trigger.
    */
   recycleDaemon(reportedPid) {
     let pid = reportedPid;
@@ -587,11 +598,13 @@ var EmbedClient = class {
       } catch {
       }
     }
-    if (Number.isFinite(pid) && pid !== null && pid > 0) {
+    if (Number.isFinite(pid) && pid !== null && pid > 0 && existsSync3(this.socketPath)) {
       try {
         process.kill(pid, "SIGTERM");
       } catch {
       }
+    } else if (pid !== null) {
+      log3(`recycle: socket gone, skipping SIGTERM on possibly-stale pid ${pid}`);
     }
     try {
       unlinkSync3(this.socketPath);
@@ -703,7 +716,7 @@ var EmbedClient = class {
     const deadline = Date.now() + this.spawnWaitMs;
     let delay = 30;
     while (Date.now() < deadline) {
-      await sleep(delay);
+      await sleep2(delay);
       delay = Math.min(delay * 1.5, 300);
       if (!existsSync3(this.socketPath))
         continue;
@@ -747,7 +760,7 @@ var EmbedClient = class {
     });
   }
 };
-function sleep(ms) {
+function sleep2(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 function isTransformersMissingError(err) {

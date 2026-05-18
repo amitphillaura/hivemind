@@ -223,19 +223,15 @@ describe("killEmbedDaemon — verifies socket before SIGTERM (#2)", () => {
       "../../src/cli/embeddings.js"
     );
 
-    // Simulate a stale pidfile: write our own pid number (so kill would
-    // succeed by SIGTERM permissions) without a live socket binding.
-    // Use the per-uid pidfile path the function expects.
+    // Test isolation: use a per-test tmp dir for the sock/pid files
+    // instead of the real /tmp/hivemind-embed-<uid>.* paths. Without
+    // this, the test would clobber any real daemon's socket/pidfile
+    // for the same uid on the dev machine or CI worker.
     const { pidPathFor, socketPathFor } = await import("../../src/embeddings/protocol.js");
+    const sockDir = mkdtempSync(join(tmpdir(), "kill-test-"));
     const uid = String(process.getuid?.() ?? 0);
-    const pidPath = pidPathFor(uid);
-    const sockPath = socketPathFor(uid);
-
-    // Save any pre-existing artifacts to restore after the test.
-    let prevPid: string | undefined;
-    let prevSock = false;
-    try { prevPid = readFileSync(pidPath, "utf-8"); } catch { /* none */ }
-    try { prevSock = existsSync(sockPath); } catch { /* none */ }
+    const pidPath = pidPathFor(uid, sockDir);
+    const sockPath = socketPathFor(uid, sockDir);
 
     try {
       // Write the *current process's* pid into the file. If the broken
@@ -243,23 +239,22 @@ describe("killEmbedDaemon — verifies socket before SIGTERM (#2)", () => {
       // the fix, the socket-alive probe sees no socket bound and
       // killEmbedDaemon should skip the SIGTERM step entirely.
       writeFileSync(pidPath, String(process.pid));
-      try { rmSync(sockPath); } catch { /* not present */ }
+      // sockPath doesn't exist (we never wrote it), so the probe sees no
+      // socket binding.
 
       // Probe asserts the socket isn't alive.
       expect(_isDaemonAliveOnSocket(sockPath, 100)).toBe(false);
 
       // The call must NOT crash the test runner (i.e. we must NOT
-      // receive SIGTERM). If we get past the next line, the fix held.
-      kill();
+      // receive SIGTERM). Passing the per-test sockDir keeps the call
+      // bound to our tmp paths.
+      kill(sockDir);
 
-      // Sock+pid file cleanup still runs.
+      // Sock+pid file cleanup still runs against the tmp paths.
       expect(existsSync(pidPath)).toBe(false);
       expect(existsSync(sockPath)).toBe(false);
     } finally {
-      if (prevPid !== undefined) writeFileSync(pidPath, prevPid);
-      // (we deliberately don't restore the socket — it's a UDS, not a
-      //  file, and the test machine recreates it on next daemon start)
-      if (!prevSock) try { rmSync(sockPath); } catch { /* none */ }
+      rmSync(sockDir, { recursive: true, force: true });
     }
   }, 30_000);
 });

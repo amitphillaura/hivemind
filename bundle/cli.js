@@ -3827,10 +3827,10 @@ function disableEmbeddings() {
   log(`  Embeddings     disabled in ~/.deeplake/config.json`);
   log(`  Embeddings     daemon terminated; shared deps preserved (run \`hivemind embeddings uninstall\` to remove)`);
 }
-function killEmbedDaemon() {
+function killEmbedDaemon(socketDir) {
   const uid = typeof process.getuid === "function" ? process.getuid() : userInfo().uid;
-  const pidPath = pidPathFor(String(uid));
-  const sockPath = socketPathFor(String(uid));
+  const pidPath = pidPathFor(String(uid), socketDir);
+  const sockPath = socketPathFor(String(uid), socketDir);
   let pid = null;
   try {
     pid = Number.parseInt(readFileSync8(pidPath, "utf-8").trim(), 10);

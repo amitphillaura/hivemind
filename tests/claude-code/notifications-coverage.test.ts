@@ -317,7 +317,7 @@ describe("drainSessionStart — queue drained even when nothing fresh", () => {
     });
 
     const n: Notification = { id: "x", title: "T", body: "B", dedupKey: { v: 1 } };
-    enqueueNotification(n);
+    await enqueueNotification(n);
 
     // First drain: fires, marks as shown
     await drainSessionStart({ agent: "claude-code", creds: null });
@@ -325,7 +325,7 @@ describe("drainSessionStart — queue drained even when nothing fresh", () => {
     expect(readQueue().queue.length).toBe(0);
 
     // Re-enqueue same notification with same dedupKey → fresh.length === 0
-    enqueueNotification(n);
+    await enqueueNotification(n);
     expect(readQueue().queue.length).toBe(1);
 
     writes.length = 0;
@@ -348,7 +348,7 @@ describe("drainSessionStart — queue drained even when nothing fresh", () => {
     vi.spyOn(stateModule, "tryClaim").mockReturnValue(false);
 
     const n: Notification = { id: "y", title: "T2", body: "B2", dedupKey: { v: 99 } };
-    enqueueNotification(n);
+    await enqueueNotification(n);
     await drainSessionStart({ agent: "claude-code", creds: null });
     expect(writes.length).toBe(0);
     expect(readQueue().queue.length).toBe(0); // drained anyway
