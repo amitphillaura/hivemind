@@ -371,15 +371,34 @@ describe("EmbedClient", () => {
 });
 
 describe("isTransformersMissingError", () => {
-  it("matches the Node MODULE_NOT_FOUND form", () => {
+  it("matches Node errors that specifically name @huggingface/transformers", () => {
     expect(isTransformersMissingError("Cannot find module '@huggingface/transformers'")).toBe(true);
-    expect(isTransformersMissingError("MODULE_NOT_FOUND while loading whatever")).toBe(true);
+    expect(isTransformersMissingError(
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@huggingface/transformers' imported from /a/b",
+    )).toBe(true);
+    expect(isTransformersMissingError(
+      "MODULE_NOT_FOUND when resolving @huggingface/transformers from /tmp",
+    )).toBe(true);
   });
 
   it("matches the actionable wrapper thrown by defaultImportTransformers", () => {
     expect(isTransformersMissingError(
       "@huggingface/transformers is not installed anywhere reachable. Run `hivemind embeddings install`...",
     )).toBe(true);
+  });
+
+  it("does NOT match bare MODULE_NOT_FOUND for unrelated dependencies (regression for #10/#14)", () => {
+    // The old matcher classified any MODULE_NOT_FOUND as a transformers
+    // issue, so an onnxruntime-node / sharp / etc. missing-dep failure
+    // would falsely trigger the recycle + "run hivemind embeddings
+    // install" guidance — a command that can't fix non-transformers
+    // problems. The matcher must require @huggingface/transformers OR
+    // the actionable wrapper string to land.
+    expect(isTransformersMissingError("MODULE_NOT_FOUND while loading onnxruntime-node")).toBe(false);
+    expect(isTransformersMissingError("Cannot find module 'sharp'")).toBe(false);
+    expect(isTransformersMissingError(
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'onnxruntime-node' imported from /a/b",
+    )).toBe(false);
   });
 
   it("does not match unrelated daemon errors", () => {

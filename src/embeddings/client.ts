@@ -460,12 +460,23 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Detect daemon-side errors that indicate `@huggingface/transformers` is
- * not resolvable from the daemon's bundle location. Matches both Node's
- * MODULE_NOT_FOUND form and the actionable wrapper we throw from
- * `defaultImportTransformers`.
+ * not resolvable from the daemon's bundle location. Matches:
+ *   - The actionable wrapper we throw from `defaultImportTransformers`
+ *     (contains the literal `hivemind embeddings install`), or
+ *   - A Node module-resolution error that specifically names
+ *     `@huggingface/transformers`.
+ *
+ * Bare `MODULE_NOT_FOUND` (without the package name) used to fall here
+ * too, but that overshoots — it also caught onnxruntime-node / sharp
+ * / etc. missing-dep failures, recycled the daemon for problems
+ * `hivemind embeddings install` can't fix, and surfaced the wrong user
+ * guidance. Any daemon-side import failure of an unrelated dependency
+ * is a packaging bug we should hear about separately, not a request to
+ * reinstall transformers.
  */
 export function isTransformersMissingError(err: string): boolean {
-  return /(@huggingface\/transformers|hivemind embeddings install|MODULE_NOT_FOUND)/i.test(err);
+  if (/hivemind embeddings install/i.test(err)) return true;
+  return /@huggingface\/transformers/i.test(err);
 }
 
 // ── Test helpers ────────────────────────────────────────────────────────────

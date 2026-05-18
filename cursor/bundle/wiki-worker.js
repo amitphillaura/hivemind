@@ -752,7 +752,9 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 function isTransformersMissingError(err) {
-  return /(@huggingface\/transformers|hivemind embeddings install|MODULE_NOT_FOUND)/i.test(err);
+  if (/hivemind embeddings install/i.test(err))
+    return true;
+  return /@huggingface\/transformers/i.test(err);
 }
 
 // dist/src/utils/client-header.js
