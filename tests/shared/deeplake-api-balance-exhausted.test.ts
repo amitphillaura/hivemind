@@ -169,4 +169,23 @@ describe("DeeplakeApi — 402 balance-exhausted handling", () => {
     expect((caught as Error).message).toMatch(/Query failed: 402/);
     expect((caught as Error).message).toMatch(/insufficient balance/);
   });
+
+  it("swallows enqueueNotification rejection: the .catch handler logs but never propagates", async () => {
+    // Override the beforeEach default (mockResolvedValue) for this single
+    // call. Forces the enqueue path to reject so the fire-and-forget
+    // `.catch(...)` handler in deeplake-api.ts runs — proves the original
+    // 402 still throws cleanly and the enqueue failure does not surface
+    // as an unhandled rejection or replace the user-visible error.
+    enqueueNotificationMock.mockRejectedValueOnce(new Error("queue write failed"));
+    fetchMock.mockResolvedValueOnce(
+      bodyResp(402, JSON.stringify({ balance_cents: 0, error: "insufficient balance, please top up" })),
+    );
+    const api = await makeApi();
+    await expect(api.query("SELECT 1")).rejects.toThrow(/Query failed: 402/);
+    expect(enqueueNotificationMock).toHaveBeenCalledTimes(1);
+    // Flush the microtask queue so the .catch handler executes before the
+    // test exits; otherwise the rejection would surface after assertions
+    // as an unhandled-rejection warning.
+    await new Promise(resolve => setImmediate(resolve));
+  });
 });
