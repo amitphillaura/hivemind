@@ -77,11 +77,27 @@ jobs:
         id: release_commit
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          # -f forces gitignored bundles (bundle/, claude-code/bundle/, etc.)
-          # into the index. This commit is what marketplace.json's sha-pinned
-          # source resolves to — Claude Code clones the repo at THIS sha and
-          # finds bundles tracked at claude-code/bundle/, codex/bundle/, etc.
-          git add -fA
+          # Stage in two steps to avoid sweeping in gitignored junk:
+          #   1) `git add -A`        → tracked modifications + non-gitignored
+          #                            untracked (e.g. package.json version
+          #                            bump, package-lock.json refresh,
+          #                            sync-versions edits to 6 manifests).
+          #   2) `git add -f <dirs>` → force-stage ONLY the 7 bundle dirs that
+          #                            are gitignored. This is what marketplace.json's
+          #                            sha-pinned source resolves to.
+          # Earlier draft used `git add -fA` which is "force AND all" —
+          # overrides gitignore for EVERYTHING, sweeping in node_modules/
+          # (~16k files), dist/, and .husky/_/. Either OOMs the husky
+          # pre-commit tsc check or balloons the commit beyond reason.
+          git add -A
+          git add -f \
+            bundle \
+            claude-code/bundle \
+            codex/bundle \
+            cursor/bundle \
+            hermes/bundle \
+            mcp/bundle \
+            pi/bundle
           git commit -m "release: v$VERSION"
           RELEASE_SHA=$(git rev-parse HEAD)
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
