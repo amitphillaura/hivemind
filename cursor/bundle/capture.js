@@ -1386,7 +1386,7 @@ function createSymlinkAtomic(target, link) {
 
 // dist/src/hooks/cursor/capture.js
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { dirname as dirname6, join as join19 } from "node:path";
+import { dirname as dirname7, join as join20 } from "node:path";
 
 // dist/src/hooks/summary-state.js
 import { readFileSync as readFileSync7, writeFileSync as writeFileSync5, writeSync as writeSync2, mkdirSync as mkdirSync6, renameSync as renameSync4, existsSync as existsSync6, unlinkSync as unlinkSync4, openSync as openSync3, closeSync as closeSync3 } from "node:fs";
@@ -1817,25 +1817,34 @@ function spawnSkillifyWorker(opts) {
 }
 
 // dist/src/skillify/state.js
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, writeSync as writeSync3, mkdirSync as mkdirSync10, renameSync as renameSync6, existsSync as existsSync9, unlinkSync as unlinkSync5, openSync as openSync4, closeSync as closeSync4 } from "node:fs";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync8, writeSync as writeSync3, mkdirSync as mkdirSync10, renameSync as renameSync6, rmdirSync, existsSync as existsSync9, lstatSync as lstatSync2, unlinkSync as unlinkSync5, openSync as openSync4, closeSync as closeSync4 } from "node:fs";
 import { execSync as execSync2 } from "node:child_process";
-import { homedir as homedir14 } from "node:os";
 import { createHash } from "node:crypto";
-import { join as join17, basename as basename2 } from "node:path";
+import { join as join18, basename as basename2 } from "node:path";
 
 // dist/src/skillify/legacy-migration.js
 import { existsSync as existsSync8, renameSync as renameSync5 } from "node:fs";
+import { dirname as dirname6, join as join17 } from "node:path";
+
+// dist/src/skillify/state-dir.js
 import { homedir as homedir13 } from "node:os";
 import { join as join16 } from "node:path";
+function getStateDir() {
+  const override = process.env.HIVEMIND_STATE_DIR?.trim();
+  return override && override.length > 0 ? override : join16(homedir13(), ".deeplake", "state", "skillify");
+}
+
+// dist/src/skillify/legacy-migration.js
 var dlog2 = (msg) => log("skillify-migrate", msg);
 var attempted = false;
 function migrateLegacyStateDir() {
+  if (process.env.HIVEMIND_STATE_DIR?.trim())
+    return;
   if (attempted)
     return;
   attempted = true;
-  const root = join16(homedir13(), ".deeplake", "state");
-  const legacy = join16(root, "skilify");
-  const current = join16(root, "skillify");
+  const current = getStateDir();
+  const legacy = join17(dirname6(current), "skilify");
   if (!existsSync8(legacy))
     return;
   if (existsSync8(current))
@@ -1845,8 +1854,8 @@ function migrateLegacyStateDir() {
     dlog2(`migrated ${legacy} -> ${current}`);
   } catch (err) {
     const code = err.code;
-    if (code === "EXDEV" || code === "EPERM") {
-      dlog2(`migration failed (${code}); leaving legacy dir in place`);
+    if (code === "EXDEV" || code === "EPERM" || code === "ENOENT" || code === "EEXIST" || code === "ENOTEMPTY") {
+      dlog2(`migration skipped (${code}); legacy dir left as-is or another process handled it`);
       return;
     }
     throw err;
@@ -1855,17 +1864,16 @@ function migrateLegacyStateDir() {
 
 // dist/src/skillify/state.js
 var dlog3 = (msg) => log("skillify-state", msg);
-var STATE_DIR2 = join17(homedir14(), ".deeplake", "state", "skillify");
 var YIELD_BUF2 = new Int32Array(new SharedArrayBuffer(4));
 var TRIGGER_THRESHOLD = (() => {
   const n = Number(process.env.HIVEMIND_SKILLIFY_EVERY_N_TURNS ?? "");
   return Number.isInteger(n) && n > 0 ? n : 20;
 })();
 function statePath2(projectKey) {
-  return join17(STATE_DIR2, `${projectKey}.json`);
+  return join18(getStateDir(), `${projectKey}.json`);
 }
 function lockPath3(projectKey) {
-  return join17(STATE_DIR2, `${projectKey}.lock`);
+  return join18(getStateDir(), `${projectKey}.lock`);
 }
 var DEFAULT_PORTS = {
   http: "80",
@@ -1921,7 +1929,7 @@ function readState2(projectKey) {
 }
 function writeState2(projectKey, state) {
   migrateLegacyStateDir();
-  mkdirSync10(STATE_DIR2, { recursive: true });
+  mkdirSync10(getStateDir(), { recursive: true });
   const p = statePath2(projectKey);
   const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync8(tmp, JSON.stringify(state, null, 2));
@@ -1929,7 +1937,7 @@ function writeState2(projectKey, state) {
 }
 function withRmwLock2(projectKey, fn) {
   migrateLegacyStateDir();
-  mkdirSync10(STATE_DIR2, { recursive: true });
+  mkdirSync10(getStateDir(), { recursive: true });
   const rmw = lockPath3(projectKey) + ".rmw";
   const deadline = Date.now() + 2e3;
   let fd = null;
@@ -1989,7 +1997,7 @@ function resetCounter(projectKey) {
 }
 function tryAcquireWorkerLock(projectKey, maxAgeMs = 10 * 60 * 1e3) {
   migrateLegacyStateDir();
-  mkdirSync10(STATE_DIR2, { recursive: true });
+  mkdirSync10(getStateDir(), { recursive: true });
   const p = lockPath3(projectKey);
   if (existsSync9(p)) {
     try {
@@ -2002,8 +2010,22 @@ function tryAcquireWorkerLock(projectKey, maxAgeMs = 10 * 60 * 1e3) {
     try {
       unlinkSync5(p);
     } catch (unlinkErr) {
-      dlog3(`could not unlink stale worker lock for ${projectKey}: ${unlinkErr.message}`);
-      return false;
+      if (unlinkErr?.code !== "EISDIR" && unlinkErr?.code !== "EPERM" && unlinkErr?.code !== "ENOENT") {
+        dlog3(`could not unlink stale worker lock for ${projectKey}: ${unlinkErr.message}`);
+        return false;
+      }
+      let isDir = false;
+      try {
+        isDir = lstatSync2(p).isDirectory();
+      } catch {
+      }
+      if (isDir) {
+        try {
+          rmdirSync(p);
+        } catch (rmErr) {
+          dlog3(`rmdir stale lock skipped for ${projectKey}: ${rmErr.message}`);
+        }
+      }
     }
   }
   try {
@@ -2028,13 +2050,14 @@ function releaseWorkerLock(projectKey) {
 
 // dist/src/skillify/scope-config.js
 import { existsSync as existsSync10, mkdirSync as mkdirSync11, readFileSync as readFileSync10, writeFileSync as writeFileSync9 } from "node:fs";
-import { homedir as homedir15 } from "node:os";
-import { join as join18 } from "node:path";
-var STATE_DIR3 = join18(homedir15(), ".deeplake", "state", "skillify");
-var CONFIG_PATH = join18(STATE_DIR3, "config.json");
+import { join as join19 } from "node:path";
+function configPath() {
+  return join19(getStateDir(), "config.json");
+}
 var DEFAULT = { scope: "me", team: [], install: "project" };
 function loadScopeConfig() {
   migrateLegacyStateDir();
+  const CONFIG_PATH = configPath();
   if (!existsSync10(CONFIG_PATH))
     return DEFAULT;
   try {
@@ -2091,9 +2114,9 @@ function tryStopCounterTrigger(opts) {
 // dist/src/hooks/cursor/capture.js
 var log5 = (msg) => log("cursor-capture", msg);
 function resolveEmbedDaemonPath() {
-  return join19(dirname6(fileURLToPath3(import.meta.url)), "embeddings", "embed-daemon.js");
+  return join20(dirname7(fileURLToPath3(import.meta.url)), "embeddings", "embed-daemon.js");
 }
-var __bundleDir = dirname6(fileURLToPath3(import.meta.url));
+var __bundleDir = dirname7(fileURLToPath3(import.meta.url));
 var PLUGIN_VERSION = getInstalledVersion(__bundleDir, ".claude-plugin") ?? "";
 if (!embeddingsDisabled()) {
   try {
