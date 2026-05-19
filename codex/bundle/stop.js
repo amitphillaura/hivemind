@@ -881,6 +881,8 @@ function getStateDir() {
 var dlog = (msg) => log("skillify-migrate", msg);
 var attemptedFor = /* @__PURE__ */ new Set();
 function migrateLegacyStateDir() {
+  if (process.env.HIVEMIND_STATE_DIR?.trim())
+    return;
   const current = getStateDir();
   if (attemptedFor.has(current))
     return;
