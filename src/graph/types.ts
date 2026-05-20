@@ -53,8 +53,6 @@ export interface GraphMetadata {
   commit_sha: string | null;
   /** Stable per-repo identifier — sha1 of normalized git remote URL. */
   repo_key: string;
-  /** Human-friendly basename of the worktree root. */
-  repo_project: string;
 }
 
 /**
@@ -73,6 +71,12 @@ export interface GraphObservation {
   branch: string | null;
   /** Absolute path of THIS worktree (multi-worktree disambiguator). */
   worktree_path: string;
+  /**
+   * Human-friendly basename of the worktree root. Observation only: the
+   * same repo cloned to `/tmp/a` vs `/work/project-copy` produces different
+   * basenames; basename does NOT belong to repo identity (repo_key does).
+   */
+  repo_project: string;
   /**
    * hivemind plugin version this snapshot was built with. Observation only:
    * a version bump that doesn't change `schema_version` shouldn't invalidate
