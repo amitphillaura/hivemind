@@ -220,9 +220,10 @@ describe("install consent gate — non-TTY paths", () => {
     expect(ensureLoggedInMock).not.toHaveBeenCalled();
     expect(loginWithProvidedTokenMock).not.toHaveBeenCalled();
     expect(installs.installClaude).toHaveBeenCalledTimes(1);
-    expect(stdoutText()).toContain("Hivemind install completed without sign-in");
+    expect(stdoutText()).toContain("No TTY detected");
     expect(stdoutText()).toContain("--token <value>");
     expect(stdoutText()).toContain("DEEPLAKE_API_TOKEN");
+    expect(stdoutText()).toContain("HIVEMIND_TOKEN");
     expect(stdoutText()).toContain("hivemind login");
     expect(exitSpy).not.toHaveBeenCalled();
   });

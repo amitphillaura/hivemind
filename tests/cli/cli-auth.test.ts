@@ -22,6 +22,7 @@ import { join } from "node:path";
 
 const loginMock = vi.fn();
 const listOrgsMock = vi.fn();
+const saveCredentialsFromTokenMock = vi.fn();
 const stdoutWriteMock = vi.fn();
 const stderrWriteMock = vi.fn();
 
@@ -61,6 +62,7 @@ async function importFresh(): Promise<typeof import("../../src/cli/auth.js")> {
       ...actual,
       login: (...a: unknown[]) => loginMock(...a),
       listOrgs: (...a: unknown[]) => listOrgsMock(...a),
+      saveCredentialsFromToken: (...a: unknown[]) => saveCredentialsFromTokenMock(...a),
     };
   });
   return await import("../../src/cli/auth.js");
@@ -70,8 +72,11 @@ beforeEach(() => {
   TEMP_HOME = mkdtempSync(join(tmpdir(), "hivemind-cli-auth-"));
   loginMock.mockReset().mockResolvedValue(undefined);
   listOrgsMock.mockReset().mockResolvedValue([]);
+  saveCredentialsFromTokenMock.mockReset().mockResolvedValue(undefined);
   stdoutWriteMock.mockReset();
   stderrWriteMock.mockReset();
+  delete process.env.DEEPLAKE_API_TOKEN;
+  delete process.env.HIVEMIND_TOKEN;
   vi.spyOn(process.stdout, "write").mockImplementation(((...a: unknown[]) => { stdoutWriteMock(...a); return true; }) as any);
   vi.spyOn(process.stderr, "write").mockImplementation(((...a: unknown[]) => { stderrWriteMock(...a); return true; }) as any);
   delete process.env.HIVEMIND_API_URL;
@@ -224,5 +229,68 @@ describe("maybeShowOrgChoice", () => {
     await expect(maybeShowOrgChoice()).resolves.toBeUndefined();
     expect(stdoutWriteMock).not.toHaveBeenCalled();
     expect(stderrWriteMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("loginWithProvidedToken", () => {
+  it("returns false (no-op) when no token in env or flag", async () => {
+    const { loginWithProvidedToken } = await importFresh();
+    const ok = await loginWithProvidedToken();
+    expect(ok).toBe(false);
+    expect(saveCredentialsFromTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("uses --token flag value, skipTokenMint=true, logs '--token flag'", async () => {
+    saveCredentialsFromTokenMock.mockResolvedValue(undefined);
+    const { loginWithProvidedToken } = await importFresh();
+    const ok = await loginWithProvidedToken("flag-tok");
+    expect(ok).toBe(true);
+    expect(saveCredentialsFromTokenMock).toHaveBeenCalledTimes(1);
+    expect(saveCredentialsFromTokenMock).toHaveBeenCalledWith("flag-tok", "https://api.deeplake.ai", { skipTokenMint: true });
+    expect(stdoutWriteMock.mock.calls.map(c => c[0]).join("")).toContain("Signed in via --token flag.");
+  });
+
+  it("falls back to DEEPLAKE_API_TOKEN when no flag, logs 'DEEPLAKE_API_TOKEN'", async () => {
+    process.env.DEEPLAKE_API_TOKEN = "env-tok";
+    saveCredentialsFromTokenMock.mockResolvedValue(undefined);
+    const { loginWithProvidedToken } = await importFresh();
+    const ok = await loginWithProvidedToken();
+    expect(ok).toBe(true);
+    expect(saveCredentialsFromTokenMock).toHaveBeenCalledWith("env-tok", "https://api.deeplake.ai", { skipTokenMint: true });
+    expect(stdoutWriteMock.mock.calls.map(c => c[0]).join("")).toContain("Signed in via DEEPLAKE_API_TOKEN.");
+  });
+
+  it("HIVEMIND_TOKEN fallback when neither flag nor DEEPLAKE_API_TOKEN", async () => {
+    process.env.HIVEMIND_TOKEN = "hm-tok";
+    saveCredentialsFromTokenMock.mockResolvedValue(undefined);
+    const { loginWithProvidedToken } = await importFresh();
+    const ok = await loginWithProvidedToken();
+    expect(ok).toBe(true);
+    expect(saveCredentialsFromTokenMock).toHaveBeenCalledWith("hm-tok", "https://api.deeplake.ai", { skipTokenMint: true });
+  });
+
+  it("flag value beats env value (priority)", async () => {
+    process.env.DEEPLAKE_API_TOKEN = "env-tok";
+    saveCredentialsFromTokenMock.mockResolvedValue(undefined);
+    const { loginWithProvidedToken } = await importFresh();
+    await loginWithProvidedToken("flag-tok");
+    expect(saveCredentialsFromTokenMock).toHaveBeenCalledWith("flag-tok", "https://api.deeplake.ai", { skipTokenMint: true });
+  });
+
+  it("HIVEMIND_API_URL takes precedence over default", async () => {
+    process.env.HIVEMIND_API_URL = "https://hm.example";
+    saveCredentialsFromTokenMock.mockResolvedValue(undefined);
+    const { loginWithProvidedToken } = await importFresh();
+    await loginWithProvidedToken("tok");
+    expect(saveCredentialsFromTokenMock).toHaveBeenCalledWith("tok", "https://hm.example", { skipTokenMint: true });
+  });
+
+  it("returns false + warns when saveCredentialsFromToken rejects", async () => {
+    saveCredentialsFromTokenMock.mockRejectedValue(new Error("API 401: invalid"));
+    const { loginWithProvidedToken } = await importFresh();
+    const ok = await loginWithProvidedToken("bad-tok");
+    expect(ok).toBe(false);
+    const stderrText = stderrWriteMock.mock.calls.map(c => c[0]).join("");
+    expect(stderrText).toContain("Token authentication failed: API 401: invalid. Continuing install.");
   });
 });

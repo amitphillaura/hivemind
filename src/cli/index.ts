@@ -163,9 +163,9 @@ async function runAuthGate(args: string[]): Promise<void> {
 
   if (!isTTY) {
     log("");
-    log("Hivemind install completed without sign-in (no TTY detected).");
-    log("To enable shared memory now, rerun with `--token <value>` or set");
-    log("DEEPLAKE_API_TOKEN. Otherwise run `hivemind login` after install.");
+    log("No TTY detected — continuing without sign-in.");
+    log("To sign in, rerun with `--token <value>`, set DEEPLAKE_API_TOKEN");
+    log("or HIVEMIND_TOKEN, or run `hivemind login` after install.");
     return;
   }
 

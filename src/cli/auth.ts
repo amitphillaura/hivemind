@@ -44,7 +44,11 @@ export async function loginWithProvidedToken(flagToken?: string): Promise<boolea
 
   try {
     await saveCredentialsFromToken(token, resolveApiUrl(), { skipTokenMint: true });
-    const source = flagToken ? "--token flag" : "DEEPLAKE_API_TOKEN";
+    const source = flagToken
+      ? "--token flag"
+      : process.env.DEEPLAKE_API_TOKEN
+        ? "DEEPLAKE_API_TOKEN"
+        : "HIVEMIND_TOKEN";
     log(`Signed in via ${source}.`);
     return true;
   } catch (err) {

@@ -50,6 +50,8 @@ The installer detects every supported assistant on your machine (table below), w
 ```bash
 DEEPLAKE_API_TOKEN=<your-token> hivemind install
 # or
+HIVEMIND_TOKEN=<your-token> hivemind install
+# or
 hivemind install --token <your-token>
 ```
 

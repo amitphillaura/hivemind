@@ -51,7 +51,9 @@ function spawnInstall(env: Record<string, string>): Promise<{ code: number | nul
       child.kill("SIGKILL");
       reject(new Error(`bundle/cli.js install hung past 5s (likely readline on closed stdin). stdout=${stdout} stderr=${stderr}`));
     }, 5000);
-    child.on("exit", (code) => {
+    // Use "close" not "exit": close fires after stdio streams flush, so
+    // the buffered stdout/stderr we assert on is guaranteed complete.
+    child.on("close", (code) => {
       clearTimeout(timer);
       resolveSpawn({ code, stdout, stderr });
     });
@@ -98,7 +100,7 @@ describe("bundle/cli.js install — non-TTY smoke", () => {
     const { code, stdout, stderr } = await spawnInstall({});
     expect(code).toBe(0);
     const combined = stdout + stderr;
-    expect(combined).toContain("Hivemind install completed without sign-in");
+    expect(combined).toContain("No TTY detected");
     expect(combined).toContain("--token <value>");
     expect(combined).toContain("DEEPLAKE_API_TOKEN");
     expect(combined).toContain("hivemind login");
@@ -118,6 +120,6 @@ describe("bundle/cli.js install — non-TTY smoke", () => {
     expect(combined).toContain("Token authentication failed");
     expect(combined).toContain("Continuing install");
     // Headless hint must NOT print when a token was attempted (rule 8).
-    expect(combined).not.toContain("Hivemind install completed without sign-in");
+    expect(combined).not.toContain("No TTY detected");
   });
 });
