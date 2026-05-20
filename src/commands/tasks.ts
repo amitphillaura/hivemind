@@ -31,10 +31,16 @@
  *       Reassign the task to another user. Preserves text, scope, status.
  *       `<user>` must match the target's `cfg.userName` (see identity
  *       contract above).
+ *   hivemind tasks progress <task-id> <kpi-id> --value N [--note "..."]
+ *       Append a KPI progress event (source='user'). The event is
+ *       attributed to the current task version, so a later edit
+ *       doesn't accidentally rebind progress. Negative values allowed
+ *       (corrections).
  *   hivemind tasks report [<task-id>]
- *       (stub in T3) — KPI progress summary. The aggregation depends on
- *       the events table which lands in T5. Today this prints a deferred
- *       notice so we don't ship a half-working command.
+ *       KPI progress summary computed from the task_events stream.
+ *       Without an argument, lists every active task assigned to the
+ *       current user and prints current/target per KPI. With an
+ *       argument, dives into the single task.
  */
 
 import { loadConfig } from "../config.js";
@@ -46,11 +52,13 @@ import {
   markTaskDone,
   assignTask,
   listTasks,
+  getTaskLatest,
   type TaskRow,
   type TaskScope,
   type ScopeFilter,
   type Kpi,
 } from "../tasks/index.js";
+import { appendEvent, computeAllForTask } from "../events/index.js";
 
 const USAGE = `
 hivemind tasks — manage personal + team tasks
@@ -61,7 +69,8 @@ Usage:
   hivemind tasks edit <task-id> "<new text>"
   hivemind tasks done <task-id>
   hivemind tasks assign <task-id> <user>
-  hivemind tasks report [<task-id>]    (T5: events / KPI aggregation)
+  hivemind tasks progress <task-id> <kpi-id> --value N [--note "..."]
+  hivemind tasks report [<task-id>]
 
 Identity: <user> must match what \`hivemind whoami\` shows for the
 target user. Comparisons are exact (no fuzzy / email matching in v1).
@@ -156,13 +165,42 @@ function parseLimit(args: string[]): number {
 }
 
 /**
+ * Parse the --value flag for `tasks progress`. Required; finite (allows
+ * negatives for corrections); rejects NaN / Infinity. Unlike --limit
+ * this is NOT required to be a positive integer — float deltas are
+ * legal (e.g. partial completion).
+ */
+function parseValue(args: string[]): number {
+  const idx = args.findIndex(a => a === "--value" || a.startsWith("--value="));
+  if (idx === -1) {
+    console.error("Missing required --value <N> flag.");
+    process.exit(1);
+    throw new Error("unreachable");
+  }
+  const raw = args[idx].includes("=") ? args[idx].split("=", 2)[1] : args[idx + 1];
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    console.error(`Invalid --value: ${raw}. Must be a finite number.`);
+    process.exit(1);
+    throw new Error("unreachable");
+  }
+  return n;
+}
+
+function parseNote(args: string[]): string {
+  const idx = args.findIndex(a => a === "--note" || a.startsWith("--note="));
+  if (idx === -1) return "";
+  return args[idx].includes("=") ? args[idx].split("=", 2)[1] : (args[idx + 1] ?? "");
+}
+
+/**
  * Drop known flag tokens (and their values) from `args` so positional
  * argument scans only see text / task_id / user_email. Recognises the
  * flags this command actually uses; unknown flags pass through unchanged
  * so adding a new flag doesn't accidentally swallow a positional.
  */
 function stripKnownFlags(args: string[]): string[] {
-  const VALUE_FLAGS = new Set(["--scope", "--status", "--limit", "--assign"]);
+  const VALUE_FLAGS = new Set(["--scope", "--status", "--limit", "--assign", "--value", "--note"]);
   const BOOL_FLAGS = new Set(["--mine", "--team", "--all"]);
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -326,14 +364,129 @@ export async function runTasksCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "progress") {
+    const positional = stripKnownFlags(args.slice(1));
+    const taskId = positional[0];
+    const kpiId = positional[1];
+    if (!taskId || !kpiId) {
+      console.error("Usage: hivemind tasks progress <task-id> <kpi-id> --value N [--note \"...\"]");
+      process.exit(1);
+      throw new Error("unreachable");
+    }
+    const value = parseValue(args.slice(1));
+    const note = parseNote(args.slice(1));
+    // Bind the event to the CURRENT task version: a later edit (which
+    // INSERTs version+1) shouldn't be retroactively credited with
+    // progress, so we capture the version at write time. SELECT cost
+    // is one extra round-trip per emission — fine for a CLI command
+    // that runs at human cadence.
+    const task = await getTaskLatest(api.query.bind(api), tableName, taskId);
+    if (!task) {
+      console.error(`Task not found: ${taskId}`);
+      process.exit(1);
+      throw new Error("unreachable");
+    }
+    try {
+      const out = await appendEvent(
+        api.query.bind(api),
+        cfg.taskEventsTableName,
+        {
+          task_id: taskId,
+          task_version: task.version,
+          kpi_id: kpiId,
+          value,
+          note,
+          source: "user",
+          agent: "manual",
+          plugin_version: pluginVersion,
+        },
+      );
+      console.log(`Recorded progress: task ${taskId} kpi ${kpiId} value ${value} (event ${out.id}).`);
+    } catch (err) {
+      // The task_events table may not exist yet — try to create it
+      // and retry once. Mirrors the lazy-create pattern in
+      // src/hooks/capture.ts.
+      const msg = (err as Error).message;
+      if (msg.includes("does not exist") || msg.includes("permission denied")) {
+        try {
+          await api.ensureTaskEventsTable(cfg.taskEventsTableName);
+          const out = await appendEvent(
+            api.query.bind(api),
+            cfg.taskEventsTableName,
+            {
+              task_id: taskId,
+              task_version: task.version,
+              kpi_id: kpiId,
+              value,
+              note,
+              source: "user",
+              agent: "manual",
+              plugin_version: pluginVersion,
+            },
+          );
+          console.log(`Recorded progress: task ${taskId} kpi ${kpiId} value ${value} (event ${out.id}).`);
+        } catch (retryErr) {
+          console.error(`Progress failed: ${(retryErr as Error).message}`);
+          process.exit(1);
+        }
+      } else {
+        console.error(`Progress failed: ${msg}`);
+        process.exit(1);
+      }
+    }
+    return;
+  }
+
   if (sub === "report") {
-    // T3 stub: KPI aggregation requires the hivemind_task_events table
-    // and aggregate.computeCurrent() which both land in T5. We print a
-    // clear notice rather than silently returning zero progress (which
-    // would be indistinguishable from "real" zero progress and mislead
-    // the user about whether the feature is wired up yet).
-    console.log("report: KPI progress aggregation lands with the events module in T5.");
-    console.log("       Today `hivemind tasks list` already prints the static KPI definitions.");
+    // Pull the set of tasks to report on. With an explicit task-id
+    // positional we focus to that one row; without, we mirror the
+    // default `list` scope (--mine + active) so `report` answers
+    // "what's MY progress?" by default.
+    const positional = stripKnownFlags(args.slice(1));
+    const targetTaskId = positional[0];
+
+    let tasksToReport: TaskRow[];
+    if (targetTaskId) {
+      const one = await getTaskLatest(api.query.bind(api), tableName, targetTaskId);
+      if (!one) {
+        console.error(`Task not found: ${targetTaskId}`);
+        process.exit(1);
+        throw new Error("unreachable");
+      }
+      tasksToReport = [one];
+    } else {
+      tasksToReport = await listTasks(api.query.bind(api), tableName, {
+        scope: "mine",
+        status: "active",
+        current_user: cfg.userName,
+        limit: 50, // report is the dive-deep view; allow a higher cap than list's 10
+      });
+    }
+
+    if (tasksToReport.length === 0) {
+      console.log("(no active tasks to report on)");
+      return;
+    }
+
+    // Per-task: pull aggregated KPI totals in one round-trip via
+    // computeAllForTask, then render current/target/unit for each KPI
+    // defined on the task. KPIs with no events show 0/target.
+    for (const task of tasksToReport) {
+      console.log(formatListRow(task));
+      const totals = await computeAllForTask(
+        api.query.bind(api),
+        cfg.taskEventsTableName,
+        task.task_id,
+      );
+      if (task.kpis.length === 0) {
+        console.log("    (no KPIs defined yet — T4 will plug LLM generation)");
+        continue;
+      }
+      for (const k of task.kpis) {
+        const current = totals[k.kpi_id] ?? 0;
+        console.log(`    - ${k.name}: ${current}/${k.target} ${k.unit}`);
+      }
+    }
     return;
   }
 

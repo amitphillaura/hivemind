@@ -112,8 +112,10 @@ Personal + team tasks (SessionStart injection + KPI gen in follow-ups):
   hivemind tasks edit <task-id> "<new text>"   Edit a task (bumps version).
   hivemind tasks done <task-id>                Mark a task done.
   hivemind tasks assign <task-id> <user>       Reassign a task.
-  hivemind tasks report [<task-id>]            (T5) KPI progress aggregation.
-  Note: KPIs land empty in T3; T4 adds LLM-driven generation. SessionStart
+  hivemind tasks progress <task-id> <kpi-id> --value N [--note "..."]
+                                               Append a KPI progress event.
+  hivemind tasks report [<task-id>]            KPI progress summary (computed from events).
+  Note: KPIs land empty until T4 adds LLM-driven generation. SessionStart
   injection of relevant tasks lands in T6. <user> values must match the
   target user's 'hivemind whoami' output exactly (no fuzzy email matching in v1).
 

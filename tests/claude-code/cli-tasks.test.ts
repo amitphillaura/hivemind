@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const ensureTasksTableMock = vi.fn();
+const ensureTaskEventsTableMock = vi.fn();
 const queryMock = vi.fn();
 
 vi.mock("../../src/config.js", () => ({
@@ -23,6 +24,7 @@ vi.mock("../../src/deeplake-api.js", () => ({
       _tableName: string,
     ) { /* nothing */ }
     ensureTasksTable(name: string) { return ensureTasksTableMock(name); }
+    ensureTaskEventsTable(name: string) { return ensureTaskEventsTableMock(name); }
     query(sql: string) { return queryMock(sql); }
   },
 }));
@@ -61,6 +63,7 @@ beforeEach(() => {
   logged = [];
   erred = [];
   ensureTasksTableMock.mockReset().mockResolvedValue(undefined);
+  ensureTaskEventsTableMock.mockReset().mockResolvedValue(undefined);
   queryMock.mockReset().mockResolvedValue([]);
   loadConfigMock.mockReset().mockReturnValue(VALID_CONFIG);
   logSpy = vi.spyOn(console, "log").mockImplementation((...a: any[]) => { logged.push(a.join(" ")); });
@@ -355,17 +358,169 @@ describe("runTasksCommand — assign", () => {
   });
 });
 
-// ── report (stub) ───────────────────────────────────────────────────────────
+// ── progress ────────────────────────────────────────────────────────────────
 
-describe("runTasksCommand — report (T3 stub)", () => {
-  it("prints a deferred notice rather than silently returning zero progress", async () => {
+describe("runTasksCommand — progress", () => {
+  it("looks up the task version, then INSERTs an event bound to that version", async () => {
+    // SELECT latest task → INSERT event
+    queryMock.mockResolvedValueOnce([fakeRow({ version: 3 })]);
+    queryMock.mockResolvedValueOnce([]);
+    await runTasksCommand([
+      "progress",
+      "task-aaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      "k_pr_merged",
+      "--value", "1",
+      "--note", "merged PR #42",
+    ]);
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    // First call: SELECT for getTaskLatest (compound ORDER BY)
+    expect(queryMock.mock.calls[0][0]).toMatch(/^SELECT .* FROM "hivemind_tasks"/);
+    expect(queryMock.mock.calls[0][0]).toContain(`task_id = 'task-aaaa-bbbb-cccc-dddd-eeeeeeeeeeee'`);
+    // Second call: INSERT into task_events with the resolved version
+    const insertSql = queryMock.mock.calls[1][0];
+    expect(insertSql).toMatch(/^INSERT INTO "hivemind_task_events"/);
+    expect(insertSql).toContain(`'task-aaaa-bbbb-cccc-dddd-eeeeeeeeeeee'`);
+    expect(insertSql).toContain(`'k_pr_merged'`);
+    expect(insertSql).toContain(", 3, ");          // task_version (from getTaskLatest)
+    expect(insertSql).toContain("'user'");          // source
+    expect(insertSql).toContain(`E'merged PR #42'`);
+    expect(logged.some(l => l.includes("Recorded progress") && l.includes("k_pr_merged") && l.includes("value 1"))).toBe(true);
+  });
+
+  it("accepts --value=N (= form)", async () => {
+    queryMock.mockResolvedValueOnce([fakeRow({ version: 1 })]);
+    queryMock.mockResolvedValueOnce([]);
+    await runTasksCommand([
+      "progress", "task-aaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "k_pr_merged", "--value=2",
+    ]);
+    expect(queryMock.mock.calls[1][0]).toContain(", 2, ");
+  });
+
+  it("accepts negative --value (corrections)", async () => {
+    queryMock.mockResolvedValueOnce([fakeRow({ version: 1 })]);
+    queryMock.mockResolvedValueOnce([]);
+    await runTasksCommand(["progress", "task-x", "k_x", "--value", "-1"]);
+    expect(queryMock.mock.calls[1][0]).toContain(", -1, ");
+  });
+
+  it("rejects missing positional args (task-id or kpi-id)", async () => {
+    await expectExit(1, () => runTasksCommand(["progress"]));
+    await expectExit(1, () => runTasksCommand(["progress", "task-id"]));
+    expect(erred.some(l => l.includes("Usage: hivemind tasks progress"))).toBe(true);
+  });
+
+  it("rejects missing --value flag", async () => {
+    await expectExit(1, () => runTasksCommand(["progress", "task-x", "k_x"]));
+    expect(erred.some(l => l.includes("Missing required --value"))).toBe(true);
+  });
+
+  it("rejects non-finite --value (NaN / Infinity)", async () => {
+    await expectExit(1, () => runTasksCommand(["progress", "task-x", "k_x", "--value", "not-a-number"]));
+    expect(erred.some(l => l.includes("Invalid --value"))).toBe(true);
+  });
+
+  it("exits 1 when the task does not exist", async () => {
+    queryMock.mockResolvedValueOnce([]); // SELECT returns nothing
+    await expectExit(1, () => runTasksCommand(["progress", "missing", "k_x", "--value", "1"]));
+    expect(erred.some(l => l.includes("Task not found: missing"))).toBe(true);
+    // No INSERT — only the SELECT was issued.
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("lazy-creates task_events on first event of a fresh session, then retries", async () => {
+    // SELECT (success) → INSERT (table missing) → INSERT (after ensure)
+    queryMock.mockResolvedValueOnce([fakeRow({ version: 1 })]);
+    queryMock.mockRejectedValueOnce(new Error(`relation "hivemind_task_events" does not exist`));
+    queryMock.mockResolvedValueOnce([]);
+    await runTasksCommand(["progress", "task-x", "k_x", "--value", "1"]);
+    expect(ensureTaskEventsTableMock).toHaveBeenCalledTimes(1);
+    expect(ensureTaskEventsTableMock).toHaveBeenCalledWith("hivemind_task_events");
+    // 1 SELECT + 1 failed INSERT + 1 retry INSERT = 3 queries
+    expect(queryMock).toHaveBeenCalledTimes(3);
+    expect(logged.some(l => l.includes("Recorded progress"))).toBe(true);
+  });
+});
+
+// ── report ──────────────────────────────────────────────────────────────────
+
+describe("runTasksCommand — report", () => {
+  it("empty state: prints (no active tasks to report on) when listTasks returns []", async () => {
+    queryMock.mockResolvedValueOnce([]); // listTasks SELECT
     await runTasksCommand(["report"]);
-    expect(logged.some(l => l.includes("KPI progress aggregation lands with the events module in T5"))).toBe(true);
-    // No INSERT/UPDATE — read-only stub today
-    const writeQueries = queryMock.mock.calls
-      .map(c => c[0])
-      .filter((s: string) => /^(INSERT|UPDATE)/.test(s));
-    expect(writeQueries).toEqual([]);
+    expect(logged.some(l => l.includes("(no active tasks to report on)"))).toBe(true);
+    // listTasks + nothing else
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("per-task: aggregates events via SUM and renders current/target per KPI", async () => {
+    const KPI = {
+      kpi_id: "k_pr",
+      name: "PRs merged",
+      target: 5,
+      unit: "count",
+      generated_by: "manual",
+      generated_at: "2026-05-20T10:00:00Z",
+    };
+    queryMock.mockResolvedValueOnce([
+      fakeRow({ task_id: "T1", kpis: JSON.stringify([KPI]) }),
+    ]);
+    // computeAllForTask SELECT GROUP BY kpi_id → returns aggregated total
+    queryMock.mockResolvedValueOnce([{ kpi_id: "k_pr", total: 3 }]);
+    await runTasksCommand(["report"]);
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock.mock.calls[1][0]).toMatch(/SUM\(value\)/);
+    expect(queryMock.mock.calls[1][0]).toMatch(/GROUP BY kpi_id/);
+    expect(logged.some(l => l.includes("PRs merged: 3/5 count"))).toBe(true);
+  });
+
+  it("KPIs with no events show 0/target (distinguishable from missing data)", async () => {
+    const KPI = {
+      kpi_id: "k_pr",
+      name: "PRs merged",
+      target: 5,
+      unit: "count",
+      generated_by: "manual",
+      generated_at: "2026-05-20T10:00:00Z",
+    };
+    queryMock.mockResolvedValueOnce([
+      fakeRow({ task_id: "T1", kpis: JSON.stringify([KPI]) }),
+    ]);
+    queryMock.mockResolvedValueOnce([]); // no events
+    await runTasksCommand(["report"]);
+    expect(logged.some(l => l.includes("PRs merged: 0/5 count"))).toBe(true);
+  });
+
+  it("targeted: report <task-id> dives into one task (no listTasks call)", async () => {
+    const KPI = {
+      kpi_id: "k_pr",
+      name: "PRs merged",
+      target: 5,
+      unit: "count",
+      generated_by: "manual",
+      generated_at: "2026-05-20T10:00:00Z",
+    };
+    // getTaskLatest SELECT (single row) → computeAllForTask SELECT
+    queryMock.mockResolvedValueOnce([fakeRow({ task_id: "T-specific", kpis: JSON.stringify([KPI]) })]);
+    queryMock.mockResolvedValueOnce([{ kpi_id: "k_pr", total: 1 }]);
+    await runTasksCommand(["report", "T-specific"]);
+    // First query was getTaskLatest (compound ORDER BY + LIMIT 1), NOT listTasks
+    expect(queryMock.mock.calls[0][0]).toContain("LIMIT 1");
+    expect(queryMock.mock.calls[0][0]).toContain(`task_id = 'T-specific'`);
+    expect(logged.some(l => l.includes("T-specific"))).toBe(true);
+    expect(logged.some(l => l.includes("PRs merged: 1/5 count"))).toBe(true);
+  });
+
+  it("targeted: report <missing-task-id> exits 1 with clear error", async () => {
+    queryMock.mockResolvedValueOnce([]); // getTaskLatest returns nothing
+    await expectExit(1, () => runTasksCommand(["report", "ghost-task"]));
+    expect(erred.some(l => l.includes("Task not found: ghost-task"))).toBe(true);
+  });
+
+  it("task with no KPIs prints the 'T4 will plug LLM generation' hint", async () => {
+    queryMock.mockResolvedValueOnce([fakeRow({ kpis: "[]" })]);    // listTasks
+    queryMock.mockResolvedValueOnce([]);                            // computeAllForTask
+    await runTasksCommand(["report"]);
+    expect(logged.some(l => l.includes("no KPIs defined yet"))).toBe(true);
   });
 });
 
