@@ -9,4 +9,4 @@
 export { appendEvent } from "./append.js";
 export type { AppendEventInput, AppendResult, EventSource, QueryFn } from "./append.js";
 
-export { computeCurrent, computeAllForTask } from "./aggregate.js";
+export { computeCurrent, computeAllForTask, computeAllForTasks } from "./aggregate.js";

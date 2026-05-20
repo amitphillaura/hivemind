@@ -96,6 +96,43 @@ export async function computeAllForTask(
 }
 
 /**
+ * Compute KPI totals for MANY tasks in one round-trip. Returns
+ * `{ task_id → { kpi_id → total } }`. Tasks with no events get an
+ * empty inner map; KPIs with no events for an existing task get 0
+ * (callers should default missing keys to 0).
+ *
+ * Used by the SessionStart renderer (T6) so injecting 10 tasks with
+ * KPIs costs 1 SQL round-trip, not 10. The (task_id, kpi_id) lookup
+ * index keeps the GROUP BY cheap.
+ *
+ * Edge case: empty taskIds → early-return {}, no SQL issued. Without
+ * the early return we'd emit `WHERE task_id IN ()` which is invalid.
+ */
+export async function computeAllForTasks(
+  query: QueryFn,
+  tableName: string,
+  taskIds: string[],
+): Promise<Record<string, Record<string, number>>> {
+  if (taskIds.length === 0) return {};
+  const safe = sqlIdent(tableName);
+  const inList = taskIds.map(id => `'${sqlStr(id)}'`).join(", ");
+  const rows = await query(
+    `SELECT task_id, kpi_id, SUM(value) AS total FROM "${safe}" ` +
+      `WHERE task_id IN (${inList}) ` +
+      `GROUP BY task_id, kpi_id`,
+  );
+  const out: Record<string, Record<string, number>> = {};
+  for (const row of rows) {
+    const tid = typeof row.task_id === "string" ? row.task_id : "";
+    const kid = typeof row.kpi_id === "string" ? row.kpi_id : "";
+    if (!tid || !kid) continue;
+    if (!out[tid]) out[tid] = {};
+    out[tid][kid] = normalizeTotal(row.total);
+  }
+  return out;
+}
+
+/**
  * Normalise the SUM(value) cell into a finite number. Deeplake may
  * return either a number or a string (driver-dependent serialization);
  * null comes back when there are zero matching rows.

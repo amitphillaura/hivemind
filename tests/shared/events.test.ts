@@ -3,6 +3,7 @@ import {
   appendEvent,
   computeCurrent,
   computeAllForTask,
+  computeAllForTasks,
 } from "../../src/events/index.js";
 
 /**
@@ -190,5 +191,55 @@ describe("computeAllForTask", () => {
       () => [{ kpi_id: "k_a", total: "3" }],
     ]);
     expect(await computeAllForTask(query, TBL, "task-X")).toEqual({ k_a: 3 });
+  });
+});
+
+// ── computeAllForTasks (batch) ──────────────────────────────────────────────
+
+describe("computeAllForTasks", () => {
+  it("returns a {task_id → {kpi_id → total}} map in ONE round-trip", async () => {
+    const { calls, query } = mockQuery([
+      () => [
+        { task_id: "t1", kpi_id: "k_a", total: 3 },
+        { task_id: "t1", kpi_id: "k_b", total: 1 },
+        { task_id: "t2", kpi_id: "k_a", total: 7 },
+      ],
+    ]);
+    const out = await computeAllForTasks(query, TBL, ["t1", "t2", "t3"]);
+    expect(out).toEqual({
+      t1: { k_a: 3, k_b: 1 },
+      t2: { k_a: 7 },
+      // t3 has no events → no entry in map (caller defaults to 0)
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/^SELECT task_id, kpi_id, SUM\(value\) AS total/);
+    expect(calls[0]).toMatch(/GROUP BY task_id, kpi_id/);
+    expect(calls[0]).toContain(`task_id IN ('t1', 't2', 't3')`);
+  });
+
+  it("returns {} with NO SQL when taskIds is empty (avoids invalid `IN ()`)", async () => {
+    const { calls, query } = mockQuery([]);
+    const out = await computeAllForTasks(query, TBL, []);
+    expect(out).toEqual({});
+    expect(calls).toEqual([]);
+  });
+
+  it("escapes task ids in the IN list", async () => {
+    const { calls, query } = mockQuery([() => []]);
+    await computeAllForTasks(query, TBL, ["x' OR '1'='1", "y"]);
+    expect(calls[0]).toContain(`'x'' OR ''1''=''1'`);
+    expect(calls[0]).toContain(`'y'`);
+  });
+
+  it("drops rows with empty task_id or kpi_id (forward-compat hygiene)", async () => {
+    const { query } = mockQuery([
+      () => [
+        { task_id: "t1", kpi_id: "k_a", total: 5 },
+        { task_id: "", kpi_id: "k_a", total: 99 },         // orphan event (auto-extract)
+        { task_id: "t1", kpi_id: "", total: 99 },          // task-level event, no KPI counter
+      ],
+    ]);
+    const out = await computeAllForTasks(query, TBL, ["t1"]);
+    expect(out).toEqual({ t1: { k_a: 5 } });
   });
 });
