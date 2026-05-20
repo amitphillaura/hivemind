@@ -33,6 +33,8 @@ vi.mock("node:os", async () => {
 const ENV_KEYS = [
   "HIVEMIND_TOKEN", "HIVEMIND_ORG_ID", "HIVEMIND_WORKSPACE_ID",
   "HIVEMIND_API_URL", "HIVEMIND_TABLE", "HIVEMIND_SESSIONS_TABLE",
+  "HIVEMIND_SKILLS_TABLE", "HIVEMIND_RULES_TABLE",
+  "HIVEMIND_TASKS_TABLE", "HIVEMIND_TASK_EVENTS_TABLE",
   "HIVEMIND_MEMORY_PATH",
 ];
 
@@ -75,6 +77,10 @@ describe("loadConfig — no credentials file", () => {
       apiUrl: "https://api.deeplake.ai",
       tableName: "memory",
       sessionsTableName: "sessions",
+      skillsTableName: "skills",
+      rulesTableName: "hivemind_rules",
+      tasksTableName: "hivemind_tasks",
+      taskEventsTableName: "hivemind_task_events",
       memoryPath: "/home/tester/.deeplake/memory",
     });
   });
@@ -167,6 +173,10 @@ describe("loadConfig — credentials file", () => {
     process.env.HIVEMIND_API_URL = "https://hm-api";
     process.env.HIVEMIND_TABLE = "hm-mem";
     process.env.HIVEMIND_SESSIONS_TABLE = "hm-sess";
+    process.env.HIVEMIND_SKILLS_TABLE = "hm-skills";
+    process.env.HIVEMIND_RULES_TABLE = "hm-rules";
+    process.env.HIVEMIND_TASKS_TABLE = "hm-tasks";
+    process.env.HIVEMIND_TASK_EVENTS_TABLE = "hm-task-events";
     process.env.HIVEMIND_MEMORY_PATH = "/custom/mem";
     const loadConfig = await importLoadConfig();
     const cfg = loadConfig();
@@ -175,7 +185,24 @@ describe("loadConfig — credentials file", () => {
       apiUrl: "https://hm-api",
       tableName: "hm-mem",
       sessionsTableName: "hm-sess",
+      skillsTableName: "hm-skills",
+      rulesTableName: "hm-rules",
+      tasksTableName: "hm-tasks",
+      taskEventsTableName: "hm-task-events",
       memoryPath: "/custom/mem",
     });
+  });
+
+  it("rules / tasks / task-events env vars override independently of each other", async () => {
+    // Three independent overrides — make sure setting one doesn't bleed
+    // into the other two. Each table name is read from its own env var.
+    process.env.HIVEMIND_TOKEN = "t";
+    process.env.HIVEMIND_ORG_ID = "o";
+    process.env.HIVEMIND_RULES_TABLE = "rules_test";
+    const loadConfig = await importLoadConfig();
+    const cfg = loadConfig();
+    expect(cfg?.rulesTableName).toBe("rules_test");
+    expect(cfg?.tasksTableName).toBe("hivemind_tasks");           // default unchanged
+    expect(cfg?.taskEventsTableName).toBe("hivemind_task_events"); // default unchanged
   });
 });

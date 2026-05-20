@@ -95,6 +95,9 @@ function fakeConfig(): Config {
     tableName: "memory",
     sessionsTableName: "sessions",
     skillsTableName: "skills",
+    rulesTableName: "hivemind_rules",
+    tasksTableName: "hivemind_tasks",
+    taskEventsTableName: "hivemind_task_events",
     memoryPath: "/tmp/fake-memory",
   };
 }
