@@ -604,16 +604,35 @@ describe("runTasksCommand — report", () => {
     expect(erred.some(l => l.includes("Task not found: ghost-task"))).toBe(true);
   });
 
-  it("task with no KPIs prints the 'T4 will plug LLM generation' hint AND skips the aggregate query", async () => {
-    // The kpis.length===0 check now runs BEFORE computeAllForTask, so
-    // a task without KPIs costs ONLY the listTasks SELECT — no
-    // wasted aggregate call. Codex review on T5 surfaced the ordering.
-    queryMock.mockResolvedValueOnce([fakeRow({ kpis: "[]" })]);    // listTasks
+  it("task with no KPIs and no events prints the 'record progress' hint", async () => {
+    // Codex legacy audit pass 2 (P1.3): when a task has zero LLM
+    // KPIs, report STILL queries events (because `tasks progress`
+    // accepts any kpi_id when task.kpis is empty). With zero KPIs
+    // and zero events the user sees the hint to record progress.
+    queryMock.mockResolvedValueOnce([fakeRow({ kpis: "[]" })]);  // listTasks
+    queryMock.mockResolvedValueOnce([]);                          // computeAllForTask: no events
     await runTasksCommand(["report"]);
-    expect(logged.some(l => l.includes("no KPIs defined yet"))).toBe(true);
-    // listTasks (1) — NO computeAllForTask. ensureTaskEventsTable was
-    // called separately on the mock (which doesn't count as a query).
-    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(logged.some(l => l.includes("record progress with"))).toBe(true);
+    // listTasks (1) + computeAllForTask (1).
+    expect(queryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("task with no KPIs but with manually-recorded events surfaces them under the task (P1.3 legacy audit)", async () => {
+    // Codex P1.3: previously this branch short-circuited and the
+    // user never saw their manually-recorded progress on a task
+    // whose KPI generation failed at insert time. New behavior:
+    // report queries events even for KPI-less tasks and shows them
+    // grouped by kpi_id.
+    queryMock.mockResolvedValueOnce([fakeRow({ task_id: "T-manual", kpis: "[]" })]);
+    queryMock.mockResolvedValueOnce([
+      { kpi_id: "k_manual_a", total: 3 },
+      { kpi_id: "k_manual_b", total: 1 },
+    ]);
+    await runTasksCommand(["report"]);
+    expect(logged.some(l => l.includes("manually-recorded progress"))).toBe(true);
+    expect(logged.some(l => l.includes("k_manual_a: 3 (manual)"))).toBe(true);
+    expect(logged.some(l => l.includes("k_manual_b: 1 (manual)"))).toBe(true);
+    expect(queryMock).toHaveBeenCalledTimes(2);
   });
 });
 

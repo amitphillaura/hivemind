@@ -527,19 +527,20 @@ export async function runTasksCommand(args: string[]): Promise<void> {
       return;
     }
 
-    // Per-task: render KPI lines from the events stream. Tasks with
-    // no KPIs short-circuit BEFORE the aggregate query — saves a
-    // round-trip and surfaces the "T4 plugs LLM generation" hint
-    // even when the events table is brand-new. The aggregate itself
+    // Per-task: render KPI lines from the events stream. The aggregate
     // is best-effort: a missing task_events table is the legacy
     // state — show 0/target rather than DDL-creating the table on a
     // read path.
+    //
+    // Codex legacy audit pass 2 (P1.3): when a task has zero LLM-
+    // generated KPIs, we STILL query events. `tasks progress` accepts
+    // any kpi_id when task.kpis is empty (line ~434 above), so a user
+    // can legitimately record manual progress against KPIs that never
+    // landed on the task row (LLM down at insert time, fresh-install
+    // pre-T4, etc.). Previously this branch short-circuited before
+    // the events query and silently hid every manually-recorded event.
     for (const task of tasksToReport) {
       console.log(formatListRow(task));
-      if (task.kpis.length === 0) {
-        console.log("    (no KPIs defined yet — T4 will plug LLM generation)");
-        continue;
-      }
       let totals: Record<string, number> = {};
       try {
         totals = await computeAllForTask(
@@ -551,6 +552,18 @@ export async function runTasksCommand(args: string[]): Promise<void> {
         const msg = (err as Error).message;
         if (!isMissingTableError(msg)) throw err;
         // events table missing → 0/target everywhere.
+      }
+      if (task.kpis.length === 0) {
+        const kpiIds = Object.keys(totals);
+        if (kpiIds.length === 0) {
+          console.log("    (no KPIs defined — record progress with 'hivemind tasks progress <task-id> <kpi-id> --value N')");
+        } else {
+          console.log("    (no LLM-generated KPIs — showing manually-recorded progress)");
+          for (const kid of kpiIds) {
+            console.log(`    - ${kid}: ${totals[kid]} (manual)`);
+          }
+        }
+        continue;
       }
       for (const k of task.kpis) {
         const current = totals[k.kpi_id] ?? 0;
