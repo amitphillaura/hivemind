@@ -370,6 +370,7 @@ export default defineConfig({
         // variants); the happy-path canonicalization output is covered.
         "src/graph/extract/typescript.ts":   { statements: 90, branches: 70, functions: 90, lines: 90 },
         "src/graph/snapshot.ts":             { statements: 90, branches: 85, functions: 90, lines: 90 },
+        "src/graph/cache.ts":                { statements: 90, branches: 85, functions: 90, lines: 90 },
         "src/commands/graph.ts":             { statements: 80, branches: 60, functions: 90, lines: 80 },
         "src/utils/repo-identity.ts":        { statements: 85, branches: 50, functions: 90, lines: 90 },
       },

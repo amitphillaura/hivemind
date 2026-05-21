@@ -17,6 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 import { getVersion } from "../cli/version.js";
+import { fileContentHash, readCache, writeCache } from "../graph/cache.js";
 import { extractTypeScript } from "../graph/extract/typescript.js";
 import { buildSnapshot, repoDir, writeSnapshot } from "../graph/snapshot.js";
 import type {
@@ -116,11 +117,22 @@ function runBuildCommand(args: string[]): void {
   const extractions: FileExtraction[] = [];
   let skipped = 0;
   let totalParseErrors = 0;
+  let cacheHits = 0;
   for (const abs of sourceFiles) {
     const rel = toForwardSlash(relative(opts.cwd, abs));
     try {
       const content = readFileSync(abs, "utf8");
-      const extraction = extractTypeScript(content, rel);
+      // Per-file content-hash cache: same file content (regardless of path)
+      // serves a previously-computed FileExtraction. Cache miss → extract +
+      // populate. Cache write/read failures are swallowed (best-effort).
+      const contentSha = fileContentHash(content);
+      let extraction = readCache(baseDir, contentSha, rel);
+      if (extraction === null) {
+        extraction = extractTypeScript(content, rel);
+        writeCache(baseDir, contentSha, extraction);
+      } else {
+        cacheHits += 1;
+      }
       if (extraction.parse_errors.length > 0) {
         totalParseErrors += extraction.parse_errors.length;
         for (const err of extraction.parse_errors) {
@@ -160,7 +172,7 @@ function runBuildCommand(args: string[]): void {
   console.log(`SHA-256:       ${result.snapshotSha256}`);
   console.log(`Nodes:         ${snapshot.nodes.length}`);
   console.log(`Edges:         ${snapshot.links.length}`);
-  console.log(`Files extracted: ${extractions.length} (skipped: ${skipped}, parse warnings: ${totalParseErrors})`);
+  console.log(`Files extracted: ${extractions.length} (skipped: ${skipped}, parse warnings: ${totalParseErrors}, cache hits: ${cacheHits}/${sourceFiles.length})`);
 }
 
 // ─── Source-file discovery ─────────────────────────────────────────────────
