@@ -88,12 +88,22 @@ export function stringifyKpis(kpis: Kpi[]): string {
 
 function validateOne(item: unknown): Kpi | null {
   if (!isObject(item)) return null;
-  const kpi_id = str(item.kpi_id);
-  const name = str(item.name);
+  // Codex legacy audit pass 3 P1.B: KPI `name` and `unit` are
+  // rendered verbatim into the SessionStart prompt block. A
+  // newline-bearing value would let any caller (LLM gen, manual
+  // input, malicious row) inject a forged section header into every
+  // agent's context. Reject any newlines at the validator level so
+  // bad rows never enter the table; the renderer's sanitize-on-read
+  // pass handles already-persisted rows from a vulnerable client.
+  // kpi_id / generated_by / generated_at are control values not
+  // rendered to the agent, but rejecting newlines there too keeps
+  // the contract uniform and protects future renderers.
+  const kpi_id = safeStr(item.kpi_id);
+  const name = safeStr(item.name);
   const target = num(item.target);
-  const unit = str(item.unit);
-  const generated_by = str(item.generated_by);
-  const generated_at = str(item.generated_at);
+  const unit = safeStr(item.unit);
+  const generated_by = safeStr(item.generated_by);
+  const generated_at = safeStr(item.generated_at);
   if (
     kpi_id === null ||
     name === null ||
@@ -132,6 +142,20 @@ function isObject(v: unknown): v is Record<string, unknown> {
 function str(v: unknown): string | null {
   if (typeof v !== "string" || v.length === 0) return null;
   return v;
+}
+
+/**
+ * Like `str` but additionally rejects any embedded CR/LF — KPI
+ * metadata gets inlined into the SessionStart prompt block, and a
+ * newline-bearing value is a prompt-injection vector. See
+ * src/hooks/shared/context-renderer.ts `sanitizeForInject` for the
+ * render-side counterpart that handles already-persisted rows.
+ */
+function safeStr(v: unknown): string | null {
+  const s = str(v);
+  if (s === null) return null;
+  if (/[\r\n]/.test(s)) return null;
+  return s;
 }
 
 function num(v: unknown): number | null {

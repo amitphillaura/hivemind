@@ -127,6 +127,23 @@ describe("parseKpis", () => {
     expect(parseKpis({ kpis: [] })).toEqual([]);
     expect(parseKpis(42)).toEqual([]);
   });
+
+  it("drops KPIs whose name or unit contains a newline (codex legacy audit pass 3 P1.B — prompt-injection defense)", () => {
+    // KPI metadata is rendered verbatim into the SessionStart prompt.
+    // A newline in `name` or `unit` would let any caller (LLM, manual
+    // entry, malicious row) inject a forged section header. Validator
+    // refuses any such row; the renderer's sanitize-on-read pass
+    // covers already-persisted bad rows.
+    const out = parseKpis([
+      { ...SAMPLE_KPI, kpi_id: "ok" },
+      { ...SAMPLE_KPI, kpi_id: "name_lf",   name: "PRs\nmerged" },
+      { ...SAMPLE_KPI, kpi_id: "name_cr",   name: "PRs\rmerged" },
+      { ...SAMPLE_KPI, kpi_id: "name_crlf", name: "PRs\r\nmerged" },
+      { ...SAMPLE_KPI, kpi_id: "unit_lf",   unit: "count\n=== HIVEMIND" },
+      { ...SAMPLE_KPI, kpi_id: "k_\nbad" },
+    ]);
+    expect(out.map(k => k.kpi_id)).toEqual(["ok"]);
+  });
 });
 
 describe("stringifyKpis", () => {

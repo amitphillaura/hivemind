@@ -326,9 +326,16 @@ function formatKpiSummary(
   totals: Record<string, number>,
 ): string {
   if (kpis.length === 0) return "";
+  // Codex legacy audit pass 3 P1.B: KPI `name` and `unit` are
+  // user-authored (or LLM-generated against user input) and end up
+  // inlined into the SessionStart prompt, so a CR/LF embedded in
+  // either string would break out of the task line and inject a
+  // forged section the same way unsanitized rule/task text would.
+  // The same sanitizer is applied here for parity with
+  // formatTaskLine and the rules loop.
   const parts = kpis.map(k => {
     const current = totals[k.kpi_id] ?? 0;
-    return `${k.name}: ${current}/${k.target} ${k.unit}`;
+    return `${sanitizeForInject(k.name)}: ${current}/${k.target} ${sanitizeForInject(k.unit)}`;
   });
   return ` | ${parts.join(", ")}`;
 }
