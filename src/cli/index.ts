@@ -16,6 +16,7 @@ import { runAuthCommand } from "../commands/auth-login.js";
 import { runSkillifyCommand } from "../commands/skillify.js";
 import { runRulesCommand } from "../commands/rules.js";
 import { runTasksCommand } from "../commands/tasks.js";
+import { runContextCommand } from "../commands/context.js";
 import { confirm, detectPlatforms, allPlatformIds, log, promptLine, warn, type PlatformId } from "./util.js";
 import { getVersion } from "./version.js";
 import { runUpdate } from "./update.js";
@@ -118,6 +119,11 @@ Personal + team tasks (SessionStart injection + KPI gen in follow-ups):
   Note: KPIs land empty until T4 adds LLM-driven generation. SessionStart
   injection of relevant tasks lands in T6. <user> values must match the
   target user's 'hivemind whoami' output exactly (no fuzzy email matching in v1).
+
+Cross-agent helpers:
+  hivemind context                             Print the rules+tasks block on demand.
+                                               Fallback for pi/openclaw agents (no SessionStart hook)
+                                               and read-only diagnostic for any agent.
 
 Account / org / workspace:
   hivemind whoami                          Show current user, org, workspace.
@@ -370,6 +376,11 @@ async function main(): Promise<void> {
 
   if (cmd === "tasks") {
     await runTasksCommand(args.slice(1));
+    return;
+  }
+
+  if (cmd === "context") {
+    await runContextCommand(args.slice(1));
     return;
   }
 
