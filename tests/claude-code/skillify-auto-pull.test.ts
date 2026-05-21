@@ -66,6 +66,7 @@ function makeConfig(): Config {
     tableName: "memory",
     sessionsTableName: "sessions",
     skillsTableName: "skills",
+    codebaseTableName: "codebase",
     memoryPath: join(tmpHome, ".deeplake", "memory"),
   };
 }

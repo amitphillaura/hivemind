@@ -31,6 +31,7 @@ const loadConfigMock = loadConfig as unknown as ReturnType<typeof vi.fn>;
 const VALID_CONFIG = {
   token: "tok", apiUrl: "x", orgId: "org", workspaceId: "ws",
   userName: "tester", skillsTableName: "skills",
+  codebaseTableName: "codebase",
   tableName: "memory", sessionsTableName: "sessions", memoryPath: "/m",
   orgName: "org",
 };

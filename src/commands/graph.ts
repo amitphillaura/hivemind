@@ -16,8 +16,11 @@ import { execSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
+import { createHash } from "node:crypto";
+
 import { getVersion } from "../cli/version.js";
 import { fileContentHash, readCache, writeCache } from "../graph/cache.js";
+import { pushSnapshot } from "../graph/deeplake-push.js";
 import {
   diffSnapshots,
   loadSnapshotByCommit,
@@ -94,15 +97,14 @@ const DEFAULT_IGNORES = new Set<string>([
 ]);
 
 /** Top-level dispatcher: invoked from src/cli/index.ts on `hivemind graph ...`. */
-export function runGraphCommand(args: string[]): void {
+export function runGraphCommand(args: string[]): void | Promise<void> {
   const sub = args[0];
   if (sub === undefined || sub === "--help" || sub === "-h" || sub === "help") {
     console.log(USAGE);
     return;
   }
   if (sub === "build") {
-    runBuildCommand(args.slice(1));
-    return;
+    return runBuildCommand(args.slice(1));
   }
   if (sub === "diff") {
     runDiffCommand(args.slice(1));
@@ -113,8 +115,7 @@ export function runGraphCommand(args: string[]): void {
     return;
   }
   if (sub === "init") {
-    runInitCommand(args.slice(1));
-    return;
+    return runInitCommand(args.slice(1));
   }
   if (sub === "uninstall") {
     runUninstallCommand(args.slice(1));
@@ -156,7 +157,7 @@ function parseInitArgs(args: string[]): InitOptions {
   return { cwd, force, initialBuild };
 }
 
-function runInitCommand(args: string[]): void {
+async function runInitCommand(args: string[]): Promise<void> {
   const opts = parseInitArgs(args);
   const status = installPostCommitHook(opts.cwd, { force: opts.force });
   switch (status.kind) {
@@ -173,7 +174,7 @@ function runInitCommand(args: string[]): void {
   if (opts.initialBuild) {
     console.log("");
     console.log("Running initial build...");
-    runBuildCommand(["--cwd", opts.cwd, "--trigger", "manual"]);
+    await runBuildCommand(["--cwd", opts.cwd, "--trigger", "manual"]);
   } else {
     console.log("");
     console.log("Skipped initial build (--no-initial-build). Run `hivemind graph build` when ready.");
@@ -402,7 +403,7 @@ function parseBuildArgs(args: string[]): BuildOptions {
   return { cwd, trigger };
 }
 
-export function runBuildCommand(args: string[]): void {
+export async function runBuildCommand(args: string[]): Promise<void> {
   const opts = parseBuildArgs(args);
 
   const { key: repoKey, project } = deriveProjectKey(opts.cwd);
@@ -480,6 +481,45 @@ export function runBuildCommand(args: string[]): void {
   console.log(`Nodes:         ${snapshot.nodes.length}`);
   console.log(`Edges:         ${snapshot.links.length}`);
   console.log(`Files extracted: ${extractions.length} (skipped: ${skipped}, parse warnings: ${totalParseErrors}, cache hits: ${cacheHits}/${sourceFiles.length})`);
+
+  // Phase 3: push to Deeplake `codebase` table. Best-effort — any failure
+  // logs and returns; the local snapshot is the source of truth. Skips
+  // silently when not authenticated (loadConfig returns null).
+  const worktreeId = workTreeIdFor(opts.cwd);
+  const pushOutcome = await pushSnapshot(snapshot, worktreeId);
+  switch (pushOutcome.kind) {
+    case "inserted":
+      console.log(`Cloud:         pushed to codebase table (commit ${pushOutcome.commitSha.slice(0, 7)})`);
+      break;
+    case "already-current":
+      console.log(`Cloud:         already up-to-date (commit ${pushOutcome.commitSha.slice(0, 7)})`);
+      break;
+    case "skipped-no-auth":
+      console.log(`Cloud:         skipped (not authenticated; run \`hivemind login\` to enable cloud sync)`);
+      break;
+    case "skipped-disabled":
+      console.log(`Cloud:         skipped (HIVEMIND_GRAPH_PUSH=0)`);
+      break;
+    case "drift":
+      console.warn(`Cloud:         DRIFT — commit ${pushOutcome.commitSha.slice(0, 7)} is in cloud with`);
+      console.warn(`               sha256=${pushOutcome.cloudSha256.slice(0, 12)}... but local rebuild produced`);
+      console.warn(`               sha256=${pushOutcome.localSha256.slice(0, 12)}...`);
+      console.warn(`               (probably extractor version drift; investigate before forcing.)`);
+      break;
+    case "error":
+      console.warn(`Cloud:         push error (non-fatal): ${pushOutcome.message}`);
+      break;
+  }
+}
+
+/**
+ * Stable per-worktree identifier — sha256 of the absolute path, truncated to
+ * 16 chars. Distinguishes two clones of the same repo on the same machine
+ * (e.g., main checkout + git worktree for a feature branch). NOT cross-machine
+ * stable; pair with user_id in the cloud PK to keep rows distinct across machines.
+ */
+function workTreeIdFor(cwd: string): string {
+  return createHash("sha256").update(cwd).digest("hex").slice(0, 16);
 }
 
 // ─── Source-file discovery ─────────────────────────────────────────────────

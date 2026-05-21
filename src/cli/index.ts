@@ -339,7 +339,7 @@ async function main(): Promise<void> {
   }
 
   if (cmd === "graph") {
-    runGraphCommand(args.slice(1));
+    await runGraphCommand(args.slice(1));
     return;
   }
 

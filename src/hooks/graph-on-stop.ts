@@ -175,7 +175,7 @@ function readGitCommit(cwd: string): string | null {
  * Catches all errors and logs to .graph-on-stop.log so a hook bug never
  * crashes the user's session.
  */
-export function main(): void {
+export async function main(): Promise<void> {
   // Disable switch for users / CI:
   //   HIVEMIND_GRAPH_ON_STOP=0   → no-op
   const envDisable = process.env.HIVEMIND_GRAPH_ON_STOP === "0";
@@ -219,7 +219,7 @@ export function main(): void {
   // not "which underlying event"; both feed the same gate + lock so the
   // distinction is invisible to consumers.
   try {
-    runBuildCommand(["--trigger", "session-end"]);
+    await runBuildCommand(["--trigger", "session-end"]);
   } catch (err) {
     logToFile(ctx.cwd, `build threw: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
@@ -242,5 +242,12 @@ function logToFile(cwd: string, line: string): void {
 // Claude Code hook command launched us). Imports from tests must NOT trigger
 // the side-effecting build pipeline.
 if (isDirectRun(import.meta.url)) {
-  main();
+  main().catch((err) => {
+    // Never let an unhandled promise rejection crash the hook process —
+    // Claude Code captures the exit code and a non-zero would surface as
+    // a noisy error to the user even though the hook is async:true.
+    // eslint-disable-next-line no-console
+    console.error(`graph-on-stop fatal: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(0);
+  });
 }

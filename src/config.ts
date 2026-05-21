@@ -12,6 +12,7 @@ export interface Config {
   tableName: string;
   sessionsTableName: string;
   skillsTableName: string;
+  codebaseTableName: string;
   memoryPath: string;
 }
 
@@ -53,6 +54,7 @@ export function loadConfig(): Config | null {
     tableName: process.env.HIVEMIND_TABLE ?? "memory",
     sessionsTableName: process.env.HIVEMIND_SESSIONS_TABLE ?? "sessions",
     skillsTableName: process.env.HIVEMIND_SKILLS_TABLE ?? "skills",
+    codebaseTableName: process.env.HIVEMIND_CODEBASE_TABLE ?? "codebase",
     memoryPath: process.env.HIVEMIND_MEMORY_PATH ?? join(home, ".deeplake", "memory"),
   };
 }
