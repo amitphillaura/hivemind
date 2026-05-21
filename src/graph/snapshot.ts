@@ -20,6 +20,7 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { writeLastBuild } from "./last-build.js";
 import type {
   FileExtraction,
   GraphEdge,
@@ -191,6 +192,14 @@ export function writeSnapshot(
     latestCommitPath = join(baseDir, "latest-commit.txt");
     writeFileAtomic(latestCommitPath, `${commitSha}\n`);
   }
+
+  // .last-build.json — read by the Stop hook to gate auto-rebuilds.
+  // Best-effort: a write failure here doesn't roll back the snapshot.
+  writeLastBuild(baseDir, {
+    ts: Date.now(),
+    commit_sha: commitSha,
+    snapshot_sha256: sha256,
+  });
 
   return { snapshotPath, latestCommitPath, snapshotSha256: sha256 };
 }

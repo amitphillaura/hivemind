@@ -17,6 +17,10 @@ const ccHooks = [
   { entry: "dist/src/hooks/plugin-cache-gc.js", out: "plugin-cache-gc" },
   { entry: "dist/src/hooks/wiki-worker.js", out: "wiki-worker" },
   { entry: "dist/src/skillify/skillify-worker.js", out: "skillify-worker" },
+  // codebase-graph Phase 1.5: auto-build the graph at Stop, gated on
+  // (a) 10-min rate limit, (b) HEAD changed since last build, (c) ≥1
+  // source file diff. See src/hooks/graph-on-stop.ts.
+  { entry: "dist/src/hooks/graph-on-stop.js", out: "graph-on-stop" },
 ];
 
 const ccShell = [
@@ -47,6 +51,11 @@ await build({
     "onnxruntime-node",
     "onnxruntime-common",
     "sharp",
+    // graph-on-stop hook transitively imports the tree-sitter parser
+    // (via runBuildCommand → extractTypeScript). Native .node prebuilds
+    // can't be bundled by esbuild; resolved from node_modules at runtime.
+    "tree-sitter",
+    "tree-sitter-typescript",
   ],
   define: {
     __HIVEMIND_VERSION__: JSON.stringify(hivemindVersion),

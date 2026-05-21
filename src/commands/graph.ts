@@ -95,7 +95,7 @@ function parseBuildArgs(args: string[]): BuildOptions {
   return { cwd };
 }
 
-function runBuildCommand(args: string[]): void {
+export function runBuildCommand(args: string[]): void {
   const opts = parseBuildArgs(args);
 
   const { key: repoKey, project } = deriveProjectKey(opts.cwd);
