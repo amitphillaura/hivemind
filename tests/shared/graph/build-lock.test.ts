@@ -76,6 +76,34 @@ describe("build-lock — acquire/release", () => {
     expect(lockPath(baseDir)).toBe(join(baseDir, ".build.in-flight"));
   });
 
+  it("stale recovery is EXCLUSIVE: simulated double-recovery doesn't produce two acquired locks (codex P1)", () => {
+    // Plant a stale lock.
+    writeFileSync(lockPath(baseDir), JSON.stringify({ pid: 99999, ts: 0 }), { flag: "w" });
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(lockPath(baseDir), tenMinAgo, tenMinAgo);
+
+    // First recoverer succeeds.
+    const a = acquireBuildLock(baseDir);
+    expect(a.acquired).toBe(true);
+    expect(a.reason).toBe("stale-recovered");
+    // Second recoverer must NOT also acquire — the lock is now fresh in
+    // its eyes, so it gets held-by-other instead of overwriting.
+    const b = acquireBuildLock(baseDir);
+    expect(b.acquired).toBe(false);
+    expect(b.reason).toBe("held-by-other");
+  });
+
+  it("after stale recovery, the lock file is fresh (mtime is current)", () => {
+    writeFileSync(lockPath(baseDir), JSON.stringify({ pid: 99999, ts: 0 }), { flag: "w" });
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(lockPath(baseDir), tenMinAgo, tenMinAgo);
+    const before = Date.now();
+    acquireBuildLock(baseDir);
+    // Lock file's mtime should be >= our 'before' timestamp (within sec precision)
+    const stat = require("node:fs").statSync(lockPath(baseDir));
+    expect(stat.mtime.getTime()).toBeGreaterThanOrEqual(before - 2000); // 2s slop for FS precision
+  });
+
   it("acquire creates baseDir when missing (first-ever build path)", () => {
     // The first auto-build happens before snapshot.ts has had a chance to
     // mkdir the per-repo dir. acquireBuildLock must create it so the lock

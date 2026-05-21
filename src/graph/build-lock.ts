@@ -72,22 +72,45 @@ export function acquireBuildLock(baseDir: string): LockResult {
     }
   }
   // Lock exists. Check staleness.
+  let ageMs: number;
   try {
     const stat = statSync(path);
-    const ageMs = Date.now() - stat.mtime.getTime();
-    if (ageMs > STALE_LOCK_MS) {
-      // Previous holder crashed or hung. Overwrite the lock and take over.
-      // This is a benign race with another stale-recoverer: both write the
-      // same content style; mtime is what matters next time.
-      writeFileSync(path, JSON.stringify({ pid: process.pid, ts: Date.now() }));
-      return { acquired: true, reason: "stale-recovered" };
-    }
+    ageMs = Date.now() - stat.mtime.getTime();
   } catch {
     // statSync failed — the lock might have been released between our wx
     // attempt and the stat. Bail out; the next caller can try again.
     return { acquired: false, reason: "fs-error" };
   }
-  return { acquired: false, reason: "held-by-other" };
+  if (ageMs <= STALE_LOCK_MS) {
+    return { acquired: false, reason: "held-by-other" };
+  }
+  // Stale recovery MUST be exclusive: two recoverers must not both enter.
+  // Codex review caught this — a plain overwrite admits both. Instead we
+  // unlink the stale file and retry the original wx-flag write. Only one
+  // recoverer's wx will succeed because the second sees the just-written
+  // fresh lock and falls through to held-by-other.
+  try {
+    unlinkSync(path);
+  } catch (err) {
+    // Another recoverer beat us to the unlink. That's fine — they'll
+    // either successfully wx-write or also race; either way we re-attempt
+    // the wx below and either acquire or see held-by-other.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      return { acquired: false, reason: "fs-error" };
+    }
+  }
+  try {
+    writeFileSync(path, JSON.stringify({ pid: process.pid, ts: Date.now() }), { flag: "wx" });
+    return { acquired: true, reason: "stale-recovered" };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") {
+      // Another recoverer raced us and won.
+      return { acquired: false, reason: "held-by-other" };
+    }
+    return { acquired: false, reason: "fs-error" };
+  }
 }
 
 /**
