@@ -106,21 +106,45 @@ export function readCache(
   ) {
     return null;
   }
+  // Per-item field validation. Without this, a corrupt entry whose items
+  // pass the array-typeof check (e.g., { nodes: [{ id: 1 }] }) would either
+  // throw later when rewriteSourceFile calls .startsWith on a non-string,
+  // or — worse, when path-rewrite is a no-op — silently return broken data
+  // to the build pipeline. Returning null here falls through to re-extract,
+  // which then writes a fresh well-formed entry. Self-healing.
+  if (!validateItems(cached)) {
+    return null;
+  }
   // Rewrite source_file on every node, every edge id reference, and every
-  // parse_error to the caller's path. The same content can sit at multiple
-  // paths; we mutate the returned shape rather than reusing the cached
-  // strings so callers always see the current relativePath.
-  //
-  // Wrapped in try/catch so a corrupt entry whose items have non-string
-  // id/source/target fields falls through to re-extraction (cache miss)
-  // instead of bubbling up as an error that the build loop interprets as
-  // "skip this file" — the FileExtraction itself is presumably extractable;
-  // only the cached COPY is corrupt.
+  // parse_error to the caller's path. Wrapped in try/catch as belt-and-
+  // suspenders against any unforeseen item shape that slipped past
+  // validateItems.
   try {
     return rewriteSourceFile(cached, relativePath);
   } catch {
     return null;
   }
+}
+
+/**
+ * Verify every node/edge/parse_error item has the string fields we rely on.
+ * Returns true when the extraction is safe to consume; false otherwise.
+ */
+function validateItems(ex: FileExtraction): boolean {
+  if (typeof ex.source_file !== "string") return false;
+  for (const n of ex.nodes) {
+    if (n === null || typeof n !== "object") return false;
+    if (typeof n.id !== "string" || typeof n.source_file !== "string") return false;
+  }
+  for (const e of ex.edges) {
+    if (e === null || typeof e !== "object") return false;
+    if (typeof e.source !== "string" || typeof e.target !== "string") return false;
+  }
+  for (const p of ex.parse_errors) {
+    if (p === null || typeof p !== "object") return false;
+    if (typeof p.source_file !== "string") return false;
+  }
+  return true;
 }
 
 /**
