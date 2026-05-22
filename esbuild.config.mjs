@@ -17,6 +17,17 @@ const ccHooks = [
   { entry: "dist/src/hooks/plugin-cache-gc.js", out: "plugin-cache-gc" },
   { entry: "dist/src/hooks/wiki-worker.js", out: "wiki-worker" },
   { entry: "dist/src/skillify/skillify-worker.js", out: "skillify-worker" },
+  // codebase-graph Phase 1.5: auto-build the graph at SessionEnd, gated
+  // on (a) 10-min rate limit, (b) HEAD changed since last build, (c) ≥1
+  // source file diff. See src/hooks/graph-on-stop.ts.
+  // Filename keeps the "on-stop" suffix for backward-compat with prior
+  // builds; the hook itself is registered under SessionEnd, not Stop.
+  { entry: "dist/src/hooks/graph-on-stop.js", out: "graph-on-stop" },
+  // codebase-graph Phase 3 v1.1: async auto-pull on SessionStart.
+  // Spawned detached via nohup from each agent's SessionStart hook;
+  // pulls the freshest cloud snapshot for HEAD if newer than local.
+  // See src/hooks/graph-pull-worker.ts.
+  { entry: "dist/src/hooks/graph-pull-worker.js", out: "graph-pull-worker" },
 ];
 
 const ccShell = [
@@ -47,6 +58,11 @@ await build({
     "onnxruntime-node",
     "onnxruntime-common",
     "sharp",
+    // graph-on-stop hook transitively imports the tree-sitter parser
+    // (via runBuildCommand → extractTypeScript). Native .node prebuilds
+    // can't be bundled by esbuild; resolved from node_modules at runtime.
+    "tree-sitter",
+    "tree-sitter-typescript",
   ],
   define: {
     __HIVEMIND_VERSION__: JSON.stringify(hivemindVersion),
@@ -67,6 +83,7 @@ const codexHooks = [
   { entry: "dist/src/hooks/codex/stop.js", out: "stop" },
   { entry: "dist/src/hooks/codex/wiki-worker.js", out: "wiki-worker" },
   { entry: "dist/src/skillify/skillify-worker.js", out: "skillify-worker" },
+  { entry: "dist/src/hooks/graph-pull-worker.js", out: "graph-pull-worker" },
 ];
 
 const codexShell = [
@@ -116,6 +133,7 @@ const cursorHooks = [
   { entry: "dist/src/hooks/cursor/pre-tool-use.js", out: "pre-tool-use" },
   { entry: "dist/src/hooks/cursor/wiki-worker.js", out: "wiki-worker" },
   { entry: "dist/src/skillify/skillify-worker.js", out: "skillify-worker" },
+  { entry: "dist/src/hooks/graph-pull-worker.js", out: "graph-pull-worker" },
 ];
 
 // Hermes Agent shell-hook bundles (matches Claude Code's wire protocol; see
@@ -127,6 +145,7 @@ const hermesHooks = [
   { entry: "dist/src/hooks/hermes/pre-tool-use.js", out: "pre-tool-use" },
   { entry: "dist/src/hooks/hermes/wiki-worker.js", out: "wiki-worker" },
   { entry: "dist/src/skillify/skillify-worker.js", out: "skillify-worker" },
+  { entry: "dist/src/hooks/graph-pull-worker.js", out: "graph-pull-worker" },
 ];
 
 const cursorShell = [
@@ -283,6 +302,7 @@ await build({
     "process.env.HIVEMIND_WORKSPACE_ID": "undefined",
     "process.env.HIVEMIND_API_URL": "undefined",
     "process.env.HIVEMIND_TABLE": "undefined",
+    "process.env.HIVEMIND_CODEBASE_TABLE": "undefined",
     "process.env.HIVEMIND_SESSIONS_TABLE": "undefined",
     "process.env.HIVEMIND_MEMORY_PATH": "undefined",
     "process.env.HIVEMIND_CAPTURE": "undefined",
@@ -441,7 +461,19 @@ await build({
   platform: "node",
   format: "esm",
   outdir: "bundle",
-  external: ["node:*", "node-liblzma", "@mongodb-js/zstd"],
+  external: [
+    "node:*",
+    "node-liblzma",
+    "@mongodb-js/zstd",
+    // tree-sitter ships native .node prebuilds via prebuild-install. esbuild
+    // can't bundle .node files, and even if it could, native bindings have to
+    // be loaded from disk at runtime. The CLI resolves them from its sibling
+    // node_modules — same pattern as transformers/onnxruntime in the embed-
+    // daemon bundle. Imported via src/commands/graph.ts (codebase-graph
+    // Phase 1).
+    "tree-sitter",
+    "tree-sitter-typescript",
+  ],
   banner: { js: "#!/usr/bin/env node" },
 });
 chmodSync("bundle/cli.js", 0o755);

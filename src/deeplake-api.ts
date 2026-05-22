@@ -4,6 +4,7 @@ import { sqlStr, sqlIdent } from "./utils/sql.js";
 import { SUMMARY_EMBEDDING_COL } from "./embeddings/columns.js";
 import { deeplakeClientHeader } from "./utils/client-header.js";
 import {
+  CODEBASE_COLUMNS,
   MEMORY_COLUMNS,
   SESSIONS_COLUMNS,
   SKILLS_COLUMNS,
@@ -531,6 +532,29 @@ export class DeeplakeApi {
    * This sidesteps the Deeplake UPDATE-coalescing quirk that bit the wiki
    * worker.
    */
+  /**
+   * Create the codebase table. One row per (org, workspace, repo, user,
+   * worktree, commit) — see CODEBASE_COLUMNS for the schema. Healing
+   * + index follow the same pattern as ensureSessionsTable.
+   */
+  async ensureCodebaseTable(name: string): Promise<void> {
+    const safe = sqlIdent(name);
+    const tables = await this.listTables();
+    if (!tables.includes(safe)) {
+      log(`table "${safe}" not found, creating`);
+      await this.createTableWithRetry(buildCreateTableSql(safe, CODEBASE_COLUMNS), safe);
+      log(`table "${safe}" created`);
+      if (!tables.includes(safe)) this._tablesCache = [...tables, safe];
+    }
+    await this.healSchema(safe, CODEBASE_COLUMNS);
+    // Index on the identity key so SELECT-before-INSERT lookups don't full-scan.
+    await this.ensureLookupIndex(
+      safe,
+      "codebase_identity",
+      `("org_id", "workspace_id", "repo_slug", "user_id", "worktree_id", "commit_sha")`,
+    );
+  }
+
   async ensureSkillsTable(name: string): Promise<void> {
     // Validate the table identifier before any SQL interpolation.
     // `name` ultimately comes from HIVEMIND_SKILLS_TABLE — a stray quote

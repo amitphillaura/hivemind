@@ -124,9 +124,48 @@ function validateSchema(label: string, cols: readonly ColumnDef[]): void {
   }
 }
 
+/**
+ * Codebase table — one row per (org, workspace, repo, user, worktree, commit).
+ * snapshot_jsonb stores the canonical NetworkX node-link JSON written to disk.
+ * snapshot_sha256 lets us dedup AND detect extractor-version drift (same
+ * commit + same code SHOULD produce the same sha256; a mismatch means the
+ * extractor changed).
+ *
+ * Phase 1.5 = simple: a single SELECT-before-INSERT push pattern. Cross-user
+ * node-level dedup (split into manifest + content-addressable nodes) is
+ * deferred to v1.1+.
+ */
+export const CODEBASE_COLUMNS: readonly ColumnDef[] = Object.freeze([
+  // Identity key (matches the PK below)
+  { name: "org_id",          sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "workspace_id",    sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "repo_slug",       sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "user_id",         sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "worktree_id",     sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "commit_sha",      sql: "TEXT NOT NULL DEFAULT ''" },
+
+  // Observation metadata
+  { name: "parent_sha",      sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "branch",          sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "ts",              sql: "TIMESTAMP" },
+  { name: "pushed_by",       sql: "TEXT NOT NULL DEFAULT ''" },
+
+  // Snapshot payload
+  { name: "snapshot_sha256", sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "snapshot_jsonb",  sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "node_count",      sql: "BIGINT NOT NULL DEFAULT 0" },
+  { name: "edge_count",      sql: "BIGINT NOT NULL DEFAULT 0" },
+
+  // Generator metadata (for drift diagnostics — what hivemind version produced this?)
+  { name: "generator",         sql: "TEXT NOT NULL DEFAULT 'hivemind-graph'" },
+  { name: "generator_version", sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "schema_version",    sql: "BIGINT NOT NULL DEFAULT 1" },
+]);
+
 validateSchema("MEMORY_COLUMNS", MEMORY_COLUMNS);
 validateSchema("SESSIONS_COLUMNS", SESSIONS_COLUMNS);
 validateSchema("SKILLS_COLUMNS", SKILLS_COLUMNS);
+validateSchema("CODEBASE_COLUMNS", CODEBASE_COLUMNS);
 
 // ── SQL builders ────────────────────────────────────────────────────────────
 

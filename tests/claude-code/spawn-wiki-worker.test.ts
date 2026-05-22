@@ -95,6 +95,7 @@ function fakeConfig(): Config {
     tableName: "memory",
     sessionsTableName: "sessions",
     skillsTableName: "skills",
+    codebaseTableName: "codebase",
     memoryPath: "/tmp/fake-memory",
   };
 }
