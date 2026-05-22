@@ -62,15 +62,9 @@ When the user expresses a new goal:
 1. Get the current owner with `hivemind whoami` (use the userName, e.g. `emanuele.fenocchi`).
 2. Generate a UUIDv4: `uuidgen` or `node -e 'console.log(crypto.randomUUID())'`.
 3. Write the goal file at `~/.deeplake/memory/goal/<owner>/opened/<uuid>.md` with the goal description as body.
-4. (Optional) Generate 2–4 KPIs and write each at `~/.deeplake/memory/kpi/<uuid>/<kpi-slug>.md` with the body format above. If you do not want to commit KPIs yet, skip — the user can add them later.
+4. Respond to the user that the goal is created.
 
-You can ALSO spawn `claude -p` (or the agent's native LLM CLI) in the background to generate KPIs asynchronously after the goal is created. The bash guard hook on this VFS rejects any shell command whose argument string contains the literal memory mount path, so the spawn must NOT embed the full path — instead pass only the goal_id and goal text and let the sub-agent (which loads the same hivemind-goals skill on activation) compose the paths itself:
-
-```bash
-nohup codex exec --dangerously-bypass-approvals-and-sandbox - "Hivemind goal created. goal_id=<UUID>. text='<one-line text>'. Use the hivemind-goals skill to generate 2-4 measurable KPIs and write each KPI file under its canonical path convention. Each KPI body should follow the format: '<KPI name>\n\n- target: <positive int>\n- current: 0\n- unit: <count|lines|hours|...>'." > /dev/null 2>&1 &
-```
-
-The KPI worker is fire-and-forget; do NOT block the user on it. Respond to the user that the goal is created. The sub-agent will read this skill itself and resolve the KPI file location from `goal_id` per the path convention above.
+**Do NOT auto-generate KPIs.** A goal is created with zero KPI files by default. Generate KPIs ONLY when the user explicitly asks you to ("aggiungi KPI per …", "add metrics for this goal", "track these metrics: …"). When the user asks, write each KPI as a separate file at `~/.deeplake/memory/kpi/<goal_id>/<kpi-slug>.md` with the body format documented above.
 
 ### 2. List goals
 
