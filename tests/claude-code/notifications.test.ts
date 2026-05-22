@@ -166,6 +166,10 @@ describe("localMinedRule", () => {
     expect(result!.title).toContain("5 skills");
     expect(result!.body).toContain("hivemind login");
     expect(result!.dedupKey).toEqual({ count: 5 });
+    // Fallback count branch uses fully static copy — safe for both
+    // channels, so userVisibleOnly stays absent (default = false).
+    // The model can know "5 skills exist" without security risk.
+    expect(result!.userVisibleOnly).toBeUndefined();
   });
 
   it("fires with singular noun when count === 1", () => {
@@ -190,6 +194,179 @@ describe("localMinedRule", () => {
       agent: "claude-code", creds: null, state: { shown: {} }, localSkillsCount: 7,
     });
     expect(r5!.dedupKey).not.toEqual(r7!.dedupKey);
+  });
+
+  it("fires the concrete-insight branch when latestInsightEntry is populated", () => {
+    // Conversion-surface guard: when the gate produced a quantified
+    // insight, we MUST render it instead of the abstract count copy.
+    // The whole install→signup pitch depends on this branch firing.
+    const result = localMinedRule.evaluate({
+      agent: "claude-code",
+      creds: null,
+      state: { shown: {} },
+      localSkillsCount: 11,
+      latestInsightEntry: {
+        skill_name: "verify-before-done",
+        canonical_path: "/x/SKILL.md",
+        symlinks: [],
+        source_session_ids: ["sid"],
+        source_session_paths: ["/x/sid.jsonl"],
+        source_agent: "claude_code",
+        gate_agent: "claude_code",
+        created_at: "2026-05-22T08:58:07.613Z",
+        uploaded: false,
+        insight: "You revisited 4 merged PRs in the last month because tests weren't run before merge.",
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.title).toContain("Hivemind found a pattern");
+    // Title MUST NOT carry the bee — format.ts prepends the severity icon
+    // (info → 🐝), so double-bee output is the bug we're guarding against.
+    expect(result!.title).not.toContain("🐝");
+    // SECURITY INVARIANT (codex P1): this body carries LLM-derived
+    // prose, so the notification framework MUST keep it off the
+    // model-visible additionalContext channel. The rule signals that
+    // by setting userVisibleOnly. Without this flag the delivery
+    // adapter would push the insight into both channels and create a
+    // self-prompt-injection vector.
+    expect(result!.userVisibleOnly).toBe(true);
+    // Three-line structured body: each line independently scannable with
+    // its own emoji prefix.
+    expect(result!.body).toContain("📌");
+    expect(result!.body).toContain("You revisited 4 merged PRs");
+    expect(result!.body).toContain("✨");
+    expect(result!.body).toContain("`verify-before-done`");
+    expect(result!.body).toContain("🔐");
+    expect(result!.body).toContain("hivemind login");
+    // Negative patterns:
+    // - The verbose `claude -p '/skill <prompt>'` invocation was dropped;
+    //   users won't act on it and it clutters the surface.
+    expect(result!.body).not.toContain("claude -p");
+    // - Abstract count phrasing is mutually exclusive with insight branch.
+    expect(result!.title).not.toContain("11 skills");
+    // - Body lines must be indented so wrapping renders cleanly under
+    //   each emoji marker.
+    expect(result!.body).toMatch(/\n {3}✨/);
+    expect(result!.body).toMatch(/\n {3}🔐/);
+    // Dedup keyed on the entry identity, not the count: a new insight
+    // refires, the same entry dedupes.
+    expect(result!.dedupKey).toEqual({
+      skill_name: "verify-before-done",
+      created_at: "2026-05-22T08:58:07.613Z",
+    });
+  });
+
+  it("falls back to the count branch when latestInsightEntry has empty insight", () => {
+    // Defense-in-depth: getLatestInsightEntry filters empty strings, but
+    // a malformed manifest could slip a non-trimmed entry through. The
+    // rule double-checks and falls back to the legacy count surface
+    // rather than rendering a vacuous "Hivemind found a pattern: " line.
+    const result = localMinedRule.evaluate({
+      agent: "claude-code",
+      creds: null,
+      state: { shown: {} },
+      localSkillsCount: 3,
+      latestInsightEntry: {
+        skill_name: "verify-before-done",
+        canonical_path: "/x/SKILL.md",
+        symlinks: [],
+        source_session_ids: ["sid"],
+        source_session_paths: ["/x/sid.jsonl"],
+        source_agent: "claude_code",
+        gate_agent: "claude_code",
+        created_at: "2026-05-22T08:58:07.613Z",
+        uploaded: false,
+        insight: "   ",
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.title).toContain("3 skills");
+    expect(result!.title).not.toContain("Hivemind found a pattern");
+    expect(result!.dedupKey).toEqual({ count: 3 });
+  });
+
+  it("truncates over-long insights at a word boundary with an ellipsis", () => {
+    // Haiku often returns 40+ word paragraphs. The banner is single-slot
+    // session-start surface — long prose buries the takeaway. Rule must
+    // truncate to ≤~90 chars at a word boundary so the user-visible line
+    // stays scannable.
+    const longInsight =
+      "You traced npm corruption back to SessionStart hooks calling autoUpdate() twice per session without inter-process locks, exposing a documented-but-unimplemented follow-up that caused cascading failures across every session restart.";
+    const result = localMinedRule.evaluate({
+      agent: "claude-code",
+      creds: null,
+      state: { shown: {} },
+      localSkillsCount: 1,
+      latestInsightEntry: {
+        skill_name: "concurrent-subprocess-serialization-pattern",
+        canonical_path: "/x/SKILL.md",
+        symlinks: [],
+        source_session_ids: ["sid"],
+        source_session_paths: ["/x/sid.jsonl"],
+        source_agent: "claude_code",
+        gate_agent: "claude_code",
+        created_at: "2026-05-22T08:58:07.618Z",
+        uploaded: false,
+        insight: longInsight,
+      },
+    });
+    expect(result).not.toBeNull();
+    const insightLine = result!.body.split("\n").find(l => l.includes("📌"))!;
+    // Truncated line stays ≤ ~94 chars total (3 indent + 📌 + space + 90).
+    expect(insightLine.length).toBeLessThanOrEqual(100);
+    expect(insightLine.endsWith("…")).toBe(true);
+    // Word-boundary truncation: must NOT cut mid-word. The last visible
+    // word before the ellipsis must be a complete token from the input.
+    const beforeEllipsis = insightLine.slice(0, -1).trim();
+    const lastWord = beforeEllipsis.split(" ").pop()!;
+    expect(longInsight).toContain(lastWord);
+  });
+
+  it("short insights pass through untouched", () => {
+    const short = "You hit npm corruption twice this week.";
+    const result = localMinedRule.evaluate({
+      agent: "claude-code",
+      creds: null,
+      state: { shown: {} },
+      localSkillsCount: 1,
+      latestInsightEntry: {
+        skill_name: "npm-corruption-guard",
+        canonical_path: "/x/SKILL.md",
+        symlinks: [],
+        source_session_ids: ["sid"],
+        source_session_paths: ["/x/sid.jsonl"],
+        source_agent: "claude_code",
+        gate_agent: "claude_code",
+        created_at: "2026-05-22T08:58:07.618Z",
+        uploaded: false,
+        insight: short,
+      },
+    });
+    expect(result!.body).toContain(short);
+    expect(result!.body).not.toContain("…");
+  });
+
+  it("insight-branch dedupKey changes across distinct insights so a fresh insight re-fires", () => {
+    const entryA = {
+      skill_name: "verify-before-done",
+      canonical_path: "/x/A/SKILL.md",
+      symlinks: [],
+      source_session_ids: ["s1"],
+      source_session_paths: ["/x/s1.jsonl"],
+      source_agent: "claude_code",
+      gate_agent: "claude_code",
+      created_at: "2026-05-22T08:00:00.000Z",
+      uploaded: false,
+      insight: "Insight A.",
+    };
+    const entryB = { ...entryA, skill_name: "ask-first-propose-second", canonical_path: "/x/B/SKILL.md", insight: "Insight B." };
+    const a = localMinedRule.evaluate({
+      agent: "claude-code", creds: null, state: { shown: {} }, localSkillsCount: 1, latestInsightEntry: entryA,
+    });
+    const b = localMinedRule.evaluate({
+      agent: "claude-code", creds: null, state: { shown: {} }, localSkillsCount: 1, latestInsightEntry: entryB,
+    });
+    expect(a!.dedupKey).not.toEqual(b!.dedupKey);
   });
 });
 

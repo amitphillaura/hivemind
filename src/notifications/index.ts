@@ -15,10 +15,10 @@
 
 import type { Credentials } from "../commands/auth-creds.js";
 import type { Agent, Notification, NotificationContext } from "./types.js";
+import type { LocalManifestEntry } from "../skillify/local-manifest.js";
 import { evaluateRules } from "./rules/registry.js";
 import { readQueue, writeQueue } from "./queue.js";
 import { readState, writeState, alreadyShown, markShown, tryClaim, releaseClaim } from "./state.js";
-import { renderNotifications } from "./format.js";
 import { emit } from "./delivery/index.js";
 import { fetchBackendNotifications } from "./sources/backend.js";
 import { pickPrimaryBanner } from "./sources/primary-banner.js";
@@ -42,6 +42,12 @@ export interface DrainOptions {
    * read the local-mined manifest themselves (rules contract: no IO).
    */
   localSkillsCount?: number | null;
+  /**
+   * Most recent insight-bearing manifest entry; powers the concrete-insight
+   * branch of localMinedRule. Populated by the hook entry point so rules
+   * stay IO-free.
+   */
+  latestInsightEntry?: LocalManifestEntry | null;
 }
 
 /**
@@ -69,6 +75,7 @@ export async function drainSessionStart(opts: DrainOptions): Promise<void> {
       creds: opts.creds,
       state,
       localSkillsCount: opts.localSkillsCount ?? null,
+      latestInsightEntry: opts.latestInsightEntry ?? null,
     };
 
     const fromRules = evaluateRules("session_start", ctx);
@@ -105,8 +112,10 @@ export async function drainSessionStart(opts: DrainOptions): Promise<void> {
       return;
     }
 
-    const rendered = renderNotifications(claimed);
-    emit(opts.agent, rendered);
+    // Adapter decides per-channel rendering (some notifications go only
+    // to user-visible channels). See delivery/claude-code.ts for the
+    // model-vs-user split that closes the codex prompt-injection P1.
+    emit(opts.agent, claimed);
 
     // Persist state for non-transient notifications. Transient ones (see
     // Notification.transient docstring) are self-clearing — their enqueue

@@ -17,16 +17,40 @@
  *     in an attachment array). Earlier reports of dropped second-hook stdout
  *     (issue #13650) appear resolved in 2.1.x.
  *
+ * Channel split (codex P1 prompt-injection finding):
+ *   Notifications can opt into user-visible-only delivery by setting
+ *   `userVisibleOnly: true`. The renderer emits the user-visible block
+ *   (which carries LLM-derived prose) ONLY to `systemMessage`; the
+ *   model-visible `additionalContext` carries the subset of notifications
+ *   whose bodies are statically authored and safe to feed back into the
+ *   model's system prompt. Without this split, an insight derived from
+ *   adversarial session content could prompt-inject the next session.
+ *
  * Cap: 10,000 chars per channel (per CC docs). renderNotifications output
  * stays well under that for v1 content.
  */
 
-export function emitClaudeCode(rendered: string): void {
+import type { Notification } from "../types.js";
+import { renderNotifications } from "../format.js";
+
+export function emitClaudeCode(notifications: Notification[]): void {
+  // The empty-array short-circuit lives in delivery/index.ts:emit;
+  // adapters are guaranteed to receive at least one notification.
+  // Rendering an empty list still produces "", which the ternary
+  // below handles, but the dispatcher guard keeps the contract
+  // explicit and the coverage matrix tight.
+  const modelSafe = notifications.filter(n => !n.userVisibleOnly);
+  const modelRendered = renderNotifications(modelSafe);
+  const userRendered = renderNotifications(notifications);
+
+  // Omit additionalContext entirely when every notification in the
+  // batch is user-only — there's nothing safe to send to the model.
+  // Claude Code accepts a missing additionalContext field gracefully.
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "SessionStart",
-      additionalContext: rendered,
+      ...(modelRendered ? { additionalContext: modelRendered } : {}),
     },
-    systemMessage: rendered,
+    systemMessage: userRendered,
   }));
 }

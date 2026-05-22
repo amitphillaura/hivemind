@@ -15,16 +15,22 @@
  * needs to do.
  */
 
-import type { Agent } from "../types.js";
+import type { Agent, Notification } from "../types.js";
 import { emitClaudeCode } from "./claude-code.js";
 
-export type EmitFn = (rendered: string) => void;
+// Adapters now take notifications, not a pre-rendered string, so each
+// agent can decide per-channel rendering (e.g. user-visible-only items
+// are kept out of Claude Code's model-visible additionalContext). The
+// previous string-based signature collapsed both channels to the same
+// content, which leaked LLM-derived insight prose into the model's
+// system prompt (codex P1).
+export type EmitFn = (notifications: Notification[]) => void;
 
 const ADAPTERS: Record<Agent, EmitFn> = {
   "claude-code": emitClaudeCode,
 };
 
-export function emit(agent: Agent, rendered: string): void {
-  if (!rendered) return;
-  ADAPTERS[agent](rendered);
+export function emit(agent: Agent, notifications: Notification[]): void {
+  if (notifications.length === 0) return;
+  ADAPTERS[agent](notifications);
 }

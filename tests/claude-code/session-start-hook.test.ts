@@ -65,7 +65,24 @@ vi.mock("../../src/utils/version-check.js", async (importOriginal) => {
 const countLocalManifestEntriesMock = vi.fn();
 vi.mock("../../src/skillify/local-manifest.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/skillify/local-manifest.js")>();
-  return { ...actual, countLocalManifestEntries: (...a: unknown[]) => countLocalManifestEntriesMock(...a) };
+  return {
+    ...actual,
+    countLocalManifestEntries: (...a: unknown[]) => countLocalManifestEntriesMock(...a),
+  };
+});
+
+// maybeAutoMineLocal mocked so the un-authed branch's both outcomes are
+// reachable without doing real file IO. Real call returns
+// `triggered: false, reason: "no-claude-sessions"` in the test env, which
+// leaves the `triggered === true` branch on session-start.ts:145
+// uncovered — a coverage gap CI's branch threshold (≥90%) flags.
+const maybeAutoMineLocalMock = vi.fn();
+vi.mock("../../src/skillify/spawn-mine-local-worker.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/skillify/spawn-mine-local-worker.js")>();
+  return {
+    ...actual,
+    maybeAutoMineLocal: (...a: unknown[]) => maybeAutoMineLocalMock(...a),
+  };
 });
 
 let stdoutLines: string[] = [];
@@ -118,7 +135,14 @@ beforeEach(() => {
   autoUpdateMock.mockReset().mockResolvedValue(undefined);
   getInstalledVersionMock.mockReset().mockReturnValue("9.9.9");
   // Default: no manifest → 0 mined skills. Individual tests override.
+  // The hook's model-visible additionalContext NEVER renders insight
+  // prose (security invariant — see local-mined-banner.ts docstring),
+  // so we don't need a getLatestInsightEntry mock here.
   countLocalManifestEntriesMock.mockReset().mockReturnValue(0);
+  // Default: auto-mine guards trip (no claude sessions) — matches the
+  // common test scenario where the developer's HOME has no local
+  // sessions visible to the test runner.
+  maybeAutoMineLocalMock.mockReset().mockReturnValue({ triggered: false, reason: "no-claude-sessions" });
   // Disable auto-pull during this test: autoPullSkills would otherwise issue
   // an extra SQL query (against `skills`) through the same DeeplakeApi mock,
   // breaking the placeholder-branching call-count assertions. The auto-pull
@@ -370,6 +394,43 @@ describe("session-start hook — context shape edge cases", () => {
     const ctx = parsed.hookSpecificOutput.additionalContext;
     expect(ctx).toContain("5 local skills from past");
     expect(ctx).toContain("hivemind login");
+  });
+
+  it("logs `auto-mine: triggered (background)` when maybeAutoMineLocal returns triggered=true", async () => {
+    // Coverage guard for the ternary on src/hooks/session-start.ts:145.
+    // The "triggered=true" branch is what runs on real fresh-install
+    // flows — a coverage gap there means the path the conversion play
+    // depends on isn't asserted.
+    loadCredsMock.mockReturnValue(null);
+    maybeAutoMineLocalMock.mockReturnValueOnce({ triggered: true });
+    await runHook();
+    expect(debugLogMock).toHaveBeenCalledWith("auto-mine: triggered (background)");
+  });
+
+  it("MUST NOT render insight prose in additionalContext, even when manifest is full (security invariant)", async () => {
+    // Codex P1 regression guard: the hook's model-visible
+    // additionalContext channel must never carry LLM-derived insight
+    // strings. session-start.js used to call getLatestInsightEntry()
+    // and feed the gate's prose into additionalContext, which is a
+    // prompt-injection vector. The rich insight banner now lives
+    // exclusively on the user-visible systemMessage channel via the
+    // notifications rule. Test by simulating a populated manifest
+    // and asserting the count surface fires, not the insight one.
+    loadCredsMock.mockReturnValue(null);
+    countLocalManifestEntriesMock.mockReturnValue(7);
+    const out = await runHook();
+    const parsed = JSON.parse(out!);
+    const ctx = parsed.hookSpecificOutput.additionalContext;
+    expect(ctx).toContain("7 local skills from past");
+    expect(ctx).toContain("hivemind login");
+    // Negative patterns — these are exactly what the user-visible
+    // notifications-rule branch renders. If any of them slip into
+    // additionalContext, the prompt-injection vector is back.
+    expect(ctx).not.toContain("found a pattern");
+    expect(ctx).not.toContain("📌");
+    expect(ctx).not.toContain("✨");
+    expect(ctx).not.toContain("Minted skill");
+    expect(ctx).not.toContain("claude -p '/");
   });
 
   it("does NOT append the mined-skills note when user is logged in (even with manifest present)", async () => {

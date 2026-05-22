@@ -146,15 +146,101 @@ describe("rules registry — edge cases", () => {
 // delivery/index.ts: empty-string short-circuit
 // ---------------------------------------------------------------------------
 
-describe("delivery dispatch — empty rendered short-circuit", () => {
-  it("emit() returns silently when rendered is empty string", () => {
+describe("delivery dispatch — empty short-circuit", () => {
+  it("emit() returns silently when notifications array is empty", () => {
+    // The dispatch now takes notifications (not a pre-rendered string)
+    // so per-agent adapters can split content per channel — see the
+    // model/user split in delivery/claude-code.ts. An empty list still
+    // short-circuits without writing anything to stdout.
     const writes: string[] = [];
     vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
       writes.push(typeof c === "string" ? c : c.toString());
       return true;
     });
-    emit("claude-code", "");
+    emit("claude-code", []);
     expect(writes).toEqual([]);
+    vi.restoreAllMocks();
+  });
+
+  it("routes userVisibleOnly notifications to systemMessage ONLY, never to additionalContext (codex P1 guard)", () => {
+    // Security invariant: notifications carrying LLM-derived content
+    // set userVisibleOnly so their body never reaches the model's
+    // additionalContext channel. The user still sees the message in
+    // the terminal via systemMessage. Without this split an
+    // adversarial gate output could prompt-inject the next session.
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
+      writes.push(typeof c === "string" ? c : c.toString());
+      return true;
+    });
+    emit("claude-code", [
+      {
+        id: "user-only",
+        severity: "info",
+        title: "User-visible title",
+        body: "BODY-WITH-LLM-PROSE",
+        dedupKey: { x: 1 },
+        userVisibleOnly: true,
+      },
+    ]);
+    expect(writes).toHaveLength(1);
+    const payload = JSON.parse(writes[0]);
+    expect(payload.systemMessage).toContain("BODY-WITH-LLM-PROSE");
+    expect(payload.hookSpecificOutput.additionalContext).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it("routes non-user-only notifications to BOTH channels (legacy behavior)", () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
+      writes.push(typeof c === "string" ? c : c.toString());
+      return true;
+    });
+    emit("claude-code", [
+      {
+        id: "regular",
+        severity: "info",
+        title: "Static title",
+        body: "STATIC-BODY",
+        dedupKey: { x: 1 },
+      },
+    ]);
+    const payload = JSON.parse(writes[0]);
+    expect(payload.systemMessage).toContain("STATIC-BODY");
+    expect(payload.hookSpecificOutput.additionalContext).toContain("STATIC-BODY");
+    vi.restoreAllMocks();
+  });
+
+  it("emits a mixed batch correctly: only safe items reach additionalContext, all items reach systemMessage", () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
+      writes.push(typeof c === "string" ? c : c.toString());
+      return true;
+    });
+    emit("claude-code", [
+      {
+        id: "safe",
+        severity: "info",
+        title: "Safe",
+        body: "STATIC-BODY",
+        dedupKey: { x: 1 },
+      },
+      {
+        id: "unsafe",
+        severity: "info",
+        title: "Unsafe",
+        body: "LLM-DERIVED",
+        dedupKey: { x: 2 },
+        userVisibleOnly: true,
+      },
+    ]);
+    const payload = JSON.parse(writes[0]);
+    // additionalContext (model channel) has ONLY the safe body
+    expect(payload.hookSpecificOutput.additionalContext).toContain("STATIC-BODY");
+    expect(payload.hookSpecificOutput.additionalContext).not.toContain("LLM-DERIVED");
+    // systemMessage (user channel) has BOTH
+    expect(payload.systemMessage).toContain("STATIC-BODY");
+    expect(payload.systemMessage).toContain("LLM-DERIVED");
     vi.restoreAllMocks();
   });
 });

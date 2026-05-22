@@ -9,9 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   countLocalManifestEntries,
+  getLatestInsightEntry,
   readLocalManifest,
   writeLocalManifest,
   type LocalManifest,
+  type LocalManifestEntry,
 } from "../../src/skillify/local-manifest.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "local-manifest-test-"));
@@ -90,5 +92,357 @@ describe("readLocalManifest", () => {
     const nested = join(TMP, "a", "b", "c", "manifest.json");
     writeLocalManifest(makeManifest(1), nested);
     expect(readLocalManifest(nested)?.entries).toHaveLength(1);
+  });
+
+  it("round-trips the `insight` field on entries that carry one", () => {
+    // Schema-extension guard: writing an entry with an `insight` string
+    // must survive write → read. Without this, downstream callers
+    // (SessionStart banner) get the entry but `.insight` comes back
+    // undefined → silent fallback to count surface.
+    const path = manifestPath("insight-roundtrip");
+    const entry: LocalManifestEntry = {
+      skill_name: "verify-before-done",
+      canonical_path: "/x/SKILL.md",
+      symlinks: [],
+      source_session_ids: ["sid"],
+      source_session_paths: ["/x/sid.jsonl"],
+      source_agent: "claude_code",
+      gate_agent: "claude_code",
+      created_at: "2026-05-22T00:00:00.000Z",
+      uploaded: false,
+      insight: "You revisited 4 merged PRs in the last month because tests weren't run.",
+    };
+    writeLocalManifest({ created_at: "2026-05-22T00:00:00.000Z", entries: [entry] }, path);
+    const read = readLocalManifest(path);
+    expect(read!.entries[0].insight).toBe(entry.insight);
+  });
+});
+
+describe("getLatestInsightEntry", () => {
+  it("returns null when the manifest is missing", () => {
+    expect(getLatestInsightEntry(manifestPath("nope-insight"))).toBeNull();
+  });
+
+  it("returns null when no entry carries an insight (legacy manifest)", () => {
+    // Pre-insight manifest: every entry lacks `insight`. Accessor must
+    // return null so the banner falls back to the count-only surface
+    // instead of rendering an `undefined` interpolation.
+    const path = manifestPath("legacy");
+    writeLocalManifest(makeManifest(3), path);
+    expect(getLatestInsightEntry(path)).toBeNull();
+  });
+
+  it("returns null when entries' insight strings are all empty / whitespace", () => {
+    // Belt-and-suspenders: parseMultiVerdict already collapses empty
+    // strings to undefined, but a hand-edited or future-format manifest
+    // could still carry an empty insight. Accessor treats empty/whitespace
+    // as "no insight" so the banner doesn't render a vacuous line.
+    const path = manifestPath("empty-insights");
+    const m = makeManifest(2);
+    m.entries[0].insight = "";
+    m.entries[1].insight = "   \t  ";
+    writeLocalManifest(m, path);
+    expect(getLatestInsightEntry(path)).toBeNull();
+  });
+
+  it("returns null when manifest exists but entries is not an array (malformed file)", () => {
+    // Defensive branch: a hand-edited manifest could swap `entries` from
+    // an array to a string/object. Accessor must coerce that to null
+    // rather than throw inside the for...of loop.
+    const path = manifestPath("entries-not-array-insight");
+    writeFileSync(path, JSON.stringify({ created_at: "x", entries: "oops" }));
+    expect(getLatestInsightEntry(path)).toBeNull();
+  });
+
+  it("skips null / non-object entries inside the array", () => {
+    // Mirrors parseMultiVerdict's defensive `if (!e || typeof e !== "object")`
+    // check — guards against a manifest where an entry was set to null,
+    // a string, or otherwise non-object by hand or by a future
+    // refactor accidentally pushing the wrong shape.
+    const path = manifestPath("null-entries");
+    writeFileSync(path, JSON.stringify({
+      created_at: "x",
+      entries: [
+        null,
+        "not an object",
+        {
+          skill_name: "good",
+          canonical_path: "/x/SKILL.md",
+          symlinks: [],
+          source_session_ids: [],
+          source_session_paths: [],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T00:00:00.000Z",
+          uploaded: false,
+          insight: "Real insight.",
+        },
+      ],
+    }));
+    const latest = getLatestInsightEntry(path);
+    expect(latest).not.toBeNull();
+    expect(latest!.skill_name).toBe("good");
+  });
+
+  it("skips entries with non-string insight values", () => {
+    // Belt-and-suspenders against a future schema where insight is
+    // accidentally serialized as a number, array, or object.
+    const path = manifestPath("non-string-insights");
+    const m = makeManifest(0);
+    m.entries.push({
+      skill_name: "bad-insight-type",
+      canonical_path: "/x/SKILL.md",
+      symlinks: [],
+      source_session_ids: [],
+      source_session_paths: [],
+      source_agent: "claude_code",
+      gate_agent: "claude_code",
+      created_at: "2026-05-22T00:00:00.000Z",
+      uploaded: false,
+      insight: 42 as unknown as string,
+    });
+    writeLocalManifest(m, path);
+    expect(getLatestInsightEntry(path)).toBeNull();
+  });
+
+  it("skips entries with missing or unparseable `created_at`", () => {
+    // Date.parse returns NaN for unparseable / missing strings. We
+    // SKIP such entries rather than ordering them at -Infinity so a
+    // single malformed row can't shadow valid ones — and entries with
+    // a real timestamp win deterministically over those without.
+    const path = manifestPath("missing-created-at");
+    writeFileSync(path, JSON.stringify({
+      created_at: "x",
+      entries: [
+        {
+          skill_name: "no-date",
+          canonical_path: "/x/A/SKILL.md",
+          symlinks: [],
+          source_session_ids: [],
+          source_session_paths: [],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          uploaded: false,
+          insight: "Skipped — no parseable date.",
+        },
+        {
+          skill_name: "unparseable-date",
+          canonical_path: "/x/C/SKILL.md",
+          symlinks: [],
+          source_session_ids: [],
+          source_session_paths: [],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "not-a-date",
+          uploaded: false,
+          insight: "Also skipped.",
+        },
+        {
+          skill_name: "with-date",
+          canonical_path: "/x/B/SKILL.md",
+          symlinks: [],
+          source_session_ids: [],
+          source_session_paths: [],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T00:00:00.000Z",
+          uploaded: false,
+          insight: "Picked.",
+        },
+      ],
+    }));
+    const latest = getLatestInsightEntry(path);
+    expect(latest!.skill_name).toBe("with-date");
+  });
+
+  it("returns null when the latest mine-local run produced no insight, even if an older run did", () => {
+    // Codex P2 regression guard: getLatestInsightEntry must NOT
+    // surface a stale historical insight when subsequent runs added
+    // only non-insight entries. Without this, the localMinedRule
+    // would keep returning the same insight + dedupKey, and
+    // alreadyShown would suppress fresh count notifications,
+    // hiding new skills from the user entirely.
+    const path = manifestPath("stale-insight");
+    writeFileSync(path, JSON.stringify({
+      created_at: "x",
+      entries: [
+        // Old run: had insight.
+        {
+          skill_name: "old-insight",
+          canonical_path: "/x/SKILL.md",
+          symlinks: [],
+          source_session_ids: ["s1"],
+          source_session_paths: ["/x/s1.jsonl"],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-20T00:00:00.000Z",
+          uploaded: false,
+          insight: "Old insight from 2 days ago.",
+        },
+        // Newer run: no insight.
+        {
+          skill_name: "new-no-insight-a",
+          canonical_path: "/x/A/SKILL.md",
+          symlinks: [],
+          source_session_ids: ["s2"],
+          source_session_paths: ["/x/s2.jsonl"],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T10:00:00.000Z",
+          uploaded: false,
+        },
+        {
+          skill_name: "new-no-insight-b",
+          canonical_path: "/x/B/SKILL.md",
+          symlinks: [],
+          source_session_ids: ["s3"],
+          source_session_paths: ["/x/s3.jsonl"],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T10:00:00.100Z",
+          uploaded: false,
+        },
+      ],
+    }));
+    // Latest run (10:00:00.100Z) is way past the 5-min window from
+    // the old insight (2 days earlier), so the old insight is
+    // outside the latest-run cluster → return null → rule falls
+    // back to count branch.
+    expect(getLatestInsightEntry(path)).toBeNull();
+  });
+
+  it("picks the insight when the latest run produced one (alongside non-insight entries from the same batch)", () => {
+    // Sanity guard for the common case: one mine-local run produces
+    // 8 candidates, 4 with insight and 4 without. All written within
+    // ms of each other. Accessor returns the newest of the
+    // insight-bearing ones.
+    const path = manifestPath("mixed-same-batch");
+    writeFileSync(path, JSON.stringify({
+      created_at: "x",
+      entries: [
+        {
+          skill_name: "no-insight-a",
+          canonical_path: "/x/A/SKILL.md",
+          symlinks: [],
+          source_session_ids: ["s1"],
+          source_session_paths: ["/x/s1.jsonl"],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T10:00:00.000Z",
+          uploaded: false,
+        },
+        {
+          skill_name: "with-insight",
+          canonical_path: "/x/B/SKILL.md",
+          symlinks: [],
+          source_session_ids: ["s2"],
+          source_session_paths: ["/x/s2.jsonl"],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T10:00:00.050Z",
+          uploaded: false,
+          insight: "Found pattern.",
+        },
+        {
+          skill_name: "no-insight-c",
+          canonical_path: "/x/C/SKILL.md",
+          symlinks: [],
+          source_session_ids: ["s3"],
+          source_session_paths: ["/x/s3.jsonl"],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T10:00:00.100Z",
+          uploaded: false,
+        },
+      ],
+    }));
+    expect(getLatestInsightEntry(path)?.skill_name).toBe("with-insight");
+  });
+
+  it("orders timezone-variant timestamps correctly via Date.parse, not lexical comparison", () => {
+    // Coderabbit regression guard: raw-string comparison would order
+    // "2026-05-21T23:59:00+00:00" AFTER "2026-05-22T00:00:00Z" because
+    // '+' < 'Z' lexically. Date.parse normalizes both to the same
+    // numeric instant, so the chronologically-later entry wins.
+    const path = manifestPath("tz-variants");
+    writeFileSync(path, JSON.stringify({
+      created_at: "x",
+      entries: [
+        {
+          skill_name: "older-tz-offset",
+          canonical_path: "/x/A/SKILL.md",
+          symlinks: [],
+          source_session_ids: [],
+          source_session_paths: [],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-21T23:59:00+00:00",
+          uploaded: false,
+          insight: "Older instant.",
+        },
+        {
+          skill_name: "newer-z-form",
+          canonical_path: "/x/B/SKILL.md",
+          symlinks: [],
+          source_session_ids: [],
+          source_session_paths: [],
+          source_agent: "claude_code",
+          gate_agent: "claude_code",
+          created_at: "2026-05-22T00:00:00Z",
+          uploaded: false,
+          insight: "Newer instant.",
+        },
+      ],
+    }));
+    const latest = getLatestInsightEntry(path);
+    expect(latest!.skill_name).toBe("newer-z-form");
+  });
+
+  it("picks the most recent insight-bearing entry across mixed entries", () => {
+    // Mixed manifest: some entries have insight, some don't. We must
+    // return the one with the highest created_at AMONG insight-bearing
+    // entries — not the most recent overall (which might lack insight).
+    const path = manifestPath("mixed");
+    const m = makeManifest(0);
+    m.entries.push({
+      skill_name: "old-with-insight",
+      canonical_path: "/x/old/SKILL.md",
+      symlinks: [],
+      source_session_ids: ["s1"],
+      source_session_paths: ["/x/s1.jsonl"],
+      source_agent: "claude_code",
+      gate_agent: "claude_code",
+      created_at: "2026-05-10T00:00:00.000Z",
+      uploaded: false,
+      insight: "Old insight.",
+    });
+    m.entries.push({
+      skill_name: "newer-without-insight",
+      canonical_path: "/x/new/SKILL.md",
+      symlinks: [],
+      source_session_ids: ["s2"],
+      source_session_paths: ["/x/s2.jsonl"],
+      source_agent: "claude_code",
+      gate_agent: "claude_code",
+      created_at: "2026-05-21T00:00:00.000Z",
+      uploaded: false,
+    });
+    m.entries.push({
+      skill_name: "newest-with-insight",
+      canonical_path: "/x/newest/SKILL.md",
+      symlinks: [],
+      source_session_ids: ["s3"],
+      source_session_paths: ["/x/s3.jsonl"],
+      source_agent: "claude_code",
+      gate_agent: "claude_code",
+      created_at: "2026-05-22T00:00:00.000Z",
+      uploaded: false,
+      insight: "Newest insight.",
+    });
+    writeLocalManifest(m, path);
+    const latest = getLatestInsightEntry(path);
+    expect(latest).not.toBeNull();
+    expect(latest!.skill_name).toBe("newest-with-insight");
+    expect(latest!.insight).toBe("Newest insight.");
   });
 });
