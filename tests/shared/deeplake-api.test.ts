@@ -393,6 +393,12 @@ import {
   MEMORY_COLUMNS,
   SESSIONS_COLUMNS,
   SKILLS_COLUMNS,
+  RULES_COLUMNS,
+  TASKS_COLUMNS,
+  TASK_EVENTS_COLUMNS,
+  GOALS_COLUMNS,
+  KPIS_COLUMNS,
+  CODEBASE_COLUMNS,
 } from "../../src/deeplake-schema.js";
 
 /** Render an info_schema response shape: `[{ column_name: "<name>" }, ...]`. */
@@ -774,6 +780,414 @@ describe("DeeplakeApi.ensureSkillsTable", () => {
     await api.ensureSkillsTable("skills");
     const allSql = mockFetch.mock.calls.filter(c => c[1]?.body).map(c => JSON.parse(c[1].body).query).join(" | ");
     expect(allSql).not.toContain("ALTER TABLE");
+  });
+});
+
+// ── ensureRulesTable ────────────────────────────────────────────────────────
+
+describe("DeeplakeApi.ensureRulesTable", () => {
+  it("creates rules table when it does not exist; heals unconditionally after CREATE", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE TABLE
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(RULES_COLUMNS)));   // post-CREATE heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX
+    const api = makeApi();
+    await api.ensureRulesTable("hivemind_rules");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+
+    const createSql = JSON.parse(mockFetch.mock.calls[1][1].body).query;
+    expect(createSql).toContain(`CREATE TABLE IF NOT EXISTS "hivemind_rules"`);
+    expect(createSql).toContain("rule_id TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("scope TEXT NOT NULL DEFAULT 'team'");
+    expect(createSql).toContain("status TEXT NOT NULL DEFAULT 'active'");
+    expect(createSql).toContain("version BIGINT NOT NULL DEFAULT 1");
+    expect(createSql).toContain("USING deeplake");
+
+    const indexSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(indexSql).toContain("CREATE INDEX IF NOT EXISTS");
+    expect(indexSql).toContain(`"hivemind_rules"`);
+    expect(indexSql).toContain(`("rule_id", "version")`);
+  });
+
+  it("heals after CREATE: race-detected legacy rules table gets ALTERed before returning", async () => {
+    // Stale listTables() + concurrent CREATE → CREATE TABLE IF NOT EXISTS
+    // no-ops against legacy; unconditional heal pass repairs it.
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE (no-op vs legacy)
+    const legacy = allOf(RULES_COLUMNS).filter(c => c !== "agent");
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(legacy));                // heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // ALTER
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX
+    const api = makeApi();
+    await api.ensureRulesTable("hivemind_rules");
+    expect(mockFetch).toHaveBeenCalledTimes(5);
+    const alterSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(alterSql).toBe(`ALTER TABLE "hivemind_rules" ADD COLUMN agent TEXT NOT NULL DEFAULT 'manual'`);
+  });
+
+  it("on existing rules table: SELECT info_schema + ALTER only missing columns", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [{ table_name: "hivemind_rules" }] }),
+    });
+    const present = allOf(RULES_COLUMNS).filter(c => c !== "assigned_by");
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(present));
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // ALTER assigned_by
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX
+    const api = makeApi();
+    await api.ensureRulesTable("hivemind_rules");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+    const alterSql = JSON.parse(mockFetch.mock.calls[2][1].body).query;
+    expect(alterSql).toBe(`ALTER TABLE "hivemind_rules" ADD COLUMN assigned_by TEXT NOT NULL DEFAULT ''`);
+    expect(alterSql).not.toContain("IF NOT EXISTS");
+  });
+
+  it("on existing rules table fully up-to-date: no ALTER fires", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [{ table_name: "hivemind_rules" }] }),
+    });
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(RULES_COLUMNS)));
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX
+    const api = makeApi();
+    await api.ensureRulesTable("hivemind_rules");
+    const allSql = mockFetch.mock.calls.filter(c => c[1]?.body).map(c => JSON.parse(c[1].body).query).join(" | ");
+    expect(allSql).not.toContain("ALTER TABLE");
+  });
+});
+
+// ── ensureTasksTable ────────────────────────────────────────────────────────
+
+describe("DeeplakeApi.ensureTasksTable", () => {
+  it("creates tasks table when it does not exist; heals unconditionally after CREATE", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE TABLE
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(TASKS_COLUMNS)));   // post-CREATE heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX
+    const api = makeApi();
+    await api.ensureTasksTable("hivemind_tasks");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+
+    const createSql = JSON.parse(mockFetch.mock.calls[1][1].body).query;
+    expect(createSql).toContain(`CREATE TABLE IF NOT EXISTS "hivemind_tasks"`);
+    expect(createSql).toContain("task_id TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("assigned_to TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("assigned_by TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("kpis JSONB");
+    expect(createSql).toContain("version BIGINT NOT NULL DEFAULT 1");
+
+    const indexSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(indexSql).toContain(`"hivemind_tasks"`);
+    expect(indexSql).toContain(`("task_id", "version")`);
+  });
+
+  it("heals after CREATE: race-detected legacy tasks table gets ALTERed before returning", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE (no-op)
+    const legacy = allOf(TASKS_COLUMNS).filter(c => c !== "kpis");
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(legacy));                // heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // ALTER
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX
+    const api = makeApi();
+    await api.ensureTasksTable("hivemind_tasks");
+    expect(mockFetch).toHaveBeenCalledTimes(5);
+    // kpis is nullable JSONB — ALTER must NOT carry NOT NULL or DEFAULT.
+    const alterSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(alterSql).toBe(`ALTER TABLE "hivemind_tasks" ADD COLUMN kpis JSONB`);
+  });
+
+  it("on existing tasks table: ALTER only the missing columns in schema order", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [{ table_name: "hivemind_tasks" }] }),
+    });
+    const present = allOf(TASKS_COLUMNS).filter(c => c !== "assigned_to" && c !== "kpis");
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(present));
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // ALTER assigned_to (schema order: comes first)
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // ALTER kpis
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX
+    const api = makeApi();
+    await api.ensureTasksTable("hivemind_tasks");
+    expect(mockFetch).toHaveBeenCalledTimes(5);
+    const alter1 = JSON.parse(mockFetch.mock.calls[2][1].body).query;
+    const alter2 = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(alter1).toBe(`ALTER TABLE "hivemind_tasks" ADD COLUMN assigned_to TEXT NOT NULL DEFAULT ''`);
+    expect(alter2).toBe(`ALTER TABLE "hivemind_tasks" ADD COLUMN kpis JSONB`);
+  });
+});
+
+// ── ensureTaskEventsTable ───────────────────────────────────────────────────
+
+describe("DeeplakeApi.ensureTaskEventsTable", () => {
+  it("creates task_events table when it does not exist; heals unconditionally after CREATE", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                                // CREATE TABLE
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(TASK_EVENTS_COLUMNS)));   // post-CREATE heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                                // CREATE INDEX
+    const api = makeApi();
+    await api.ensureTaskEventsTable("hivemind_task_events");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+
+    const createSql = JSON.parse(mockFetch.mock.calls[1][1].body).query;
+    expect(createSql).toContain(`CREATE TABLE IF NOT EXISTS "hivemind_task_events"`);
+    expect(createSql).toContain("task_id TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("kpi_id TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("value BIGINT NOT NULL DEFAULT 0");
+    expect(createSql).toContain("source TEXT NOT NULL DEFAULT 'user'");
+    // No JSONB on the events table — it's flat for cheap SUM aggregation.
+    expect(createSql).not.toContain("JSONB");
+
+    const indexSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(indexSql).toContain(`"hivemind_task_events"`);
+    expect(indexSql).toContain(`("task_id", "kpi_id")`);
+  });
+
+  it("heals after CREATE: missing value column ALTER preserves BIGINT default 0", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                                // CREATE
+    const legacy = allOf(TASK_EVENTS_COLUMNS).filter(c => c !== "value");
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(legacy));                      // heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                                // ALTER
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                                // CREATE INDEX
+    const api = makeApi();
+    await api.ensureTaskEventsTable("hivemind_task_events");
+    const alterSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(alterSql).toBe(`ALTER TABLE "hivemind_task_events" ADD COLUMN value BIGINT NOT NULL DEFAULT 0`);
+  });
+
+  it("on existing task_events table fully up-to-date: no ALTER fires", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [{ table_name: "hivemind_task_events" }] }),
+    });
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(TASK_EVENTS_COLUMNS)));
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX
+    const api = makeApi();
+    await api.ensureTaskEventsTable("hivemind_task_events");
+    const allSql = mockFetch.mock.calls.filter(c => c[1]?.body).map(c => JSON.parse(c[1].body).query).join(" | ");
+    expect(allSql).not.toContain("ALTER TABLE");
+  });
+});
+
+// ── cross-table identifier safety ───────────────────────────────────────────
+
+describe("ensureRulesTable / ensureTasksTable / ensureTaskEventsTable: identifier validation", () => {
+  it("rejects table names with SQL identifier injection on every new ensure* method", async () => {
+    const api = makeApi();
+    const evil = `x"; DROP TABLE y; --`;
+    await expect(api.ensureRulesTable(evil)).rejects.toThrow();
+    await expect(api.ensureTasksTable(evil)).rejects.toThrow();
+    await expect(api.ensureTaskEventsTable(evil)).rejects.toThrow();
+    await expect(api.ensureGoalsTable(evil)).rejects.toThrow();
+    await expect(api.ensureKpisTable(evil)).rejects.toThrow();
+    await expect(api.ensureCodebaseTable(evil)).rejects.toThrow();
+    // None of the rejected calls should have hit the network — sqlIdent
+    // throws before listTables() runs.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// ── ensureCodebaseTable ─────────────────────────────────────────────────────
+
+describe("DeeplakeApi.ensureCodebaseTable", () => {
+  it("creates codebase table when missing; heals after CREATE; emits the identity-key index", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                              // CREATE TABLE
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(CODEBASE_COLUMNS)));   // post-CREATE heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                              // CREATE INDEX
+    const api = makeApi();
+    await api.ensureCodebaseTable("codebase");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+
+    const createSql = JSON.parse(mockFetch.mock.calls[1][1].body).query;
+    expect(createSql).toContain(`CREATE TABLE IF NOT EXISTS "codebase"`);
+    expect(createSql).toContain("USING deeplake");
+
+    const indexSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(indexSql).toContain(`"codebase"`);
+    // Composite identity index: (org_id, workspace_id, repo_slug, user_id, worktree_id, commit_sha)
+    expect(indexSql).toContain(`"org_id"`);
+    expect(indexSql).toContain(`"commit_sha"`);
+  });
+
+  it("heals after CREATE: missing required column gets ALTERed before returning", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                              // CREATE (no-op vs legacy)
+    // Drop the first column from the heal response — any column works; we
+    // just need to force the ALTER branch. Use a column we know is in
+    // CODEBASE_COLUMNS by index.
+    const dropCol = CODEBASE_COLUMNS[1].name;
+    const legacy = allOf(CODEBASE_COLUMNS).filter(c => c !== dropCol);
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(legacy));                    // heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                              // ALTER
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                              // CREATE INDEX
+    const api = makeApi();
+    await api.ensureCodebaseTable("codebase");
+    const alterSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(alterSql).toMatch(new RegExp(`^ALTER TABLE "codebase" ADD COLUMN ${dropCol} `));
+  });
+
+  it("on existing codebase table fully up-to-date: no ALTER fires", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [{ table_name: "codebase" }] }),
+    });
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(CODEBASE_COLUMNS)));
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX
+    const api = makeApi();
+    await api.ensureCodebaseTable("codebase");
+    const allSql = mockFetch.mock.calls.filter(c => c[1]?.body).map(c => JSON.parse(c[1].body).query).join(" | ");
+    expect(allSql).not.toContain("ALTER TABLE");
+    expect(allSql).not.toContain("CREATE TABLE");
+  });
+});
+
+// ── ensureGoalsTable ────────────────────────────────────────────────────────
+
+describe("DeeplakeApi.ensureGoalsTable", () => {
+  it("creates goals table when missing; heals after CREATE; emits BOTH lookup indexes", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE TABLE
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(GOALS_COLUMNS)));   // post-CREATE heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX (goal_id, version)
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX (owner, status)
+    const api = makeApi();
+    await api.ensureGoalsTable("hivemind_goals");
+    // 5 round-trips: listTables + CREATE + heal-SELECT + 2 indexes.
+    // Both indexes are required: (goal_id, version) for VFS latest-row
+    // reads, (owner, status) for the SessionStart banner's hot path.
+    expect(mockFetch).toHaveBeenCalledTimes(5);
+
+    const createSql = JSON.parse(mockFetch.mock.calls[1][1].body).query;
+    expect(createSql).toContain(`CREATE TABLE IF NOT EXISTS "hivemind_goals"`);
+    expect(createSql).toContain("goal_id TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("owner TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("status TEXT NOT NULL DEFAULT 'opened'");
+    expect(createSql).toContain("version BIGINT NOT NULL DEFAULT 1");
+    expect(createSql).toContain("USING deeplake");
+
+    const idx1 = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    const idx2 = JSON.parse(mockFetch.mock.calls[4][1].body).query;
+    const both = `${idx1} | ${idx2}`;
+    expect(both).toContain(`("goal_id", "version")`);
+    expect(both).toContain(`("owner", "status")`);
+  });
+
+  it("heals after CREATE: missing owner column gets ALTERed before returning", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE (no-op vs legacy)
+    const legacy = allOf(GOALS_COLUMNS).filter(c => c !== "owner");
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(legacy));                // heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // ALTER owner
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX (goal_id, version)
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX (owner, status)
+    const api = makeApi();
+    await api.ensureGoalsTable("hivemind_goals");
+    const alterSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(alterSql).toBe(`ALTER TABLE "hivemind_goals" ADD COLUMN owner TEXT NOT NULL DEFAULT ''`);
+  });
+
+  it("on existing goals table fully up-to-date: no ALTER fires (only listTables + heal + 2 indexes)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [{ table_name: "hivemind_goals" }] }),
+    });
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(GOALS_COLUMNS)));
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX (goal_id, version)
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX (owner, status)
+    const api = makeApi();
+    await api.ensureGoalsTable("hivemind_goals");
+    const allSql = mockFetch.mock.calls.filter(c => c[1]?.body).map(c => JSON.parse(c[1].body).query).join(" | ");
+    expect(allSql).not.toContain("ALTER TABLE");
+    expect(allSql).not.toContain("CREATE TABLE");
+  });
+});
+
+// ── ensureKpisTable ─────────────────────────────────────────────────────────
+
+describe("DeeplakeApi.ensureKpisTable", () => {
+  it("creates kpis table when missing; heals after CREATE; emits (goal_id, kpi_id) lookup index", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE TABLE
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(KPIS_COLUMNS)));    // post-CREATE heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX
+    const api = makeApi();
+    await api.ensureKpisTable("hivemind_kpis");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+
+    const createSql = JSON.parse(mockFetch.mock.calls[1][1].body).query;
+    expect(createSql).toContain(`CREATE TABLE IF NOT EXISTS "hivemind_kpis"`);
+    expect(createSql).toContain("goal_id TEXT NOT NULL DEFAULT ''");
+    expect(createSql).toContain("kpi_id TEXT NOT NULL DEFAULT ''");
+    // KPIs do NOT carry owner — ownership derives from the parent goal.
+    expect(createSql).not.toMatch(/\bowner TEXT/);
+
+    const indexSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(indexSql).toContain(`"hivemind_kpis"`);
+    expect(indexSql).toContain(`("goal_id", "kpi_id")`);
+  });
+
+  it("heals after CREATE: missing kpi_id column gets ALTERed before returning", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [] }),
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE
+    const legacy = allOf(KPIS_COLUMNS).filter(c => c !== "kpi_id");
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(legacy));                // heal SELECT
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // ALTER kpi_id
+    mockFetch.mockResolvedValueOnce(jsonResponse({}));                          // CREATE INDEX
+    const api = makeApi();
+    await api.ensureKpisTable("hivemind_kpis");
+    const alterSql = JSON.parse(mockFetch.mock.calls[3][1].body).query;
+    expect(alterSql).toBe(`ALTER TABLE "hivemind_kpis" ADD COLUMN kpi_id TEXT NOT NULL DEFAULT ''`);
+  });
+
+  it("on existing kpis table fully up-to-date: no ALTER fires", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200,
+      json: async () => ({ tables: [{ table_name: "hivemind_kpis" }] }),
+    });
+    mockFetch.mockResolvedValueOnce(infoSchemaResponse(allOf(KPIS_COLUMNS)));
+    mockFetch.mockResolvedValueOnce(jsonResponse({})); // CREATE INDEX
+    const api = makeApi();
+    await api.ensureKpisTable("hivemind_kpis");
+    const allSql = mockFetch.mock.calls.filter(c => c[1]?.body).map(c => JSON.parse(c[1].body).query).join(" | ");
+    expect(allSql).not.toContain("ALTER TABLE");
+    expect(allSql).not.toContain("CREATE TABLE");
   });
 });
 

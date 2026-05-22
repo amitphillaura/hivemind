@@ -45,6 +45,12 @@ const validConfig = {
   token: "t", apiUrl: "http://example", orgId: "o", orgName: "acme",
   workspaceId: "default", userName: "alice",
   tableName: "memory", sessionsTableName: "sessions",
+  // T6 fields — needed so the renderer's sqlIdent doesn't render
+  // FROM "undefined" when the mock loadConfig is consulted.
+  rulesTableName: "hivemind_rules",
+  tasksTableName: "hivemind_tasks",
+  taskEventsTableName: "hivemind_task_events",
+  skillsTableName: "skills",
 };
 
 async function runHook(env: Record<string, string | undefined> = {}): Promise<void> {
@@ -99,7 +105,8 @@ describe("hermes session-start hook — placeholder creation", () => {
     queryMock.mockResolvedValueOnce([]); // SELECT
     queryMock.mockResolvedValueOnce([]); // INSERT
     await runHook();
-    expect(queryMock).toHaveBeenCalledTimes(2);
+    // 2 placeholder + 3 T6 renderer (rules + team + mine) = 5.
+    expect(queryMock).toHaveBeenCalledTimes(5);
     const insertSql = queryMock.mock.calls[1][0] as string;
     expect(insertSql).toMatch(/INSERT INTO "memory"/);
     expect(insertSql).toContain("'hermes'");
@@ -109,7 +116,8 @@ describe("hermes session-start hook — placeholder creation", () => {
   it("skips INSERT when placeholder already exists", async () => {
     queryMock.mockResolvedValueOnce([{ path: "/summaries/alice/ses-1.md" }]);
     await runHook();
-    expect(queryMock).toHaveBeenCalledTimes(1);
+    // 1 placeholder SELECT + 3 T6 renderer (rules + team + mine) = 4.
+    expect(queryMock).toHaveBeenCalledTimes(4);
   });
 
   it("skipped entirely when no token", async () => {
@@ -118,9 +126,19 @@ describe("hermes session-start hook — placeholder creation", () => {
     expect(queryMock).not.toHaveBeenCalled();
   });
 
-  it("skipped when HIVEMIND_CAPTURE=false", async () => {
+  it("HIVEMIND_CAPTURE=false: no placeholder, no DDL ensure, but renderer still runs (codex P2 pass 2 + pass 4)", async () => {
+    // See cursor session-start tests for the identical contract.
+    // ensure*Table are DDL writes gated on captureEnabled; renderer
+    // is read-only and runs regardless.
     await runHook({ HIVEMIND_CAPTURE: "false" });
-    expect(queryMock).not.toHaveBeenCalled();
+    // Explicit negative assertion: a regression that re-enables DDL on
+    // the read-only path would silently re-introduce CREATE TABLE /
+    // CREATE INDEX from the capture-disabled hook. CodeRabbit on PR
+    // #193 flagged the original count-only check as insufficient.
+    expect(ensureTableMock).not.toHaveBeenCalled();
+    expect(ensureSessionsTableMock).not.toHaveBeenCalled();
+    expect(queryMock).toHaveBeenCalledTimes(3); // rules + team + mine
+    expect(queryMock.mock.calls[0][0]).toMatch(/^SELECT .* FROM "hivemind_rules"/);
   });
 
   it("DB error is swallowed and logged (does not crash the hook)", async () => {

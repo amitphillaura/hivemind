@@ -45,6 +45,12 @@ const validConfig = {
   token: "t", apiUrl: "http://example", orgId: "o", orgName: "acme",
   workspaceId: "default", userName: "alice",
   tableName: "memory", sessionsTableName: "sessions",
+  // T6 fields — needed so the renderer's sqlIdent doesn't render
+  // FROM "undefined" when the mock loadConfig is consulted.
+  rulesTableName: "hivemind_rules",
+  tasksTableName: "hivemind_tasks",
+  taskEventsTableName: "hivemind_task_events",
+  skillsTableName: "skills",
 };
 
 async function runHook(env: Record<string, string | undefined> = {}): Promise<void> {
@@ -101,7 +107,9 @@ describe("cursor session-start hook — placeholder creation", () => {
     await runHook();
     expect(ensureTableMock).toHaveBeenCalledTimes(1);
     expect(ensureSessionsTableMock).toHaveBeenCalledTimes(1);
-    expect(queryMock).toHaveBeenCalledTimes(2);
+    // 2 placeholder + 3 T6 renderer (rules + team-tasks + mine-tasks)
+    // = 5. computeAllForTasks skipped because tasks lists empty.
+    expect(queryMock).toHaveBeenCalledTimes(5);
     const insertSql = queryMock.mock.calls[1][0] as string;
     expect(insertSql).toMatch(/INSERT INTO "memory"/);
     expect(insertSql).toContain("'cursor'");
@@ -111,12 +119,21 @@ describe("cursor session-start hook — placeholder creation", () => {
   it("skips INSERT when placeholder already exists", async () => {
     queryMock.mockResolvedValueOnce([{ path: "/summaries/alice/sid-1.md" }]);
     await runHook();
-    expect(queryMock).toHaveBeenCalledTimes(1); // only the SELECT, no INSERT
+    // 1 placeholder SELECT + 3 T6 renderer (rules + team + mine) = 4.
+    expect(queryMock).toHaveBeenCalledTimes(4);
   });
 
-  it("skips placeholder when HIVEMIND_CAPTURE=false", async () => {
+  it("HIVEMIND_CAPTURE=false: no placeholder, no DDL ensure, but renderer still runs (codex P2 pass 2 + pass 4)", async () => {
+    // HIVEMIND_CAPTURE=false means full read-only mode. ensureTable
+    // and ensureSessionsTable are DDL writes (create/heal), so they
+    // are gated together with the placeholder INSERT. The renderer
+    // is read-only and runs unconditionally.
     await runHook({ HIVEMIND_CAPTURE: "false" });
-    expect(queryMock).not.toHaveBeenCalled();
+    expect(ensureTableMock).not.toHaveBeenCalled();
+    expect(ensureSessionsTableMock).not.toHaveBeenCalled();
+    // 3 renderer SELECTs (rules + team-tasks + mine-tasks).
+    expect(queryMock).toHaveBeenCalledTimes(3);
+    expect(queryMock.mock.calls[0][0]).toMatch(/^SELECT .* FROM "hivemind_rules"/);
   });
 
   it("skips placeholder when no token in credentials", async () => {

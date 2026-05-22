@@ -3,6 +3,9 @@ import {
   MEMORY_COLUMNS,
   SESSIONS_COLUMNS,
   SKILLS_COLUMNS,
+  RULES_COLUMNS,
+  TASKS_COLUMNS,
+  TASK_EVENTS_COLUMNS,
   buildCreateTableSql,
   healMissingColumns,
   isMissingTableError,
@@ -25,25 +28,36 @@ function mockQuery(script: Array<(sql: string) => unknown | Promise<unknown>>) {
 
 const present = (cols: string[]) => cols.map(c => ({ column_name: c }));
 
+// All schema definitions in this plugin. Kept in one tuple so the
+// validity loops below stay parametric — adding a new table only adds
+// one row here rather than expanding three separate loop bodies.
+const ALL_SCHEMAS = [
+  ["MEMORY_COLUMNS", MEMORY_COLUMNS],
+  ["SESSIONS_COLUMNS", SESSIONS_COLUMNS],
+  ["SKILLS_COLUMNS", SKILLS_COLUMNS],
+  ["RULES_COLUMNS", RULES_COLUMNS],
+  ["TASKS_COLUMNS", TASKS_COLUMNS],
+  ["TASK_EVENTS_COLUMNS", TASK_EVENTS_COLUMNS],
+] as const;
+
 describe("schema definitions", () => {
-  it("MEMORY / SESSIONS / SKILLS contain only valid SQL identifiers", () => {
-    for (const [label, cols] of [
-      ["MEMORY_COLUMNS", MEMORY_COLUMNS],
-      ["SESSIONS_COLUMNS", SESSIONS_COLUMNS],
-      ["SKILLS_COLUMNS", SKILLS_COLUMNS],
-    ] as const) {
+  it("every schema contains only valid SQL identifiers", () => {
+    for (const [label, cols] of ALL_SCHEMAS) {
       for (const c of cols) {
         expect(c.name, `${label}.${c.name}`).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/);
       }
     }
   });
 
+  it("every schema rejects duplicate column names", () => {
+    for (const [label, cols] of ALL_SCHEMAS) {
+      const names = cols.map(c => c.name);
+      expect(new Set(names).size, `${label} has duplicate column names`).toBe(names.length);
+    }
+  });
+
   it("every NOT NULL column has a DEFAULT (so ALTER on populated tables is safe)", () => {
-    for (const [label, cols] of [
-      ["MEMORY_COLUMNS", MEMORY_COLUMNS],
-      ["SESSIONS_COLUMNS", SESSIONS_COLUMNS],
-      ["SKILLS_COLUMNS", SKILLS_COLUMNS],
-    ] as const) {
+    for (const [label, cols] of ALL_SCHEMAS) {
       for (const c of cols) {
         const notNull = /\bNOT\s+NULL\b/i.test(c.sql);
         const hasDefault = /\bDEFAULT\b/i.test(c.sql);
@@ -55,13 +69,51 @@ describe("schema definitions", () => {
   });
 
   it("nullable columns (no NOT NULL) are allowed without DEFAULT", () => {
-    // summary_embedding, message_embedding, message are intentionally nullable.
+    // summary_embedding, message_embedding, message, kpis are intentionally nullable.
     const ms = MEMORY_COLUMNS.find(c => c.name === "summary_embedding");
     expect(ms?.sql).not.toMatch(/NOT NULL/);
     const me = SESSIONS_COLUMNS.find(c => c.name === "message_embedding");
     expect(me?.sql).not.toMatch(/NOT NULL/);
     const msg = SESSIONS_COLUMNS.find(c => c.name === "message");
     expect(msg?.sql).not.toMatch(/NOT NULL/);
+    const kpis = TASKS_COLUMNS.find(c => c.name === "kpis");
+    expect(kpis?.sql).not.toMatch(/NOT NULL/);
+    expect(kpis?.sql).toBe("JSONB");
+  });
+
+  it("RULES_COLUMNS encodes the version-bump pattern (BIGINT version, default 1)", () => {
+    const version = RULES_COLUMNS.find(c => c.name === "version");
+    expect(version?.sql).toContain("BIGINT");
+    expect(version?.sql).toContain("DEFAULT 1");
+    // status defaults to active so a freshly INSERTed row is visible to the
+    // SessionStart filter without an extra UPDATE.
+    const status = RULES_COLUMNS.find(c => c.name === "status");
+    expect(status?.sql).toContain("DEFAULT 'active'");
+    const scope = RULES_COLUMNS.find(c => c.name === "scope");
+    expect(scope?.sql).toContain("DEFAULT 'team'");
+  });
+
+  it("TASKS_COLUMNS encodes the version-bump pattern + assigned_to / assigned_by", () => {
+    expect(TASKS_COLUMNS.find(c => c.name === "version")?.sql).toContain("BIGINT");
+    expect(TASKS_COLUMNS.find(c => c.name === "assigned_to")).toBeDefined();
+    expect(TASKS_COLUMNS.find(c => c.name === "assigned_by")).toBeDefined();
+    // scope default 'me' — a self-created task without --scope flag is
+    // personal by default, not broadcast to the team.
+    expect(TASKS_COLUMNS.find(c => c.name === "scope")?.sql).toContain("DEFAULT 'me'");
+  });
+
+  it("TASK_EVENTS_COLUMNS is fully append-only shaped (no JSONB, no nullable status)", () => {
+    // No JSONB column — events are flat for cheap aggregation. The KPI
+    // current value is SUM(value) GROUP BY (task_id, kpi_id), not a
+    // JSONB scan.
+    for (const c of TASK_EVENTS_COLUMNS) {
+      expect(c.sql, `task_events.${c.name} should not be JSONB`).not.toMatch(/JSONB/);
+    }
+    // task_version is BIGINT (matches tasks.version so events can be
+    // joined to the exact task revision they were emitted against).
+    expect(TASK_EVENTS_COLUMNS.find(c => c.name === "task_version")?.sql).toContain("BIGINT");
+    expect(TASK_EVENTS_COLUMNS.find(c => c.name === "value")?.sql).toContain("BIGINT");
+    expect(TASK_EVENTS_COLUMNS.find(c => c.name === "source")?.sql).toContain("DEFAULT 'user'");
   });
 });
 

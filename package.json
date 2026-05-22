@@ -52,6 +52,7 @@
     "*.md": []
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.97.1",
     "@huggingface/transformers": "^3.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "deeplake": "^0.3.30",

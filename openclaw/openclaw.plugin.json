@@ -9,7 +9,9 @@
     "tools": [
       "hivemind_search",
       "hivemind_read",
-      "hivemind_index"
+      "hivemind_index",
+      "hivemind_goal_add",
+      "hivemind_kpi_add"
     ],
     "commands": [
       "hivemind_login",

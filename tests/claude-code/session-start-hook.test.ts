@@ -116,6 +116,12 @@ const validConfig = {
   token: "t", orgId: "o", orgName: "acme", workspaceId: "default",
   userName: "alice", apiUrl: "http://example", tableName: "memory",
   sessionsTableName: "sessions",
+  // T6 fields — needed so the renderer's sqlIdent doesn't render
+  // FROM "undefined" when the mock loadConfig is consulted.
+  rulesTableName: "hivemind_rules",
+  tasksTableName: "hivemind_tasks",
+  taskEventsTableName: "hivemind_task_events",
+  skillsTableName: "skills",
 };
 
 let cacheTmp: string;
@@ -211,26 +217,66 @@ describe("session-start hook — placeholder branching", () => {
     await runHook();
     expect(ensureTableMock).toHaveBeenCalled();
     expect(ensureSessionsTableMock).toHaveBeenCalledWith("sessions");
-    // 1 SELECT (existing check) + 1 INSERT = 2 queries.
-    expect(queryMock).toHaveBeenCalledTimes(2);
+    // 1 SELECT (existing-summary check) + 1 INSERT (placeholder)
+    // + 3 renderer SELECTs (listRules + listTasks team + listTasks mine)
+    // = 5 queries. computeAllForTasks is skipped because tasks lists
+    // return [] (default queryMock value), so no events SELECT.
+    expect(queryMock).toHaveBeenCalledTimes(5);
     expect(queryMock.mock.calls[0][0]).toMatch(/^SELECT path FROM/);
     expect(queryMock.mock.calls[1][0]).toMatch(/^INSERT INTO/);
+    expect(queryMock.mock.calls[2][0]).toMatch(/^SELECT .* FROM "hivemind_rules"/);
+    expect(queryMock.mock.calls[3][0]).toMatch(/^SELECT .* FROM "hivemind_tasks"/);
+    expect(queryMock.mock.calls[4][0]).toMatch(/^SELECT .* FROM "hivemind_tasks"/);
     expect(debugLogMock).toHaveBeenCalledWith("placeholder created");
   });
 
   it("skips placeholder INSERT when summary already exists (resumed session)", async () => {
     queryMock.mockResolvedValueOnce([{ path: "/summaries/alice/sid-1.md" }]);
     await runHook();
-    expect(queryMock).toHaveBeenCalledTimes(1); // only the SELECT
+    // 1 placeholder SELECT (returns row, no INSERT) + 3 renderer
+    // SELECTs (rules + team-tasks + mine-tasks) = 4 queries.
+    expect(queryMock).toHaveBeenCalledTimes(4);
   });
 
-  it("skips placeholder INSERT when HIVEMIND_CAPTURE=false but still ensures tables", async () => {
+  it("non-empty rules+tasks block is appended to additionalContext (T6 coverage)", async () => {
+    // The default tests use queryMock-returns-[] which produces an
+    // empty rulesTasksBlock and exercises the "false" branch of the
+    // additionalContext ternary. This test populates rules so the
+    // renderer returns content and the "true" branch (concat) fires.
+    const rule = {
+      id: "row-1", rule_id: "rule-1", text: "no DROP TABLE on prod",
+      scope: "team", status: "active", assigned_by: "alice@activeloop.ai",
+      version: 1, created_at: "2026-05-20T10:00:00Z",
+      agent: "manual", plugin_version: "0.7.99",
+    };
+    queryMock.mockResolvedValueOnce([]);     // placeholder SELECT
+    queryMock.mockResolvedValueOnce([]);     // placeholder INSERT
+    queryMock.mockResolvedValueOnce([rule]); // renderer rules
+    queryMock.mockResolvedValueOnce([]);     // renderer team-tasks
+    queryMock.mockResolvedValueOnce([]);     // renderer mine-tasks
+    const out = await runHook();
+    expect(out).toBeTruthy();
+    const parsed = JSON.parse(out!);
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("HIVEMIND RULES");
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("no DROP TABLE on prod");
+  });
+
+  it("HIVEMIND_CAPTURE=false: no placeholder, no DDL (ensure), but renderer still runs (codex P2 pass 4)", async () => {
     await runHook({ HIVEMIND_CAPTURE: "false" });
-    expect(ensureTableMock).toHaveBeenCalled();
-    expect(ensureSessionsTableMock).toHaveBeenCalled();
-    expect(queryMock).not.toHaveBeenCalled();
+    // ensureTable + ensureSessionsTable are DDL writes (create/heal),
+    // so they're gated on captureEnabled along with the placeholder
+    // INSERT. The renderer runs unconditionally because it's read-only.
+    expect(ensureTableMock).not.toHaveBeenCalled();
+    expect(ensureSessionsTableMock).not.toHaveBeenCalled();
+    // 3 renderer SELECTs (rules + team + mine). The rules/tasks/events
+    // tables are lazy-created by their own CLI writes; SessionStart
+    // never DDL-touches them.
+    expect(queryMock).toHaveBeenCalledTimes(3);
+    expect(queryMock.mock.calls[0][0]).toMatch(/^SELECT .* FROM "hivemind_rules"/);
+    expect(queryMock.mock.calls[1][0]).toMatch(/^SELECT .* FROM "hivemind_tasks"/);
+    expect(queryMock.mock.calls[2][0]).toMatch(/^SELECT .* FROM "hivemind_tasks"/);
     expect(debugLogMock).toHaveBeenCalledWith(
-      "placeholder skipped (HIVEMIND_CAPTURE=false)",
+      "placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)",
     );
   });
 

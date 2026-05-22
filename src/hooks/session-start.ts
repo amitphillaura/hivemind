@@ -20,6 +20,7 @@ import { makeWikiLogger } from "../utils/wiki-log.js";
 import { autoUpdate } from "./shared/autoupdate.js";
 import { autoPullSkills } from "../skillify/auto-pull.js";
 import { renderSkillifyCommands } from "../cli/skillify-spec.js";
+import { renderContextBlock } from "./shared/context-renderer.js";
 import { countLocalManifestEntries } from "../skillify/local-manifest.js";
 import { renderLocalMinedNote } from "../skillify/local-mined-banner.js";
 import { maybeAutoMineLocal } from "../skillify/spawn-mine-local-worker.js";
@@ -176,7 +177,15 @@ async function main(): Promise<void> {
   // fresh data — only the placeholder INSERT is skipped when HIVEMIND_CAPTURE=false
   // (benchmark runs, explicit opt-out). Mirrors the guard already in
   // session-start-setup.ts / session-end.ts / codex hooks.
+  // HIVEMIND_CAPTURE=false means full read-only mode — no INSERTs and
+  // no DDL. ensureTable + ensureSessionsTable both create/heal tables
+  // (DDL writes), so they MUST be gated on captureEnabled. Codex
+  // review pass 4 surfaced this — the prior code ran ensure* even
+  // under capture=false. The renderer is read-only and runs
+  // regardless; the rules/tasks/task_events tables it queries are
+  // lazy-created by their own CLI writes (rules/tasks/progress).
   const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false";
+  let rulesTasksBlock = "";
   if (input.session_id && creds?.token) {
     try {
       const config = loadConfig();
@@ -184,14 +193,28 @@ async function main(): Promise<void> {
         const table = config.tableName;
         const sessionsTable = config.sessionsTableName;
         const api = new DeeplakeApi(config.token, config.apiUrl, config.orgId, config.workspaceId, table);
-        await api.ensureTable();
-        await api.ensureSessionsTable(sessionsTable);
         if (captureEnabled) {
+          await api.ensureTable();
+          await api.ensureSessionsTable(sessionsTable);
           await createPlaceholder(api, table, input.session_id, input.cwd ?? "", config.userName, config.orgName, config.workspaceId, pluginVersion);
           log("placeholder created");
         } else {
-          log("placeholder skipped (HIVEMIND_CAPTURE=false)");
+          log("placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)");
         }
+        // Renderer is read-only and runs regardless of captureEnabled.
+        // It absorbs its own errors (missing table, network, etc.)
+        // and returns "" on any failure — SessionStart MUST NOT fail
+        // because of a bad rules/tasks read.
+        rulesTasksBlock = await renderContextBlock(
+          (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>,
+          {
+            rulesTable: config.rulesTableName,
+            tasksTable: config.tasksTableName,
+            taskEventsTable: config.taskEventsTableName,
+            currentUser: config.userName,
+          },
+          { log },
+        );
       }
     } catch (e: any) {
       log(`placeholder failed: ${e.message}`);
@@ -229,6 +252,10 @@ async function main(): Promise<void> {
   // graph-bridge wiring from this branch. The helper supersedes the
   // inline string construction; the graph spawn + inject append remain.
   const localMined = countLocalManifestEntries();
+  // Use the shared renderer (extracted on main for testability / codex
+  // review on PR #197) — keep `baseContext` here as the intermediate
+  // because the rules+tasks block append below depends on a separate
+  // name from the final `additionalContext` emitted to stdout.
   const localMinedNote = renderLocalMinedNote({ totalCount: localMined });
 
   // Local code graph context (Phase 3 v1.1). Cheap: reads ~/.hivemind/...
@@ -248,10 +275,16 @@ async function main(): Promise<void> {
   const graphLine = graphContextLine(input.cwd ?? process.cwd());
   const graphNote = graphLine ?? "";
 
-  const baseAuth = creds?.token
-    ? `\n\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${updateNotice}`
-    : `\n\n⚠️ Not logged in to Deeplake. Memory search will not work. Ask the user to run /hivemind:login to authenticate.${localMinedNote}${updateNotice}`;
-  const additionalContext = `${resolvedContext}${baseAuth}${graphNote}`;
+  const baseContext = creds?.token
+    ? `${resolvedContext}\n\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${updateNotice}`
+    : `${resolvedContext}\n\n⚠️ Not logged in to Deeplake. Memory search will not work. Ask the user to run /hivemind:login to authenticate.${localMinedNote}${updateNotice}`;
+  // Append the rules + tasks block when there's something to show, then
+  // append the graph note (single line, may be empty). The renderer
+  // returns "" on empty state OR failure, so the ternary stays terse.
+  const withRulesTasks = rulesTasksBlock
+    ? `${baseContext}\n\n${rulesTasksBlock}`
+    : baseContext;
+  const additionalContext = `${withRulesTasks}${graphNote}`;
 
   console.log(JSON.stringify({
     hookSpecificOutput: {

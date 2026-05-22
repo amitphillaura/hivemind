@@ -93,6 +93,129 @@ export const SKILLS_COLUMNS: readonly ColumnDef[] = Object.freeze([
   { name: "updated_at",      sql: "TEXT NOT NULL DEFAULT ''" },
 ]);
 
+/**
+ * Rules table — org-wide principles ("never DROP TABLE on prod creds").
+ *
+ * One row per rule version. Edits INSERT a fresh row with version+1; reads
+ * pick the latest per rule_id (ORDER BY version DESC LIMIT 1). Same
+ * pattern as SKILLS_COLUMNS — sidesteps the Deeplake UPDATE-coalescing
+ * quirk that bit the wiki worker.
+ */
+export const RULES_COLUMNS: readonly ColumnDef[] = Object.freeze([
+  { name: "id",             sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "rule_id",        sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "text",           sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "scope",          sql: "TEXT NOT NULL DEFAULT 'team'" },
+  { name: "status",         sql: "TEXT NOT NULL DEFAULT 'active'" },
+  { name: "assigned_by",    sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "version",        sql: "BIGINT NOT NULL DEFAULT 1" },
+  { name: "created_at",     sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "agent",          sql: "TEXT NOT NULL DEFAULT 'manual'" },
+  { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
+]);
+
+/**
+ * Tasks table — per-team or per-user task tracking with agent-generated KPIs.
+ *
+ * Immutable + version-bumped (same shape as SKILLS_COLUMNS and
+ * RULES_COLUMNS). `kpis` is a nullable JSONB column holding the agent's
+ * KPI metadata; the canonical KPI current-value source is
+ * TASK_EVENTS_COLUMNS (SUM(value)), not this snapshot.
+ */
+export const TASKS_COLUMNS: readonly ColumnDef[] = Object.freeze([
+  { name: "id",             sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "task_id",        sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "text",           sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "scope",          sql: "TEXT NOT NULL DEFAULT 'me'" },
+  { name: "status",         sql: "TEXT NOT NULL DEFAULT 'active'" },
+  { name: "assigned_to",    sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "assigned_by",    sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "kpis",           sql: "JSONB" },
+  { name: "version",        sql: "BIGINT NOT NULL DEFAULT 1" },
+  { name: "created_at",     sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "agent",          sql: "TEXT NOT NULL DEFAULT 'manual'" },
+  { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
+]);
+
+/**
+ * Task events table — append-only stream of KPI progress events.
+ *
+ * Every INSERT is a fresh row; never UPDATE. KPI current value =
+ * SUM(value) WHERE task_id=? AND kpi_id=?. This is the only shape that
+ * fully sidesteps the Deeplake UPDATE-coalescing bug for high-churn data
+ * (auto-extract can emit many events per session).
+ */
+export const TASK_EVENTS_COLUMNS: readonly ColumnDef[] = Object.freeze([
+  { name: "id",             sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "task_id",        sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "task_version",   sql: "BIGINT NOT NULL DEFAULT 1" },
+  { name: "kpi_id",         sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "value",          sql: "BIGINT NOT NULL DEFAULT 0" },
+  { name: "note",           sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "source",         sql: "TEXT NOT NULL DEFAULT 'user'" },
+  { name: "agent",          sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "ts",             sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
+]);
+
+/**
+ * Goals table — user-tracked objectives backed by the VFS path
+ * convention `memory/goal/<owner>/<status>/<goal_id>.md`.
+ *
+ * Path decomposition is the source of truth for `owner`, `status`, and
+ * `goal_id`; the `content` column stores the human-readable markdown
+ * body. This avoids the "path vs content drift" footgun codex flagged
+ * in the design round 3 review — there is nothing to drift since the
+ * content does not replicate path-encoded fields.
+ *
+ * Immutable + version-bumped (same shape as SKILLS_COLUMNS /
+ * RULES_COLUMNS / TASKS_COLUMNS). Every VFS write produces v=N+1;
+ * `rm` translates to v=N+1 with status='closed' (soft-close, full
+ * audit trail preserved).
+ *
+ * Status enum: 'opened' | 'in_progress' | 'closed' — mirrors the path
+ * folder names. KPIs link via shared `goal_id` (no FK enforcement on
+ * Deeplake; logical join only).
+ */
+export const GOALS_COLUMNS: readonly ColumnDef[] = Object.freeze([
+  { name: "id",             sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "goal_id",        sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "owner",          sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "status",         sql: "TEXT NOT NULL DEFAULT 'opened'" },
+  { name: "content",        sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "version",        sql: "BIGINT NOT NULL DEFAULT 1" },
+  { name: "created_at",     sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "agent",          sql: "TEXT NOT NULL DEFAULT 'manual'" },
+  { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
+]);
+
+/**
+ * KPIs table — markdown bodies describing target / current / unit for
+ * one KPI on one goal. Backed by VFS path
+ * `memory/kpi/<goal_id>/<kpi_id>.md`. Path encodes the (goal_id,
+ * kpi_id) pair; the content column stores the body (free markdown,
+ * by convention with `target:` / `current:` / `unit:` lines for the
+ * commit-extract worker to mutate).
+ *
+ * Owner is intentionally NOT stored here — it is derived from the
+ * parent goal (logical join on goal_id). This avoids the
+ * reassign-races scenario where moving a goal between owners would
+ * otherwise force a multi-file cascade move on the KPI files.
+ *
+ * Same version-bump pattern: every write INSERTs v=N+1; deleting a
+ * KPI conceptually means writing a tombstone version, deferred to v1.1.
+ */
+export const KPIS_COLUMNS: readonly ColumnDef[] = Object.freeze([
+  { name: "id",             sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "goal_id",        sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "kpi_id",         sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "content",        sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "version",        sql: "BIGINT NOT NULL DEFAULT 1" },
+  { name: "created_at",     sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "agent",          sql: "TEXT NOT NULL DEFAULT 'manual'" },
+  { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
+]);
+
 // ── Module-load lint ────────────────────────────────────────────────────────
 
 /**
@@ -165,6 +288,11 @@ export const CODEBASE_COLUMNS: readonly ColumnDef[] = Object.freeze([
 validateSchema("MEMORY_COLUMNS", MEMORY_COLUMNS);
 validateSchema("SESSIONS_COLUMNS", SESSIONS_COLUMNS);
 validateSchema("SKILLS_COLUMNS", SKILLS_COLUMNS);
+validateSchema("RULES_COLUMNS", RULES_COLUMNS);
+validateSchema("TASKS_COLUMNS", TASKS_COLUMNS);
+validateSchema("TASK_EVENTS_COLUMNS", TASK_EVENTS_COLUMNS);
+validateSchema("GOALS_COLUMNS", GOALS_COLUMNS);
+validateSchema("KPIS_COLUMNS", KPIS_COLUMNS);
 validateSchema("CODEBASE_COLUMNS", CODEBASE_COLUMNS);
 
 // ── SQL builders ────────────────────────────────────────────────────────────

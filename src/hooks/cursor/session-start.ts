@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { loadCredentials } from "../../commands/auth.js";
 import { loadConfig } from "../../config.js";
 import { DeeplakeApi } from "../../deeplake-api.js";
+import { renderContextBlock } from "../shared/context-renderer.js";
 import { sqlStr } from "../../utils/sql.js";
 import { renderSkillifyCommands } from "../../cli/skillify-spec.js";
 import { countLocalManifestEntries } from "../../skillify/local-manifest.js";
@@ -32,6 +33,7 @@ import { log as _log } from "../../utils/debug.js";
 import { getInstalledVersion } from "../../utils/version-check.js";
 import { autoUpdate } from "../shared/autoupdate.js";
 import { autoPullSkills } from "../../skillify/auto-pull.js";
+import { GOALS_INSTRUCTIONS_CLI } from "../shared/goals-instructions.js";
 import { spawnGraphPullWorker } from "../../graph/spawn-pull-worker.js";
 const log = (msg: string) => _log("cursor-session-start", msg);
 
@@ -154,18 +156,44 @@ async function main(): Promise<void> {
   const current = getInstalledVersion(__bundleDir, ".claude-plugin");
   const pluginVersion = current ?? "";
 
+  // HIVEMIND_CAPTURE=false means full read-only mode — no INSERTs
+  // AND no DDL. ensureTable + ensureSessionsTable create/heal tables
+  // (DDL writes), so they're gated on captureEnabled too. The
+  // renderer is read-only and runs regardless. Codex review pass 2
+  // + pass 4 together surfaced this layering: only writes (placeholder
+  // + ensure DDL) are gated; reads (renderer) always run.
   const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false";
-  if (creds?.token && captureEnabled) {
+  let rulesTasksBlock = "";
+  if (creds?.token) {
     try {
       const config = loadConfig();
       if (config) {
         const table = config.tableName;
         const sessionsTable = config.sessionsTableName;
         const api = new DeeplakeApi(config.token, config.apiUrl, config.orgId, config.workspaceId, table);
-        await api.ensureTable();
-        await api.ensureSessionsTable(sessionsTable);
-        await createPlaceholder(api, table, sessionId, cwd, config.userName, config.orgName, config.workspaceId, pluginVersion);
-        log("placeholder created");
+        if (captureEnabled) {
+          await api.ensureTable();
+          await api.ensureSessionsTable(sessionsTable);
+          await createPlaceholder(api, table, sessionId, cwd, config.userName, config.orgName, config.workspaceId, pluginVersion);
+          log("placeholder created");
+        } else {
+          log("placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)");
+        }
+        // T6: read-only renderer. Cursor's additional_context is
+        // invisible to the user (model-only), so the full block is
+        // fine. Renderer absorbs its own errors and returns "" on
+        // any failure (including missing rules/tasks/events tables —
+        // see context-renderer.ts for the per-section sub-tries).
+        rulesTasksBlock = await renderContextBlock(
+          (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>,
+          {
+            rulesTable: config.rulesTableName,
+            tasksTable: config.tasksTableName,
+            taskEventsTable: config.taskEventsTableName,
+            currentUser: config.userName,
+          },
+          { log },
+        );
       }
     } catch (e: any) {
       log(`placeholder failed: ${e.message}`);
@@ -195,9 +223,18 @@ async function main(): Promise<void> {
   // (pullSnapshot would early-return skipped-no-auth anyway).
   if (creds?.token) spawnGraphPullWorker(resolveCwd(input), __bundleDir);
 
-  const additionalContext = creds?.token
+  const baseContext = creds?.token
     ? `${context}\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${versionNotice}`
     : `${context}\nNot logged in to Deeplake. Run: hivemind login${localMinedNote}${versionNotice}`;
+  // Cursor cannot route Write/Edit through hivemind hooks (its
+  // pre-tool-use only intercepts Shell). So the agent here uses
+  // the CLI variant — `hivemind goal add/list/...` invoked as
+  // shell commands. Same end state (rows in hivemind_goals /
+  // hivemind_kpis), different code path inside the agent.
+  const baseWithGoals = creds?.token ? `${baseContext}\n\n${GOALS_INSTRUCTIONS_CLI}` : baseContext;
+  const additionalContext = rulesTasksBlock
+    ? `${baseWithGoals}\n\n${rulesTasksBlock}`
+    : baseWithGoals;
 
   console.log(JSON.stringify({ additional_context: additionalContext }));
 }

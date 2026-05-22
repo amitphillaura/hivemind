@@ -1,0 +1,206 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Tests for `src/notifications/sources/open-goals.ts` — the
+ * SessionStart banner source that surfaces a user's open goals.
+ *
+ * The source reads from the dedicated `hivemind_goals` table via the
+ * shared DeeplakeApi client. We mock at the network seam (the class's
+ * `query` method) and capture the exact SQL the banner caused, so any
+ * regression in:
+ *   - SQL injection escaping of `creds.userName`
+ *   - the owner-LIKE matching that tolerates short vs full-email forms
+ *   - the status filter (must not surface closed goals)
+ *   - the limit (banner is bounded — never lets a flood of goals stretch)
+ * fails fast.
+ *
+ * Coverage in trunk pre-PR #193: 9.8% statements, 16.7% functions.
+ */
+
+const queryMock = vi.fn();
+
+vi.mock("../../src/deeplake-api.js", () => ({
+  DeeplakeApi: class {
+    constructor(
+      _token: string,
+      _apiUrl: string,
+      _orgId: string,
+      _workspaceId: string,
+      _tableName: string,
+    ) { /* nothing */ }
+    query(sql: string) { return queryMock(sql); }
+  },
+}));
+
+import { fetchOpenGoals, formatOpenGoalsLine } from "../../src/notifications/sources/open-goals.js";
+
+const BASE_CREDS = {
+  token: "tok",
+  userName: "alice@activeloop.ai",
+  orgId: "org-1",
+  apiUrl: "https://api.example",
+  workspaceId: "ws",
+};
+
+beforeEach(() => {
+  queryMock.mockReset();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+// ── auth gating ─────────────────────────────────────────────────────────────
+
+describe("fetchOpenGoals — auth gating", () => {
+  it("returns null on missing token", async () => {
+    expect(await fetchOpenGoals({ ...BASE_CREDS, token: "" } as any, "hivemind_goals")).toBeNull();
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("returns null on missing userName (banner has no one to filter for)", async () => {
+    expect(await fetchOpenGoals({ ...BASE_CREDS, userName: "" } as any, "hivemind_goals")).toBeNull();
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("returns null on missing orgId", async () => {
+    expect(await fetchOpenGoals({ ...BASE_CREDS, orgId: "" } as any, "hivemind_goals")).toBeNull();
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── SQL shape ───────────────────────────────────────────────────────────────
+
+describe("fetchOpenGoals — SQL shape", () => {
+  it("issues a single SELECT scoped to current owner with LIKE + non-closed status filter + limit 25", async () => {
+    queryMock.mockResolvedValue([]);
+    await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals_test");
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toMatch(/^SELECT goal_id, owner, status, content FROM "hivemind_goals_test"/);
+    // owner LIKE is intentional — tolerates short vs full-email forms
+    expect(sql).toContain(`WHERE owner LIKE '%alice@activeloop.ai%'`);
+    expect(sql).toContain(`status IN ('opened', 'in_progress')`);
+    // 'closed' status must never show up in the banner — that would
+    // surface user's already-done work as if it were still open.
+    expect(sql).not.toMatch(/closed/);
+    expect(sql).toContain("ORDER BY created_at DESC LIMIT 25");
+  });
+
+  it("escapes single quotes in userName (SQL injection guard)", async () => {
+    queryMock.mockResolvedValue([]);
+    await fetchOpenGoals({ ...BASE_CREDS, userName: "O'Brien" } as any, "hivemind_goals");
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toContain(`'%O''Brien%'`);
+  });
+
+  it("refuses to issue a query when goalsTableName is not a valid SQL identifier", async () => {
+    queryMock.mockResolvedValue([]);
+    // sqlIdent() throws on anything outside [a-zA-Z_][a-zA-Z0-9_]*; the
+    // surrounding try/catch in fetchOpenGoals converts that into a
+    // null banner. Net effect: no DROP TABLE payload ever reaches the
+    // query layer, and the banner silently drops out for that session.
+    const result = await fetchOpenGoals(BASE_CREDS as any, 'evil"; DROP TABLE x; --');
+    expect(result).toBeNull();
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── result mapping ──────────────────────────────────────────────────────────
+
+describe("fetchOpenGoals — result mapping", () => {
+  it("returns null on empty result set (no banner to show)", async () => {
+    queryMock.mockResolvedValue([]);
+    expect(await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals")).toBeNull();
+  });
+
+  it("returns null when API yields non-array (e.g. error envelope)", async () => {
+    queryMock.mockResolvedValue({ error: "boom" });
+    expect(await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals")).toBeNull();
+  });
+
+  it("maps rows to count + first-3 labels, using the FIRST non-empty line of content", async () => {
+    queryMock.mockResolvedValue([
+      { goal_id: "g1", owner: "alice@activeloop.ai", status: "opened", content: "Ship search\n\nbody" },
+      { goal_id: "g2", owner: "alice@activeloop.ai", status: "in_progress", content: "Land memory\nmore" },
+      { goal_id: "g3", owner: "alice@activeloop.ai", status: "opened", content: "Onboard team" },
+      { goal_id: "g4", owner: "alice@activeloop.ai", status: "opened", content: "fourth — should not appear in sample" },
+    ]);
+    const summary = await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals");
+    expect(summary).not.toBeNull();
+    expect(summary!.count).toBe(4);
+    // Sample is capped at 3 (the format line ellipsis-budget)
+    expect(summary!.sample).toEqual(["Ship search", "Land memory", "Onboard team"]);
+  });
+
+  it("filters out rows where owner doesn't substring-match userName (defense-in-depth past the LIKE)", async () => {
+    queryMock.mockResolvedValue([
+      { goal_id: "g1", owner: "alice@activeloop.ai", status: "opened", content: "mine" },
+      // A stray row that the LIKE allowed through but logically isn't this user
+      { goal_id: "g2", owner: "bob@activeloop.ai",   status: "opened", content: "his" },
+    ]);
+    const summary = await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals");
+    expect(summary!.count).toBe(1);
+    expect(summary!.sample).toEqual(["mine"]);
+  });
+
+  it("accepts both short and full-email owner forms (different agents write different forms)", async () => {
+    queryMock.mockResolvedValue([
+      // Short-form row from one agent, full-email creds from another
+      { goal_id: "g1", owner: "alice", status: "opened", content: "from short-form row" },
+    ]);
+    const summary = await fetchOpenGoals(
+      { ...BASE_CREDS, userName: "alice@activeloop.ai" } as any,
+      "hivemind_goals",
+    );
+    expect(summary!.count).toBe(1);
+  });
+
+  it("drops rows missing owner or content (no NPE in label extraction)", async () => {
+    queryMock.mockResolvedValue([
+      { goal_id: "g1", owner: "", status: "opened", content: "x" },               // empty owner
+      { goal_id: "g2", owner: "alice@activeloop.ai", status: "opened", content: "" }, // empty content
+      { goal_id: "g3", owner: "alice@activeloop.ai", status: "opened", content: "ok" },
+    ]);
+    const summary = await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals");
+    expect(summary!.count).toBe(1);
+    expect(summary!.sample).toEqual(["ok"]);
+  });
+
+  it("truncates long labels to 60 chars with an ellipsis", async () => {
+    const long = "x".repeat(120);
+    queryMock.mockResolvedValue([
+      { goal_id: "g1", owner: "alice@activeloop.ai", status: "opened", content: long },
+    ]);
+    const summary = await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals");
+    expect(summary!.sample[0].length).toBe(60);
+    expect(summary!.sample[0].endsWith("…")).toBe(true);
+  });
+
+  it("returns null and never throws when the API query rejects (network/auth/missing table)", async () => {
+    queryMock.mockRejectedValue(new Error("relation \"hivemind_goals\" does not exist"));
+    const summary = await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals");
+    expect(summary).toBeNull();
+  });
+});
+
+// ── formatOpenGoalsLine ─────────────────────────────────────────────────────
+
+describe("formatOpenGoalsLine", () => {
+  it("returns the empty string on null or zero-count summary", () => {
+    expect(formatOpenGoalsLine(null)).toBe("");
+    expect(formatOpenGoalsLine({ count: 0, sample: [] })).toBe("");
+  });
+
+  it("uses singular 'goal' when count=1", () => {
+    expect(formatOpenGoalsLine({ count: 1, sample: ["Ship X"] })).toBe("1 goal open · Ship X");
+  });
+
+  it("uses plural 'goals' when count>1, joining the sample with ' · '", () => {
+    expect(formatOpenGoalsLine({ count: 3, sample: ["A", "B", "C"] })).toBe("3 goals open · A · B · C");
+  });
+
+  it("omits the sample tail when sample is empty (just the head)", () => {
+    expect(formatOpenGoalsLine({ count: 5, sample: [] })).toBe("5 goals open");
+  });
+});

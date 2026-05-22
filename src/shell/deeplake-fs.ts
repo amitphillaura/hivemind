@@ -12,6 +12,14 @@ import { EmbedClient } from "../embeddings/client.js";
 import { embeddingSqlLiteral } from "../embeddings/sql.js";
 import { embeddingsDisabled } from "../embeddings/disable.js";
 import { buildVirtualIndexContent, INDEX_LIMIT_PER_SECTION } from "../hooks/virtual-table-query.js";
+import {
+  classifyPath,
+  composeGoalPath,
+  composeKpiPath,
+  decomposeGoalPath,
+  decomposeKpiPath,
+  type PathKind,
+} from "./goal-paths.js";
 import { handleGraphVfs } from "../graph/vfs-handler.js";
 
 interface ReadFileOptions { encoding?: BufferEncoding }
@@ -163,6 +171,13 @@ export class DeeplakeFs implements IFileSystem {
   private sessionPaths = new Set<string>();
   private sessionsTable: string | null = null;
 
+  // Path-routed structured tables. When non-null, the VFS classifies
+  // each path (see ./goal-paths.ts) and dispatches reads/writes to
+  // the right table instead of the generic memory table. Null means
+  // the goal/kpi routing is disabled (test or legacy configurations).
+  private goalsTable: string | null = null;
+  private kpisTable: string | null = null;
+
   // Embedding client lazily created on first flush. Lives as long as the process.
   private embedClient: EmbedClient | null = null;
 
@@ -180,11 +195,26 @@ export class DeeplakeFs implements IFileSystem {
     table: string,
     mount = "/memory",
     sessionsTable?: string,
+    extra?: { goalsTable?: string; kpisTable?: string },
   ): Promise<DeeplakeFs> {
     const fs = new DeeplakeFs(client, table, mount);
     fs.sessionsTable = sessionsTable ?? null;
-    // Ensure the table exists before bootstrapping.
+    fs.goalsTable = extra?.goalsTable ?? null;
+    fs.kpisTable = extra?.kpisTable ?? null;
+    // Ensure the memory table + goal/kpi tables exist before
+    // bootstrapping. Each ensure call is idempotent and lazy-heals
+    // any column drift from prior schema versions. Failures bubble
+    // up; the shell will report them but stay alive (the
+    // memory-side bootstrap catches its own errors below).
     await client.ensureTable();
+    if (fs.goalsTable) {
+      try { await client.ensureGoalsTable(fs.goalsTable); }
+      catch { /* keep bootstrap moving — goal routing degrades gracefully */ }
+    }
+    if (fs.kpisTable) {
+      try { await client.ensureKpisTable(fs.kpisTable); }
+      catch { /* same — degrade gracefully */ }
+    }
 
     // Bootstrap memory + sessions metadata in parallel.
     let sessionSyncOk = true;
@@ -236,7 +266,68 @@ export class DeeplakeFs implements IFileSystem {
       }
     })() : Promise.resolve();
 
-    await Promise.all([memoryBootstrap, sessionsBootstrap]);
+    // Goals + KPIs bootstrap — read the latest version of each row in
+    // the structured tables and synthesize VFS paths for the cache.
+    // ls / cat then work naturally against the file map, while
+    // writes route to upsertRow which dispatches by path classifier.
+    const goalsBootstrap = fs.goalsTable ? (async () => {
+      try {
+        const goalRows = await client.query(
+          // One row per goal_id (UPDATE-or-INSERT model). Synthesize
+          // the canonical VFS path from owner / status / goal_id.
+          `SELECT goal_id, owner, status, content, created_at ` +
+          `FROM "${fs.goalsTable}" ORDER BY created_at DESC`
+        );
+        for (const row of goalRows) {
+          const owner = String(row["owner"] ?? "");
+          const status = String(row["status"] ?? "");
+          const goal_id = String(row["goal_id"] ?? "");
+          if (!owner || !status || !goal_id) continue;
+          if (status !== "opened" && status !== "in_progress" && status !== "closed") continue;
+          const p = composeGoalPath({ owner, status, goal_id });
+          const content = String(row["content"] ?? "");
+          fs.files.set(p, Buffer.from(content, "utf-8"));
+          fs.meta.set(p, {
+            size: Buffer.byteLength(content, "utf-8"),
+            mime: "text/markdown",
+            mtime: new Date(),
+          });
+          fs.addToTree(p);
+          fs.flushed.add(p);
+        }
+      } catch {
+        // Goals table may not exist yet — start empty.
+      }
+    })() : Promise.resolve();
+
+    const kpisBootstrap = fs.kpisTable ? (async () => {
+      try {
+        const kpiRows = await client.query(
+          // One row per (goal_id, kpi_id) (UPDATE-or-INSERT model).
+          `SELECT goal_id, kpi_id, content, created_at ` +
+          `FROM "${fs.kpisTable}" ORDER BY created_at DESC`
+        );
+        for (const row of kpiRows) {
+          const goal_id = String(row["goal_id"] ?? "");
+          const kpi_id = String(row["kpi_id"] ?? "");
+          if (!goal_id || !kpi_id) continue;
+          const p = composeKpiPath({ goal_id, kpi_id });
+          const content = String(row["content"] ?? "");
+          fs.files.set(p, Buffer.from(content, "utf-8"));
+          fs.meta.set(p, {
+            size: Buffer.byteLength(content, "utf-8"),
+            mime: "text/markdown",
+            mtime: new Date(),
+          });
+          fs.addToTree(p);
+          fs.flushed.add(p);
+        }
+      } catch {
+        // KPIs table may not exist yet — start empty.
+      }
+    })() : Promise.resolve();
+
+    await Promise.all([memoryBootstrap, sessionsBootstrap, goalsBootstrap, kpisBootstrap]);
 
     return fs;
   }
@@ -316,6 +407,21 @@ export class DeeplakeFs implements IFileSystem {
   }
 
   private async upsertRow(r: PendingRow, embedding: number[] | null): Promise<void> {
+    // Path-routed structured tables: dispatch goal / kpi writes to
+    // the dedicated table with INSERT-only version-bump semantics.
+    // The generic memory path falls through to the existing UPDATE /
+    // INSERT shape below. Failures here propagate up to the flush
+    // chain which re-queues the row on the next tick.
+    const kind: PathKind = classifyPath(r.path);
+    if (kind === "goal" && this.goalsTable) {
+      await this.upsertGoalRow(r);
+      return;
+    }
+    if (kind === "kpi" && this.kpisTable) {
+      await this.upsertKpiRow(r);
+      return;
+    }
+
     const text  = esc(r.contentText);
     const p     = esc(r.path);
     const fname = esc(r.filename);
@@ -345,6 +451,97 @@ export class DeeplakeFs implements IFileSystem {
       );
       this.flushed.add(r.path);
     }
+  }
+
+  /**
+   * UPDATE-or-INSERT for a goal row, keyed by goal_id. One row per
+   * goal forever — status changes, owner reassignments, and text
+   * edits all mutate the same row in place. The version column
+   * stays at 1 (vestigial in the schema; kept so the column is
+   * already there if we ever bring back the audit-trail pattern).
+   *
+   * Trade-off versus the prior INSERT-only-version-bump design:
+   *   - Pros: 1 row per goal makes the Deeplake table view obvious,
+   *     no row proliferation, simpler bootstrap queries.
+   *   - Cons: no audit trail; vulnerable to Deeplake's
+   *     UPDATE-coalescing quirk if two writes hit the same row
+   *     within microseconds. For the v1 single-user / small-team
+   *     workflow the user explicitly chose this trade-off.
+   */
+  private async upsertGoalRow(r: PendingRow): Promise<void> {
+    if (!this.goalsTable) throw new Error("goalsTable not configured");
+    const parts = decomposeGoalPath(r.path);
+    const safe = this.goalsTable;
+    const ts = r.lastUpdateDate ?? r.creationDate ?? new Date().toISOString();
+    const existing = await this.client.query(
+      `SELECT id FROM "${safe}" WHERE goal_id = '${esc(parts.goal_id)}' LIMIT 1`
+    );
+    if (existing.length > 0) {
+      await this.client.query(
+        `UPDATE "${safe}" SET ` +
+        `owner = '${esc(parts.owner)}', ` +
+        `status = '${esc(parts.status)}', ` +
+        `content = E'${esc(r.contentText)}', ` +
+        `created_at = '${esc(ts)}' ` +
+        `WHERE goal_id = '${esc(parts.goal_id)}'`
+      );
+    } else {
+      const id = randomUUID();
+      await this.client.query(
+        `INSERT INTO "${safe}" (id, goal_id, owner, status, content, version, created_at, agent, plugin_version) VALUES (` +
+        `'${id}', ` +
+        `'${esc(parts.goal_id)}', ` +
+        `'${esc(parts.owner)}', ` +
+        `'${esc(parts.status)}', ` +
+        `E'${esc(r.contentText)}', ` +
+        `1, ` +
+        `'${esc(ts)}', ` +
+        `'manual', ` +
+        `''` +
+        `)`
+      );
+    }
+    this.flushed.add(r.path);
+  }
+
+  /**
+   * UPDATE-or-INSERT for a KPI row, keyed by (goal_id, kpi_id).
+   * Same trade-off as upsertGoalRow — one row per KPI forever,
+   * no version proliferation. Progress bumps (Edit on the `current:`
+   * line) and any other content edits mutate the same row in place.
+   */
+  private async upsertKpiRow(r: PendingRow): Promise<void> {
+    if (!this.kpisTable) throw new Error("kpisTable not configured");
+    const parts = decomposeKpiPath(r.path);
+    const safe = this.kpisTable;
+    const ts = r.lastUpdateDate ?? r.creationDate ?? new Date().toISOString();
+    const existing = await this.client.query(
+      `SELECT id FROM "${safe}" ` +
+      `WHERE goal_id = '${esc(parts.goal_id)}' AND kpi_id = '${esc(parts.kpi_id)}' LIMIT 1`
+    );
+    if (existing.length > 0) {
+      await this.client.query(
+        `UPDATE "${safe}" SET ` +
+        `content = E'${esc(r.contentText)}', ` +
+        `created_at = '${esc(ts)}' ` +
+        `WHERE goal_id = '${esc(parts.goal_id)}' AND kpi_id = '${esc(parts.kpi_id)}'`
+      );
+    } else {
+      const id = randomUUID();
+      await this.client.query(
+        `INSERT INTO "${safe}" (id, goal_id, kpi_id, content, version, created_at, agent, plugin_version) VALUES (` +
+        `'${id}', ` +
+        `'${esc(parts.goal_id)}', ` +
+        `'${esc(parts.kpi_id)}', ` +
+        `E'${esc(r.contentText)}', ` +
+        `1, ` +
+        `'${esc(ts)}', ` +
+        `'manual', ` +
+        `''` +
+        `)`
+      );
+    }
+    this.flushed.add(r.path);
   }
 
   // ── Virtual index.md generation ────────────────────────────────────────────
@@ -782,6 +979,44 @@ export class DeeplakeFs implements IFileSystem {
       throw fsErr("ENOENT", "no such file or directory", p);
     }
 
+    // Path-routed soft-close: `rm` on a goal path does NOT delete the
+    // row. It writes a new v=N+1 with status='closed' (soft-close,
+    // preserves audit trail). The agent expects the file to be gone
+    // from the opened/in_progress folder; we move the cache entry
+    // to the canonical closed/<goal_id>.md path so subsequent ls of
+    // the source folder reflects the absence, while cat on the new
+    // closed path returns the same content.
+    if (this.goalsTable && classifyPath(p) === "goal") {
+      const parts = decomposeGoalPath(p);
+      if (parts.status === "closed") {
+        // Already closed — codex's "rm-on-closed" edge case. Treat as
+        // a true hard-delete request? For v1 we make it a no-op so
+        // the audit trail is fully preserved and the agent can not
+        // accidentally wipe history.
+        this.removeFromTree(p);
+        return;
+      }
+      const closedPath = composeGoalPath({ ...parts, status: "closed" });
+      const contentBuf = this.files.get(p);
+      const content = contentBuf instanceof Buffer ? contentBuf.toString("utf-8") : "";
+      await this.upsertGoalRow({
+        path: closedPath,
+        filename: basename(closedPath),
+        contentText: content,
+        mimeType: "text/markdown",
+        sizeBytes: Buffer.byteLength(content, "utf-8"),
+        creationDate: undefined,
+        lastUpdateDate: new Date().toISOString(),
+      });
+      // Move the cache entry from opened/ to closed/.
+      this.files.set(closedPath, contentBuf ?? null);
+      this.meta.set(closedPath, this.meta.get(p) ?? { size: 0, mime: "text/markdown", mtime: new Date() });
+      this.addToTree(closedPath);
+      this.flushed.add(closedPath);
+      this.removeFromTree(p);
+      return;
+    }
+
     if (this.dirs.has(p)) {
       const children = this.dirs.get(p) ?? new Set();
       if (children.size > 0 && !opts?.recursive) throw fsErr("ENOTEMPTY", "directory not empty", p);
@@ -830,6 +1065,37 @@ export class DeeplakeFs implements IFileSystem {
     const s = normPath(src), d = normPath(dest);
     if (this.sessionPaths.has(s)) throw fsErr("EPERM", "session files are read-only", s);
     if (this.sessionPaths.has(d)) throw fsErr("EPERM", "session files are read-only", d);
+
+    // Goal status transition: single INSERT v=N+1 with the new
+    // status, no cp+rm dance (which would otherwise double-write to
+    // the goals table). Also enforces the goal_id invariant: a goal
+    // path mv cannot rename the UUID, only the status component.
+    if (this.goalsTable && classifyPath(s) === "goal" && classifyPath(d) === "goal") {
+      const from = decomposeGoalPath(s);
+      const to = decomposeGoalPath(d);
+      if (from.goal_id !== to.goal_id || from.owner !== to.owner) {
+        throw fsErr("EPERM", "cannot rename goal_id or owner via mv (only status)", d);
+      }
+      if (!this.files.has(s)) throw fsErr("ENOENT", "no such file or directory", s);
+      const contentBuf = this.files.get(s);
+      const content = contentBuf instanceof Buffer ? contentBuf.toString("utf-8") : "";
+      await this.upsertGoalRow({
+        path: d,
+        filename: basename(d),
+        contentText: content,
+        mimeType: "text/markdown",
+        sizeBytes: Buffer.byteLength(content, "utf-8"),
+        creationDate: undefined,
+        lastUpdateDate: new Date().toISOString(),
+      });
+      this.files.set(d, contentBuf ?? null);
+      this.meta.set(d, this.meta.get(s) ?? { size: 0, mime: "text/markdown", mtime: new Date() });
+      this.addToTree(d);
+      this.flushed.add(d);
+      this.removeFromTree(s);
+      return;
+    }
+
     await this.cp(src, dest, { recursive: true });
     await this.rm(src, { recursive: true, force: true });
   }

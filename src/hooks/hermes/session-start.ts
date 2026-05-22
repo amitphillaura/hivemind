@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { loadCredentials } from "../../commands/auth.js";
 import { loadConfig } from "../../config.js";
 import { DeeplakeApi } from "../../deeplake-api.js";
+import { renderContextBlock } from "../shared/context-renderer.js";
 import { sqlStr } from "../../utils/sql.js";
 import { renderSkillifyCommands } from "../../cli/skillify-spec.js";
 import { countLocalManifestEntries } from "../../skillify/local-manifest.js";
@@ -23,6 +24,7 @@ import { log as _log } from "../../utils/debug.js";
 import { getInstalledVersion } from "../../utils/version-check.js";
 import { autoUpdate } from "../shared/autoupdate.js";
 import { autoPullSkills } from "../../skillify/auto-pull.js";
+import { GOALS_INSTRUCTIONS_CLI } from "../shared/goals-instructions.js";
 import { spawnGraphPullWorker } from "../../graph/spawn-pull-worker.js";
 const log = (msg: string) => _log("hermes-session-start", msg);
 
@@ -129,15 +131,37 @@ async function main(): Promise<void> {
   const current = getInstalledVersion(__bundleDir, ".claude-plugin");
   const pluginVersion = current ?? "";
 
-  if (creds?.token && captureEnabled) {
+  // HIVEMIND_CAPTURE=false means full read-only mode — no INSERTs
+  // AND no DDL. ensureTable + ensureSessionsTable create/heal tables
+  // (DDL writes), so they're gated on captureEnabled too. Renderer
+  // is read-only and runs regardless. See cursor session-start for
+  // the same layering rationale.
+  let rulesTasksBlock = "";
+  if (creds?.token) {
     try {
       const config = loadConfig();
       if (config) {
         const api = new DeeplakeApi(config.token, config.apiUrl, config.orgId, config.workspaceId, config.tableName);
-        await api.ensureTable();
-        await api.ensureSessionsTable(config.sessionsTableName);
-        await createPlaceholder(api, config.tableName, sessionId, cwd, config.userName, config.orgName, config.workspaceId, pluginVersion);
-        log("placeholder created");
+        if (captureEnabled) {
+          await api.ensureTable();
+          await api.ensureSessionsTable(config.sessionsTableName);
+          await createPlaceholder(api, config.tableName, sessionId, cwd, config.userName, config.orgName, config.workspaceId, pluginVersion);
+          log("placeholder created");
+        } else {
+          log("placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)");
+        }
+        // T6: read-only renderer. Hermes's context field is invisible
+        // to the user (model-only). Renderer absorbs its own errors.
+        rulesTasksBlock = await renderContextBlock(
+          (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>,
+          {
+            rulesTable: config.rulesTableName,
+            tasksTable: config.tasksTableName,
+            taskEventsTable: config.taskEventsTableName,
+            currentUser: config.userName,
+          },
+          { log },
+        );
       }
     } catch (e: any) {
       log(`placeholder failed: ${e.message}`);
@@ -167,9 +191,17 @@ async function main(): Promise<void> {
   // (pullSnapshot would early-return skipped-no-auth anyway).
   if (creds?.token) spawnGraphPullWorker(cwd, __bundleDir);
 
-  const additional = creds?.token
+  const baseContext = creds?.token
     ? `${context}\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${versionNotice}`
     : `${context}\nNot logged in to Deeplake. Run: hivemind login${localMinedNote}${versionNotice}`;
+  // Hermes' pre-tool-use intercepts only `terminal` — it cannot
+  // route Write/Edit. Use the CLI variant: agent invokes
+  // `hivemind goal add/list/...` via terminal. End state in tables
+  // is identical to the VFS-routed path.
+  const baseWithGoals = creds?.token ? `${baseContext}\n\n${GOALS_INSTRUCTIONS_CLI}` : baseContext;
+  const additional = rulesTasksBlock
+    ? `${baseWithGoals}\n\n${rulesTasksBlock}`
+    : baseWithGoals;
 
   // Hermes expects { context: "..." } on stdout
   console.log(JSON.stringify({ context: additional }));

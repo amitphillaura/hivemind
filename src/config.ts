@@ -12,6 +12,11 @@ export interface Config {
   tableName: string;
   sessionsTableName: string;
   skillsTableName: string;
+  rulesTableName: string;
+  tasksTableName: string;
+  taskEventsTableName: string;
+  goalsTableName: string;
+  kpisTableName: string;
   codebaseTableName: string;
   memoryPath: string;
 }
@@ -54,6 +59,22 @@ export function loadConfig(): Config | null {
     tableName: process.env.HIVEMIND_TABLE ?? "memory",
     sessionsTableName: process.env.HIVEMIND_SESSIONS_TABLE ?? "sessions",
     skillsTableName: process.env.HIVEMIND_SKILLS_TABLE ?? "skills",
+    // Defaults match the table name written into the SQL — keep aligned
+    // with RULES_COLUMNS / TASKS_COLUMNS / TASK_EVENTS_COLUMNS in
+    // deeplake-schema.ts and with the e2e test-org override convention
+    // (memory_test / sessions_test → goals_test, etc.) documented in
+    // CLAUDE.md.
+    rulesTableName: process.env.HIVEMIND_RULES_TABLE ?? "hivemind_rules",
+    tasksTableName: process.env.HIVEMIND_TASKS_TABLE ?? "hivemind_tasks",
+    taskEventsTableName: process.env.HIVEMIND_TASK_EVENTS_TABLE ?? "hivemind_task_events",
+    // Goals + KPIs (refined design — VFS path classifier maps
+    //   memory/goal/<user>/<status>/<uuid>.md → hivemind_goals row
+    //   memory/kpi/<uuid>/<kpi_id>.md → hivemind_kpis row
+    // See src/shell/deeplake-fs.ts for the translation logic and
+    // GOALS_COLUMNS / KPIS_COLUMNS in deeplake-schema.ts for the
+    // table shape.
+    goalsTableName: process.env.HIVEMIND_GOALS_TABLE ?? "hivemind_goals",
+    kpisTableName: process.env.HIVEMIND_KPIS_TABLE ?? "hivemind_kpis",
     codebaseTableName: process.env.HIVEMIND_CODEBASE_TABLE ?? "codebase",
     memoryPath: process.env.HIVEMIND_MEMORY_PATH ?? join(home, ".deeplake", "memory"),
   };

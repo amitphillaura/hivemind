@@ -27,6 +27,11 @@ function makeConfig(): Config {
     tableName: "memory",
     sessionsTableName: "sessions",
     skillsTableName: "skills",
+    rulesTableName: "hivemind_rules",
+    tasksTableName: "hivemind_tasks",
+    taskEventsTableName: "hivemind_task_events",
+    goalsTableName: "hivemind_goals",
+    kpisTableName: "hivemind_kpis",
     codebaseTableName: "codebase_test",
     memoryPath: "/tmp/mem",
   };
