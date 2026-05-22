@@ -113,13 +113,19 @@ function loadSnapshotOrError(
   }
   const wt = workTreeIdFor(cwd);
   const last = readLastBuild(baseDir, wt);
-  if (last === null || last.commit_sha === null) {
+  if (last === null) {
     return {
       kind: "no-graph",
       message: "No local graph for this worktree yet. Run `hivemind graph build` (or `hivemind graph pull` if a teammate has built this commit).",
     };
   }
-  const snapPath = join(baseDir, "snapshots", `${last.commit_sha}.json`);
+  // CodeRabbit P1: writeSnapshot persists non-git builds under
+  // snapshot_sha256 (no commit context). Fall back to that so the VFS
+  // is reachable for commitless builds — previously this branch bailed
+  // out and the user got "No local graph" even right after a successful
+  // build in a loose source directory.
+  const fileBase = last.commit_sha ?? last.snapshot_sha256;
+  const snapPath = join(baseDir, "snapshots", `${fileBase}.json`);
   if (!existsSync(snapPath)) {
     return { kind: "no-graph", message: `Snapshot file missing on disk: ${snapPath}` };
   }

@@ -45,6 +45,7 @@ import type { GraphSnapshot } from "./types.js";
 
 export type PushOutcome =
   | { kind: "skipped-no-auth" }
+  | { kind: "skipped-no-commit" }
   | { kind: "skipped-disabled" }
   | { kind: "inserted"; commitSha: string }
   | { kind: "inserted-with-duplicate-race"; commitSha: string; rowCount: number }
@@ -77,8 +78,10 @@ export async function pushSnapshot(
   }
   const commitSha = snapshot.graph.commit_sha;
   if (commitSha === null) {
-    // No commit context → can't form the identity key. Silently skip.
-    return { kind: "skipped-no-auth" };
+    // CodeRabbit Minor: distinct outcome for "no commit context" — the
+    // user shouldn't be told to log in when the real reason is just
+    // "not in a git repo". runBuildCommand handles this case separately.
+    return { kind: "skipped-no-commit" };
   }
   const api = (deps.makeApi ?? defaultMakeApi)(config);
 

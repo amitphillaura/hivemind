@@ -111,14 +111,17 @@ describe("pushSnapshot — gating", () => {
     expect(result.kind).toBe("skipped-no-auth");
   });
 
-  it("commit_sha === null → skipped-no-auth (no identity key)", async () => {
+  it("commit_sha === null → skipped-no-commit (no identity key)", async () => {
     const snap = makeSnapshot();
     snap.graph.commit_sha = null;
     const result = await pushSnapshot(snap, "wt1", {
       loadConfig: () => makeConfig(),
       makeApi: () => { throw new Error("should not be called"); },
     });
-    expect(result.kind).toBe("skipped-no-auth");
+    // CodeRabbit Minor fix: distinct outcome for no-commit (previously
+    // reused "skipped-no-auth" which made runBuildCommand falsely
+    // suggest `hivemind login`).
+    expect(result.kind).toBe("skipped-no-commit");
   });
 });
 

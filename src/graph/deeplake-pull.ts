@@ -179,7 +179,11 @@ export async function pullSnapshot(
   const worktreeId = workTreeIdFor(cwd);
   const local = readLastBuild(baseDir, worktreeId);
   if (local !== null && local.commit_sha === head) {
-    if (local.snapshot_sha256 === cloudSha256) {
+    // CodeRabbit P1: empty cloud sha (legacy rows without the column
+    // populated) is NOT proof local is current — it's "we don't know".
+    // Only short-circuit on real hash equality; otherwise fall through
+    // to the ts comparison or pull path.
+    if (cloudSha256 !== "" && local.snapshot_sha256 === cloudSha256) {
       return { kind: "up-to-date", commitSha: head, snapshotSha256: cloudSha256 };
     }
     if (local.ts > cloudTs) {

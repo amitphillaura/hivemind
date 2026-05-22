@@ -150,7 +150,8 @@ export function installPostCommitHook(cwd: string, opts: InstallOptions = {}): I
   // "foreign-hook" — the contract is "re-running on an already-installed
   // hook is a no-op". PATH discovery only matters when we're about to
   // WRITE a new hook file.
-  if (existsSync(path)) {
+  const existed = existsSync(path);
+  if (existed) {
     const content = readFileSync(path, "utf8");
     if (containsOurMarkers(content)) {
       return { kind: "already-ours", path };
@@ -184,7 +185,9 @@ export function installPostCommitHook(cwd: string, opts: InstallOptions = {}): I
   } catch {
     // best-effort
   }
-  return { kind: "installed", path, wasNew: true };
+  // CodeRabbit Minor: report wasNew honestly. On --force overwrite of a
+  // foreign hook the file already existed, so wasNew is false.
+  return { kind: "installed", path, wasNew: !existed };
 }
 
 /**

@@ -499,6 +499,9 @@ describe("pullSnapshot — ts coercion", () => {
       readHead: () => "head1234abcd",
       makeApi: () => api,
     });
+    // CodeRabbit Minor: assert outcome kind FIRST so a non-pulled result
+    // doesn't silently pass the conditional cloudTs check.
+    expect(result.kind).toBe("pulled");
     if (result.kind === "pulled") expect(result.cloudTs).toBe(1_700_000_000_000);
   });
 
@@ -517,6 +520,9 @@ describe("pullSnapshot — ts coercion", () => {
       readHead: () => "head1234abcd",
       makeApi: () => api,
     });
+    // CodeRabbit Minor: assert outcome kind FIRST so a non-pulled result
+    // doesn't silently pass the conditional cloudTs check.
+    expect(result.kind).toBe("pulled");
     if (result.kind === "pulled") expect(result.cloudTs).toBe(1_700_000_000_000);
   });
 

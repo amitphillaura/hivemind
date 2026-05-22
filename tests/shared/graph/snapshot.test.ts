@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -295,8 +295,8 @@ describe("writeSnapshot — atomic file I/O", () => {
     const r2 = writeSnapshot(snap, tmpRoot);
     const after = readFileSync(r2.snapshotPath, "utf8");
     expect(after).toBe(before);
-    // No leftover .tmp.* files
-    const { readdirSync } = require("node:fs") as typeof import("node:fs");
+    // No leftover .tmp.* files (CodeRabbit P1: `require()` is undefined
+    // in ESM; readdirSync is imported with the other fs bindings above).
     const leftovers = readdirSync(join(tmpRoot, "snapshots")).filter((f) => f.includes(".tmp."));
     expect(leftovers).toEqual([]);
   });

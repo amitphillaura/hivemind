@@ -254,12 +254,14 @@ function parseHistoryArgs(args: string[]): HistoryOptions {
       cwd = args[i + 1]!;
       i += 1;
     } else if (a === "-n" && i + 1 < args.length) {
-      const parsed = parseInt(args[i + 1]!, 10);
-      if (!Number.isFinite(parsed) || parsed < 0) {
+      // CodeRabbit Minor: parseInt accepts trailing junk ("5junk" → 5).
+      // Validate the whole token before converting.
+      const raw = args[i + 1]!;
+      if (!/^\d+$/.test(raw)) {
         console.error("hivemind graph history: -n must be a non-negative integer");
         process.exit(2);
       }
-      n = parsed;
+      n = Number(raw);
       i += 1;
     } else if (a === "--json") {
       json = true;
@@ -323,12 +325,12 @@ function parseDiffArgs(args: string[]): DiffOptions {
     } else if (a === "--json") {
       json = true;
     } else if (a === "--limit" && i + 1 < args.length) {
-      const n = parseInt(args[i + 1]!, 10);
-      if (!Number.isFinite(n) || n < 0) {
+      const raw = args[i + 1]!;
+      if (!/^\d+$/.test(raw)) {
         console.error("hivemind graph diff: --limit must be a non-negative integer");
         process.exit(2);
       }
-      limit = n;
+      limit = Number(raw);
       i += 1;
     } else if (a === "--help" || a === "-h") {
       console.log(USAGE);
@@ -524,6 +526,9 @@ export async function runBuildCommand(args: string[]): Promise<void> {
       break;
     case "skipped-no-auth":
       console.log(`Cloud:         skipped (not authenticated; run \`hivemind login\` to enable cloud sync)`);
+      break;
+    case "skipped-no-commit":
+      console.log(`Cloud:         skipped (no commit context — not in a git repo)`);
       break;
     case "skipped-disabled":
       console.log(`Cloud:         skipped (HIVEMIND_GRAPH_PUSH=0)`);

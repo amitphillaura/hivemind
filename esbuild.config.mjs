@@ -302,6 +302,7 @@ await build({
     "process.env.HIVEMIND_WORKSPACE_ID": "undefined",
     "process.env.HIVEMIND_API_URL": "undefined",
     "process.env.HIVEMIND_TABLE": "undefined",
+    "process.env.HIVEMIND_CODEBASE_TABLE": "undefined",
     "process.env.HIVEMIND_SESSIONS_TABLE": "undefined",
     "process.env.HIVEMIND_MEMORY_PATH": "undefined",
     "process.env.HIVEMIND_CAPTURE": "undefined",

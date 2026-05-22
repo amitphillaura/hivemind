@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   deriveProjectKey,
@@ -105,7 +105,6 @@ describe("deriveProjectKey", () => {
     // key than a caller passing the absolute path of the SAME directory.
     // After the fix we `path.resolve(cwd)` first so both forms collapse.
     const abs = mkdtempSync(join(tmpdir(), "deriveProjectKey-rel-abs-"));
-    trackedKeys.push(abs);
     const prev = process.cwd();
     try {
       process.chdir(abs);
@@ -114,6 +113,9 @@ describe("deriveProjectKey", () => {
       expect(fromDot.key).toBe(fromAbs.key);
     } finally {
       process.chdir(prev);
+      // CodeRabbit Minor: clean up directly — trackedKeys only handles
+      // STATE_DIR children, not arbitrary temp dirs we create here.
+      rmSync(abs, { recursive: true, force: true });
     }
   });
 
@@ -121,15 +123,16 @@ describe("deriveProjectKey", () => {
     // Same dir, accessed via "." should still yield the correct basename
     // (not "" or "." which `basename(".")` would have returned).
     const abs = mkdtempSync(join(tmpdir(), "deriveProjectKey-basename-"));
-    trackedKeys.push(abs);
     const prev = process.cwd();
     try {
       process.chdir(abs);
       const { project } = deriveProjectKey(".");
-      // basename(resolve(".")) === basename(abs)
-      expect(project).toBe(abs.split("/").pop());
+      // CodeRabbit Minor: path.basename is portable across separators
+      // (was `split("/").pop()` which broke on Windows).
+      expect(project).toBe(basename(abs));
     } finally {
       process.chdir(prev);
+      rmSync(abs, { recursive: true, force: true });
     }
   });
 });

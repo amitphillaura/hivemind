@@ -460,10 +460,19 @@ function findEnclosingDeclaration(
       // We walk to the NEAREST declarator (not the lexical_declaration that
       // contains multiple declarators) so calls inside `b` resolve to `b`,
       // not the first declarator.
-      const ident = cur.childForFieldName("name");
-      if (ident !== null && ident.type === "identifier") {
-        const n = declByName.get(ident.text);
-        if (n !== undefined) return n;
+      //
+      // CodeRabbit P1: ONLY treat function-valued declarators as callers.
+      // Previously any nearest variable_declarator was tagged — e.g.
+      // `const x = helper()` would produce `x --calls--> helper`, but `x`
+      // is the initialized value, not an enclosing callable scope. Filter
+      // by the declarator's `value` field being a function/arrow.
+      const value = cur.childForFieldName("value");
+      if (value?.type === "arrow_function" || value?.type === "function_expression") {
+        const ident = cur.childForFieldName("name");
+        if (ident !== null && ident.type === "identifier") {
+          const n = declByName.get(ident.text);
+          if (n !== undefined) return n;
+        }
       }
     }
     cur = cur.parent;

@@ -645,6 +645,14 @@ export class DeeplakeFs implements IFileSystem {
     // matching /graph(/find|/show)? is a directory; anything else under
     // /graph/ is a file (synthesized at readFile time).
     if (isGraphPath(p)) {
+      // CodeRabbit P1: align stat() with the tightened exists() — non-dir
+      // /graph paths must reject when the dispatcher says not-found.
+      // Otherwise tools that stat-before-read get inconsistent answers
+      // (exists=false but stat=true) and break the standard FS contract.
+      if (!isGraphDir(p)) {
+        const r = handleGraphVfs(graphSubpathOf(p), process.cwd());
+        if (r.kind === "not-found") throw fsErr("ENOENT", "no such file or directory", p);
+      }
       const dir = isGraphDir(p);
       return {
         isFile: !dir, isDirectory: dir, isSymbolicLink: false,
@@ -684,7 +692,13 @@ export class DeeplakeFs implements IFileSystem {
   async realpath(path: string): Promise<string> {
     const p = normPath(path);
     if (p === "/index.md") return p; // Virtual index always exists
-    if (isGraphPath(p)) return p;    // Graph VFS — every /graph/* resolves to itself
+    if (isGraphPath(p)) {
+      // Same alignment as stat(): unknown leaf path → ENOENT.
+      if (isGraphDir(p)) return p;
+      const r = handleGraphVfs(graphSubpathOf(p), process.cwd());
+      if (r.kind === "ok" || r.kind === "no-graph") return p;
+      throw fsErr("ENOENT", "no such file or directory", p);
+    }
     if (!this.files.has(p) && !this.dirs.has(p)) throw fsErr("ENOENT", "no such file or directory", p);
     return p;
   }

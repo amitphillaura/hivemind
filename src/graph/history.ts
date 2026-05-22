@@ -90,12 +90,15 @@ export function readHistoryTail(baseDir: string, n: number): HistoryEntry[] {
   } catch {
     return [];
   }
+  // CodeRabbit Minor: walk backward, collecting up to N VALID entries.
+  // Previous impl sliced the last N lines and THEN validated — a
+  // malformed line near the tail would permanently shrink the result.
+  // Order is preserved by unshifting (oldest-first → newest-last).
   const lines = raw.split("\n").filter((l) => l.length > 0);
-  const tail = lines.slice(Math.max(0, lines.length - n));
   const entries: HistoryEntry[] = [];
-  for (const line of tail) {
-    const parsed = parseLine(line);
-    if (parsed !== null) entries.push(parsed);
+  for (let i = lines.length - 1; i >= 0 && entries.length < n; i--) {
+    const parsed = parseLine(lines[i]!);
+    if (parsed !== null) entries.unshift(parsed);
   }
   return entries;
 }

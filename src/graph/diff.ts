@@ -91,10 +91,21 @@ export function loadSnapshotByCommit(baseDir: string, commitSha: string): GraphS
     return null;
   }
   try {
-    return JSON.parse(raw) as GraphSnapshot;
+    const parsed = JSON.parse(raw) as unknown;
+    // CodeRabbit P1: parseable JSON ≠ valid snapshot. Without this
+    // structural check, diffSnapshots throws on a malformed payload
+    // (truncated mid-write, Phase 1.5 file read by Phase 1 code, etc.).
+    if (!isGraphSnapshotLike(parsed)) return null;
+    return parsed;
   } catch {
     return null;
   }
+}
+
+function isGraphSnapshotLike(v: unknown): v is GraphSnapshot {
+  if (v === null || typeof v !== "object") return false;
+  const s = v as Partial<GraphSnapshot>;
+  return Array.isArray(s.nodes) && Array.isArray(s.links);
 }
 
 /**
