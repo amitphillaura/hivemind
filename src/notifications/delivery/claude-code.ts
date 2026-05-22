@@ -34,7 +34,11 @@ import type { Notification } from "../types.js";
 import { renderNotifications } from "../format.js";
 
 export function emitClaudeCode(notifications: Notification[]): void {
-  if (notifications.length === 0) return;
+  // The empty-array short-circuit lives in delivery/index.ts:emit;
+  // adapters are guaranteed to receive at least one notification.
+  // Rendering an empty list still produces "", which the ternary
+  // below handles, but the dispatcher guard keeps the contract
+  // explicit and the coverage matrix tight.
   const modelSafe = notifications.filter(n => !n.userVisibleOnly);
   const modelRendered = renderNotifications(modelSafe);
   const userRendered = renderNotifications(notifications);
@@ -42,9 +46,6 @@ export function emitClaudeCode(notifications: Notification[]): void {
   // Omit additionalContext entirely when every notification in the
   // batch is user-only — there's nothing safe to send to the model.
   // Claude Code accepts a missing additionalContext field gracefully.
-  // userRendered is always non-empty here: renderNotifications only
-  // returns "" for an empty input array, and we already short-circuit
-  // that case on the first line.
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "SessionStart",
