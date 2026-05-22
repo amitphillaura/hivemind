@@ -81,7 +81,12 @@ describe("graphContextLine", () => {
     // Snapshot path is keyed by commit_sha when present
     expect(line).toContain(join(snapshotsDir, "abc1234deadbeef.json"));
     expect(line).toContain("TypeScript only, AST-based");
-    expect(line).toContain("no semantic-similarity edges yet");
+    // v1.1 inject restructured to point at the VFS subdir instead of
+    // raw-snapshot-only guidance. New assertions:
+    expect(line).toContain("~/.deeplake/memory/graph/find/<pattern>");
+    expect(line).toContain("~/.deeplake/memory/graph/show/<handle-or-pattern>");
+    expect(line).toContain("no semantic edges yet");
+    expect(line).toContain("intra-file only");
   });
 
   it("renders '?' for counts on legacy files without node_count/edge_count", () => {
