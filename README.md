@@ -57,20 +57,6 @@ The agent reaches the answer in fewer turns with less context, because the prior
   </a>
 </p>
 
-## How Hivemind compares
-
-|                                                              | **Hivemind**                            | [mem0](https://github.com/mem0ai/mem0) | [Letta](https://github.com/letta-ai/letta) | Static `CLAUDE.md` |
-|--------------------------------------------------------------|-----------------------------------------|----------------------------------------|--------------------------------------------|--------------------|
-| **Shared across a team of engineers**                        | ✅ org + workspace boundaries           | per-user                               | per-agent                                  | per-file           |
-| **Auto-captures from IDE/CLI agents (no manual API calls)**  | ✅ lifecycle hooks for 6 agents          | call the API                           | agent self-edits                           | manual             |
-| **Mines patterns into reusable `SKILL.md`**                  | ✅ background worker                     | —                                      | —                                          | —                  |
-| **Hybrid lexical + semantic retrieval**                      | ✅ BM25 + nomic-embed (optional)         | vector + graph                         | varies                                     | grep               |
-| **BYOC storage (GCS / Azure / S3 / on-prem)**                | ✅                                       | —                                      | —                                          | n/a                |
-| **Zero external database to operate**                        | ✅ Deeplake managed (or BYOC)            | external DB                            | external DB                                | n/a                |
-| **Open source**                                              | ✅ Apache 2.0                            | ✅                                     | ✅                                          | n/a                |
-
-Comparisons based on each project's public docs. Links above so you can verify directly.
-
 ## Quick start
 
 One command, all your agents:
