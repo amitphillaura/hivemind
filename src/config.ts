@@ -17,6 +17,7 @@ export interface Config {
   taskEventsTableName: string;
   goalsTableName: string;
   kpisTableName: string;
+  codebaseTableName: string;
   memoryPath: string;
 }
 
@@ -74,6 +75,7 @@ export function loadConfig(): Config | null {
     // table shape.
     goalsTableName: process.env.HIVEMIND_GOALS_TABLE ?? "hivemind_goals",
     kpisTableName: process.env.HIVEMIND_KPIS_TABLE ?? "hivemind_kpis",
+    codebaseTableName: process.env.HIVEMIND_CODEBASE_TABLE ?? "codebase",
     memoryPath: process.env.HIVEMIND_MEMORY_PATH ?? join(home, ".deeplake", "memory"),
   };
 }

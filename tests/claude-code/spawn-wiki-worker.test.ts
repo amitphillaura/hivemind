@@ -100,6 +100,7 @@ function fakeConfig(): Config {
     taskEventsTableName: "hivemind_task_events",
     goalsTableName: "hivemind_goals",
     kpisTableName: "hivemind_kpis",
+    codebaseTableName: "codebase",
     memoryPath: "/tmp/fake-memory",
   };
 }

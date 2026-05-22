@@ -13,6 +13,8 @@ import {
 } from "./embeddings.js";
 import { ensureLoggedIn, isLoggedIn, loginWithProvidedToken, maybeShowOrgChoice } from "./auth.js";
 import { runAuthCommand } from "../commands/auth-login.js";
+import { runGraphCommand } from "../commands/graph.js";
+import { runDashboardCommand } from "../commands/dashboard.js";
 import { runSkillifyCommand } from "../commands/skillify.js";
 import { runRulesCommand } from "../commands/rules.js";
 import { runTasksCommand } from "../commands/tasks.js";
@@ -66,6 +68,18 @@ Usage:
       Check npm for a newer @deeplake/hivemind, upgrade the CLI, and refresh
       every detected agent bundle. Single command for all agents.
 
+  hivemind dashboard [--cwd <path>] [--out <path>] [--no-open]
+                     [--serve] [--port <n>]
+      Build a self-contained HTML dashboard for this repo. Combines
+      KPI cards (tokens saved, skills created, memory recalls,
+      sessions) with the codebase-graph visualization. Writes to
+      ~/.hivemind/dashboards/<repo-key>/index.html by default.
+      --no-open skips the browser launch (headless / CI scenarios).
+      --serve starts a loopback HTTP server at http://127.0.0.1:<port>
+      (default 8123) so the dashboard is reachable via a URL — useful
+      over SSH; VS Code / Cursor Remote-SSH auto-forwards the port
+      and opens it in the integrated Simple Browser tab on click.
+
 Semantic search (embeddings):
   hivemind embeddings install                Download @huggingface/transformers
                                              once (~600 MB) into a shared dir,
@@ -93,6 +107,22 @@ Semantic search (embeddings):
 
   Add --with-embeddings to "hivemind install" (or "hivemind <agent> install")
   to run "embeddings install" automatically after installing the agent(s).
+
+Codebase graph (per-repo AST snapshot + cloud sync):
+  hivemind graph build [--cwd <path>]        Walk TypeScript sources, extract
+                                             AST nodes + edges, write a
+                                             snapshot, and push to cloud.
+  hivemind graph diff <sha1> <sha2>          Diff two snapshots by commit.
+  hivemind graph history [-n N] [--json]     Show last N build entries.
+  hivemind graph init [--force]              Install a managed
+                                             .git/hooks/post-commit hook
+                                             that rebuilds on each commit.
+  hivemind graph pull                        Download the freshest cloud
+                                             snapshot for HEAD into local.
+  hivemind graph uninstall                   Remove the managed post-commit
+                                             hook.
+  Agents query the local snapshot via the Deeplake mount at
+  ~/.deeplake/memory/graph/{index.md,find/<pattern>,show/<handle-or-pattern>}.
 
 Skill management (mine + share reusable Claude skills across the org):
 ${renderCliHelpBlock()}
@@ -394,6 +424,16 @@ async function main(): Promise<void> {
   if (cmd === "context") {
     await runContextCommand(args.slice(1));
     return;
+  }
+
+  if (cmd === "graph") {
+    await runGraphCommand(args.slice(1));
+    return;
+  }
+
+  if (cmd === "dashboard") {
+    const code = await runDashboardCommand(args.slice(1));
+    process.exit(code);
   }
 
   if (cmd === "embeddings") {

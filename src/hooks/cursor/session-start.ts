@@ -34,6 +34,7 @@ import { getInstalledVersion } from "../../utils/version-check.js";
 import { autoUpdate } from "../shared/autoupdate.js";
 import { autoPullSkills } from "../../skillify/auto-pull.js";
 import { GOALS_INSTRUCTIONS_CLI } from "../shared/goals-instructions.js";
+import { spawnGraphPullWorker } from "../../graph/spawn-pull-worker.js";
 const log = (msg: string) => _log("cursor-session-start", msg);
 
 const __bundleDir = dirname(fileURLToPath(import.meta.url));
@@ -216,6 +217,12 @@ async function main(): Promise<void> {
   const localMinedNote = localMined > 0
     ? `\n${localMined} local skill${localMined === 1 ? "" : "s"} from past 'hivemind skillify mine-local' run(s) live in ~/.claude/skills/. Run 'hivemind login' to start sharing new mining results with your team.`
     : "";
+  // Async auto-pull on SessionStart — detached, never blocks. Pulled
+  // bytes land for the NEXT SessionStart. See src/graph/spawn-pull-worker.ts.
+  // Gate on creds: avoid wasted process churn when unauthenticated
+  // (pullSnapshot would early-return skipped-no-auth anyway).
+  if (creds?.token) spawnGraphPullWorker(resolveCwd(input), __bundleDir);
+
   const baseContext = creds?.token
     ? `${context}\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${versionNotice}`
     : `${context}\nNot logged in to Deeplake. Run: hivemind login${localMinedNote}${versionNotice}`;

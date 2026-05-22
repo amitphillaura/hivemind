@@ -24,6 +24,8 @@ import { renderContextBlock } from "./shared/context-renderer.js";
 import { countLocalManifestEntries } from "../skillify/local-manifest.js";
 import { renderLocalMinedNote } from "../skillify/local-mined-banner.js";
 import { maybeAutoMineLocal } from "../skillify/spawn-mine-local-worker.js";
+import { graphContextLine } from "../graph/session-context.js";
+import { spawnGraphPullWorker } from "../graph/spawn-pull-worker.js";
 const log = (msg: string) => _log("session-start", msg);
 
 const __bundleDir = dirname(fileURLToPath(import.meta.url));
@@ -246,21 +248,43 @@ async function main(): Promise<void> {
   // is intentionally NOT rendered here because `insight` originates
   // from haiku's gate output and feeding LLM-derived prose back into
   // `additionalContext` is a prompt-injection vector (codex P1).
+  // Take the refactored helper from main (renderLocalMinedNote) AND the
+  // graph-bridge wiring from this branch. The helper supersedes the
+  // inline string construction; the graph spawn + inject append remain.
   const localMined = countLocalManifestEntries();
   // Use the shared renderer (extracted on main for testability / codex
   // review on PR #197) — keep `baseContext` here as the intermediate
   // because the rules+tasks block append below depends on a separate
   // name from the final `additionalContext` emitted to stdout.
   const localMinedNote = renderLocalMinedNote({ totalCount: localMined });
+
+  // Local code graph context (Phase 3 v1.1). Cheap: reads ~/.hivemind/...
+  // /.last-build.json (small file populated by writeSnapshot) — never opens
+  // the ~1 MB snapshot. Returns null when no graph exists for this repo, in
+  // which case we add nothing (avoids a misleading "graph: 0 nodes" line
+  // for users who've never run a build).
+  //
+  // Fire the async graph-pull worker BEFORE composing the inject. The
+  // worker runs detached and will not affect THIS session's inject (the
+  // pulled bytes land for the NEXT SessionStart to pick up). Putting the
+  // spawn here is purely organizational — order doesn't matter because
+  // the worker is fully detached.
+  // Gate on creds: pullSnapshot would early-return "skipped-no-auth"
+  // anyway, so spawning a worker without auth is wasted process churn.
+  if (creds?.token) spawnGraphPullWorker(input.cwd ?? process.cwd(), __bundleDir);
+  const graphLine = graphContextLine(input.cwd ?? process.cwd());
+  const graphNote = graphLine ?? "";
+
   const baseContext = creds?.token
     ? `${resolvedContext}\n\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${updateNotice}`
     : `${resolvedContext}\n\n⚠️ Not logged in to Deeplake. Memory search will not work. Ask the user to run /hivemind:login to authenticate.${localMinedNote}${updateNotice}`;
-  // Append the rules + tasks block when there's something to show.
-  // The renderer returns "" on empty state OR failure, so the
-  // ternary stays terse.
-  const additionalContext = rulesTasksBlock
+  // Append the rules + tasks block when there's something to show, then
+  // append the graph note (single line, may be empty). The renderer
+  // returns "" on empty state OR failure, so the ternary stays terse.
+  const withRulesTasks = rulesTasksBlock
     ? `${baseContext}\n\n${rulesTasksBlock}`
     : baseContext;
+  const additionalContext = `${withRulesTasks}${graphNote}`;
 
   console.log(JSON.stringify({
     hookSpecificOutput: {

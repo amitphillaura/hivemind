@@ -20,6 +20,7 @@ import {
   decomposeKpiPath,
   type PathKind,
 } from "./goal-paths.js";
+import { handleGraphVfs } from "../graph/vfs-handler.js";
 
 interface ReadFileOptions { encoding?: BufferEncoding }
 interface WriteFileOptions { encoding?: BufferEncoding }
@@ -88,6 +89,67 @@ interface PendingRow {
 }
 
 // ── DeeplakeFs ────────────────────────────────────────────────────────────────
+// ── Graph VFS bridge ──────────────────────────────────────────────────────────
+//
+// The codebase graph (Phase 1) lives at <memory-mount>/graph/. Its dispatcher
+// is `handleGraphVfs()` in src/graph/vfs-handler.ts — a single source of truth
+// shared between two consumers:
+//
+//   1. The pre-tool-use hook (Claude Code Bash/Read/Grep paths) — already
+//      wired in src/hooks/pre-tool-use.ts.
+//   2. This file, so the standalone deeplake-shell exposes the same VFS to
+//      whoever's poking at the mount manually (debug, scripted access, etc).
+//
+// The bridge is intentionally thin: detect the /graph/ prefix, strip it,
+// delegate. Path shape is documented in handleGraphVfs:
+//   /graph              -> directory listing (index.md, find/, show/)
+//   /graph/index.md     -> synthesized overview text
+//   /graph/find/<pat>   -> synthesized search results
+//   /graph/show/<key>   -> synthesized node detail
+//   /graph/find         -> placeholder dir (no children to list)
+//   /graph/show         -> placeholder dir (no children to list)
+//
+// The dispatcher is pure: no SQL, just reads the local snapshot file. The
+// shell's cwd (inherited from the invoking terminal) determines which repo's
+// graph to load.
+
+const GRAPH_ROOT = "/graph";
+const GRAPH_PREFIX = "/graph/";
+const GRAPH_DIRS = new Set([GRAPH_ROOT, "/graph/find", "/graph/show"]);
+
+function isGraphPath(p: string): boolean {
+  return p === GRAPH_ROOT || p.startsWith(GRAPH_PREFIX);
+}
+
+function isGraphDir(p: string): boolean {
+  return GRAPH_DIRS.has(p);
+}
+
+function graphSubpathOf(p: string): string {
+  // p is normalized: "/graph" -> "", "/graph/index.md" -> "index.md",
+  // "/graph/find/foo" -> "find/foo".
+  if (p === GRAPH_ROOT) return "";
+  return p.slice(GRAPH_PREFIX.length);
+}
+
+/**
+ * Synthesize file content for a /graph/* path by delegating to the same
+ * dispatcher the pre-tool-use hook uses. Throws ENOENT when the dispatcher
+ * reports not-found so the FS API stays well-behaved.
+ *
+ * The "no-graph" return (no local snapshot for this cwd) is rendered as the
+ * file body, NOT as ENOENT — the file conceptually exists; it just reports
+ * its own emptiness. Same semantics as /index.md when no rows exist yet.
+ */
+function readGraphFile(p: string, cwd: string): string {
+  const sub = graphSubpathOf(p);
+  const r = handleGraphVfs(sub, cwd);
+  if (r.kind === "ok") return r.body;
+  if (r.kind === "no-graph") return `(no-graph) ${r.message}`;
+  // not-found: surface as ENOENT so the shell shows the expected error
+  throw fsErr("ENOENT", `${r.message}`, p);
+}
+
 export class DeeplakeFs implements IFileSystem {
   // path → Buffer (content) or null (exists but not fetched yet)
   private files = new Map<string, Buffer | null>();
@@ -616,6 +678,13 @@ export class DeeplakeFs implements IFileSystem {
 
   async readFile(path: string, _opts?: ReadFileOptions | BufferEncoding): Promise<string> {
     const p = normPath(path);
+    // Graph VFS bridge — delegate to the shared dispatcher BEFORE the
+    // dirs/files cache check, otherwise /graph/index.md would race with a
+    // hypothetical real "graph" dir entry.
+    if (isGraphPath(p)) {
+      if (isGraphDir(p)) throw fsErr("EISDIR", "illegal operation on a directory", p);
+      return readGraphFile(p, process.cwd());
+    }
     if (this.dirs.has(p) && !this.files.has(p)) throw fsErr("EISDIR", "illegal operation on a directory", p);
 
     // Virtual index.md: if no real row exists, generate from summary rows
@@ -750,11 +819,45 @@ export class DeeplakeFs implements IFileSystem {
   async exists(path: string): Promise<boolean> {
     const p = normPath(path);
     if (p === "/index.md") return true; // Virtual index always exists
+    if (isGraphPath(p)) {
+      // CodeRabbit P1: the old "everything under /graph/ exists" was too
+      // broad. A bogus path like /graph/find/<no-such-pattern> would
+      // exists-true and confuse callers (e.g. shell write/append flows
+      // that check exists() before touching the path). Tighten:
+      //   - /graph, /graph/find, /graph/show are always-true dirs
+      //   - /graph/<endpoint>/<arg> only exists when the dispatcher
+      //     returns a non-not-found result (ok OR no-graph — both render
+      //     conceptual file content, just one happens to be a stub
+      //     message; the path is addressable either way).
+      if (isGraphDir(p)) return true;
+      const r = handleGraphVfs(graphSubpathOf(p), process.cwd());
+      return r.kind === "ok" || r.kind === "no-graph";
+    }
     return this.files.has(p) || this.dirs.has(p);
   }
 
   async stat(path: string): Promise<FsStat> {
     const p = normPath(path);
+    // Graph VFS — synthesize stat without parsing the snapshot. Anything
+    // matching /graph(/find|/show)? is a directory; anything else under
+    // /graph/ is a file (synthesized at readFile time).
+    if (isGraphPath(p)) {
+      // CodeRabbit P1: align stat() with the tightened exists() — non-dir
+      // /graph paths must reject when the dispatcher says not-found.
+      // Otherwise tools that stat-before-read get inconsistent answers
+      // (exists=false but stat=true) and break the standard FS contract.
+      if (!isGraphDir(p)) {
+        const r = handleGraphVfs(graphSubpathOf(p), process.cwd());
+        if (r.kind === "not-found") throw fsErr("ENOENT", "no such file or directory", p);
+      }
+      const dir = isGraphDir(p);
+      return {
+        isFile: !dir, isDirectory: dir, isSymbolicLink: false,
+        mode: dir ? 0o755 : 0o644,
+        size: 0, // synthesized; cheaper than computing the body just to size it
+        mtime: new Date(),
+      };
+    }
     const isFile = this.files.has(p);
     const isDir  = this.dirs.has(p);
     // Virtual index.md: always exists as a file
@@ -786,6 +889,13 @@ export class DeeplakeFs implements IFileSystem {
   async realpath(path: string): Promise<string> {
     const p = normPath(path);
     if (p === "/index.md") return p; // Virtual index always exists
+    if (isGraphPath(p)) {
+      // Same alignment as stat(): unknown leaf path → ENOENT.
+      if (isGraphDir(p)) return p;
+      const r = handleGraphVfs(graphSubpathOf(p), process.cwd());
+      if (r.kind === "ok" || r.kind === "no-graph") return p;
+      throw fsErr("ENOENT", "no such file or directory", p);
+    }
     if (!this.files.has(p) && !this.dirs.has(p)) throw fsErr("ENOENT", "no such file or directory", p);
     return p;
   }
@@ -811,11 +921,24 @@ export class DeeplakeFs implements IFileSystem {
 
   async readdir(path: string): Promise<string[]> {
     const p = normPath(path);
+    // Graph VFS — directory listings synthesized from a fixed taxonomy.
+    if (p === GRAPH_ROOT) return ["index.md", "find", "show"];
+    if (p === "/graph/find" || p === "/graph/show") {
+      // No children to enumerate: arguments are user-supplied patterns, not
+      // a finite set we could list. Return empty so `ls` shows nothing
+      // (rather than throwing — the dir conceptually exists, it's just
+      // dispatched-on-demand).
+      return [];
+    }
     if (!this.dirs.has(p)) throw fsErr("ENOTDIR", "not a directory", p);
     const entries = [...(this.dirs.get(p) ?? [])];
     // Virtual index.md: always show in root listing even if no real row exists
     if (p === "/" && !entries.includes("index.md")) {
       entries.push("index.md");
+    }
+    // Surface the graph subtree in the root listing.
+    if (p === "/" && !entries.includes("graph")) {
+      entries.push("graph");
     }
     return entries;
   }
@@ -825,6 +948,18 @@ export class DeeplakeFs implements IFileSystem {
     const p = normPath(path);
     return names.map(name => {
       const child = p === "/" ? `/${name}` : `${p}/${name}`;
+      // CodeRabbit P1: graph entries aren't in this.files/this.dirs (they're
+      // synthesized). Classify them by the same isGraphDir taxonomy used by
+      // exists()/stat() so tools that consume DirentEntry get accurate types
+      // (e.g. `ls -F` shows trailing slash on /graph and /graph/find).
+      if (isGraphPath(child)) {
+        return {
+          name,
+          isFile: !isGraphDir(child),
+          isDirectory: isGraphDir(child),
+          isSymbolicLink: false,
+        };
+      }
       return {
         name,
         isFile: (this.files.has(child) || child === "/index.md") && !this.dirs.has(child),

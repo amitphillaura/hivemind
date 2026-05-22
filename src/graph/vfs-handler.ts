@@ -1,0 +1,423 @@
+/**
+ * Virtual filesystem handler for graph queries under
+ * ~/.deeplake/memory/graph/ — same intercept pattern as the
+ * memory mount's BM25 grep. Synthesizes text responses on the fly
+ * from the local snapshot; no real files exist at these paths.
+ *
+ * Endpoints (v1.1 trimmed surface — codex review recommended limit):
+ *   index.md           - overview: commit, counts, file stats, edge kinds
+ *   find/<pattern>     - case-insensitive substring search on node ids
+ *                        + labels. Emits numbered handles [N] persisted
+ *                        in .find-handles.json for the current worktree.
+ *   show/<key>         - <key> is either a digit (handle from last find)
+ *                        OR a substring pattern. Returns node detail +
+ *                        1-hop neighborhood grouped by edge relation.
+ *
+ * Intentionally NOT shipped in v1.1: callers/, callees/, importers/.
+ * They're just filtered views of show. Prematurely freezing the path
+ * taxonomy makes future API evolution painful (codex P1 review).
+ *
+ * Privacy: the handler reads ONLY the local snapshot file on disk.
+ * Zero network calls in the read path. Pull-from-cloud happens in
+ * a separate async worker (src/hooks/graph-pull-worker.ts).
+ */
+
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { join, dirname } from "node:path";
+
+import { readLastBuild } from "./last-build.js";
+import { repoDir } from "./snapshot.js";
+import { deriveProjectKey } from "../utils/repo-identity.js";
+import type { GraphSnapshot, GraphNode, GraphEdge } from "./types.js";
+
+function workTreeIdFor(cwd: string): string {
+  return createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+}
+
+export type GraphVfsResult =
+  | { kind: "ok"; body: string }
+  | { kind: "not-found"; message: string }
+  | { kind: "no-graph"; message: string };
+
+/**
+ * Top-level dispatcher. `subpath` is whatever comes after
+ * <memory>/graph/ — e.g. "index.md", "find/pushSnapshot", "show/3".
+ *
+ * Best-effort: any error returns a "no-graph" result with the reason
+ * inline; this keeps the agent unblocked even when the graph isn't
+ * available (e.g. on a fresh checkout that hasn't built yet).
+ */
+export function handleGraphVfs(subpath: string, cwd: string): GraphVfsResult {
+  // Normalize leading slash so callers can pass either "/find/X" or "find/X".
+  const path = subpath.replace(/^\/+/, "");
+
+  // Empty path → directory listing (so `ls` and bare reads work).
+  if (path === "" || path === "/") {
+    return { kind: "ok", body: dirListing() };
+  }
+
+  // index.md: cheap, no snapshot parsing for the common case.
+  if (path === "index.md" || path === "index") {
+    return loadSnapshotOrError(cwd, (snap, baseDir) => ({
+      kind: "ok",
+      body: renderIndex(snap, baseDir, cwd),
+    }));
+  }
+
+  // find/<pattern> — pattern may contain anything except literal "/" which
+  // is the next path segment. We accept the rest of the string verbatim.
+  if (path.startsWith("find/")) {
+    const pattern = path.slice("find/".length);
+    if (pattern === "") {
+      return { kind: "not-found", message: "find/ requires a pattern: cat memory/graph/find/<keyword>" };
+    }
+    return loadSnapshotOrError(cwd, (snap, baseDir) => ({
+      kind: "ok",
+      body: renderFind(snap, pattern, baseDir, workTreeIdFor(cwd)),
+    }));
+  }
+
+  // show/<key> — key is either a digit handle (from a prior find) or a
+  // substring pattern (when the agent already knows the symbol).
+  if (path.startsWith("show/")) {
+    const key = path.slice("show/".length);
+    if (key === "") {
+      return { kind: "not-found", message: "show/ requires a handle or pattern" };
+    }
+    return loadSnapshotOrError(cwd, (snap, baseDir) => ({
+      kind: "ok",
+      body: renderShow(snap, key, baseDir, workTreeIdFor(cwd)),
+    }));
+  }
+
+  return {
+    kind: "not-found",
+    message: `Unknown endpoint: graph/${path}\nAvailable: index.md, find/<pattern>, show/<handle-or-pattern>`,
+  };
+}
+
+// ── Snapshot loading ───────────────────────────────────────────────────
+
+function loadSnapshotOrError(
+  cwd: string,
+  fn: (snap: GraphSnapshot, baseDir: string) => GraphVfsResult,
+): GraphVfsResult {
+  let key: string;
+  let baseDir: string;
+  try {
+    key = deriveProjectKey(cwd).key;
+    baseDir = repoDir(key);
+  } catch (e) {
+    return { kind: "no-graph", message: `Cannot derive repo identity: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  const wt = workTreeIdFor(cwd);
+  const last = readLastBuild(baseDir, wt);
+  if (last === null) {
+    return {
+      kind: "no-graph",
+      message: "No local graph for this worktree yet. Run `hivemind graph build` (or `hivemind graph pull` if a teammate has built this commit).",
+    };
+  }
+  // CodeRabbit P1: writeSnapshot persists non-git builds under
+  // snapshot_sha256 (no commit context). Fall back to that so the VFS
+  // is reachable for commitless builds — previously this branch bailed
+  // out and the user got "No local graph" even right after a successful
+  // build in a loose source directory.
+  const fileBase = last.commit_sha ?? last.snapshot_sha256;
+  const snapPath = join(baseDir, "snapshots", `${fileBase}.json`);
+  if (!existsSync(snapPath)) {
+    return { kind: "no-graph", message: `Snapshot file missing on disk: ${snapPath}` };
+  }
+  let snap: GraphSnapshot;
+  try {
+    snap = JSON.parse(readFileSync(snapPath, "utf8")) as GraphSnapshot;
+  } catch (e) {
+    return { kind: "no-graph", message: `Failed to parse snapshot: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  // CodeRabbit P1: validate schema and wrap the renderer in try/catch.
+  // A snapshot file can be syntactically valid JSON but structurally
+  // wrong (e.g. truncated by a crash mid-write, or a Phase 1.5 file
+  // read by Phase 1 code). The renderers all assume `nodes` and `links`
+  // are arrays — without this guard a malformed payload would throw
+  // through to the hook caller and surface as "RETRY REQUIRED" instead
+  // of the documented best-effort no-graph response.
+  if (!Array.isArray((snap as { nodes?: unknown }).nodes) ||
+      !Array.isArray((snap as { links?: unknown }).links)) {
+    return { kind: "no-graph", message: "Snapshot schema is invalid (missing nodes/links arrays)." };
+  }
+  try {
+    return fn(snap, baseDir);
+  } catch (e) {
+    return { kind: "no-graph", message: `Failed to render graph view: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+// ── Renderers ──────────────────────────────────────────────────────────
+
+function dirListing(): string {
+  return [
+    "index.md",
+    "find/",
+    "show/",
+  ].join("\n");
+}
+
+function renderIndex(snap: GraphSnapshot, baseDir: string, cwd: string): string {
+  const commit = snap.graph.commit_sha?.slice(0, 7) ?? "no-commit";
+  const fullCommit = snap.graph.commit_sha ?? "no-commit";
+  const totalNodes = snap.nodes.length;
+  const totalEdges = snap.links.length;
+
+  // File breakdown: top 8 files by node count
+  const byFile: Record<string, number> = {};
+  for (const n of snap.nodes) byFile[n.source_file] = (byFile[n.source_file] ?? 0) + 1;
+  const topFiles = Object.entries(byFile)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 8);
+
+  // Edge kind breakdown
+  const byRel: Record<string, number> = {};
+  for (const e of snap.links) byRel[e.relation] = (byRel[e.relation] ?? 0) + 1;
+
+  // Node kind breakdown
+  const byKind: Record<string, number> = {};
+  for (const n of snap.nodes) byKind[n.kind] = (byKind[n.kind] ?? 0) + 1;
+
+  const lines: string[] = [];
+  lines.push(`# Code Graph — ${snap.observation.repo_project}`);
+  lines.push("");
+  lines.push(`Commit:  ${fullCommit}  (built ${snap.observation.ts})`);
+  lines.push(`Branch:  ${snap.observation.branch ?? "(detached)"}`);
+  lines.push(`Source:  ${join(baseDir, "snapshots", `${commit ? snap.graph.commit_sha : "?"}.json`)}`);
+  lines.push("");
+  lines.push(`Nodes:   ${totalNodes}    Edges: ${totalEdges}`);
+  lines.push("");
+  lines.push("## How to query");
+  lines.push("  cat ~/.deeplake/memory/graph/find/<pattern>");
+  lines.push("    Case-insensitive substring match on node id + label.");
+  lines.push("    Emits numbered handles [1] [2] ... saved for this worktree.");
+  lines.push("");
+  lines.push("  cat ~/.deeplake/memory/graph/show/<handle-or-pattern>");
+  lines.push("    <handle>: a digit from a prior `find/` (e.g. 3).");
+  lines.push("    <pattern>: a substring; resolves to a unique node if possible,");
+  lines.push("               or shows candidates if ambiguous.");
+  lines.push("    Output: node detail + 1-hop neighbors grouped by edge kind.");
+  lines.push("");
+  lines.push("## Node kinds");
+  for (const [k, n] of Object.entries(byKind).sort(([, a], [, b]) => b - a)) {
+    lines.push(`  ${k.padEnd(12)} ${n}`);
+  }
+  lines.push("");
+  lines.push("## Edge kinds");
+  for (const [k, n] of Object.entries(byRel).sort(([, a], [, b]) => b - a)) {
+    lines.push(`  ${k.padEnd(12)} ${n}`);
+  }
+  lines.push("");
+  lines.push("## Top files by node count");
+  for (const [f, n] of topFiles) {
+    lines.push(`  ${String(n).padStart(4)}  ${f}`);
+  }
+  lines.push("");
+  lines.push(`Limitations:`);
+  lines.push(`  - TypeScript only. AST-based, no semantic similarity edges.`);
+  lines.push(`  - 'calls' edges are intra-file only (Phase 1 extractor doesn't resolve cross-file).`);
+  lines.push(`    A node showing "Incoming (0)" may still have callers in OTHER files —`);
+  lines.push(`    treat it as "no callers in the same file", not "unused".`);
+  lines.push(`  - 'imports' edges are file-level and DO span files; trust them.`);
+  lines.push(`  - Stale after edits — if a file's mtime is newer than the build, read the live source.`);
+  // Touch `cwd` so unused-param lint is quiet (we don't use cwd in render but the
+  // caller wires it for symmetry with the find/show paths).
+  void cwd;
+  return lines.join("\n");
+}
+
+function renderFind(snap: GraphSnapshot, pattern: string, baseDir: string, worktreeId: string): string {
+  const needle = pattern.toLowerCase();
+  // Match on full id (file:symbol:kind) AND on label alone. We rank by:
+  //   1. exact label match
+  //   2. label starts with needle
+  //   3. id contains needle
+  //   4. label contains needle
+  // Caps at 50 results to keep output short.
+  const matches: GraphNode[] = [];
+  for (const n of snap.nodes) {
+    const id = n.id.toLowerCase();
+    const lbl = n.label.toLowerCase();
+    if (id.includes(needle) || lbl.includes(needle)) matches.push(n);
+  }
+  matches.sort((a, b) => {
+    const ra = rank(a, needle);
+    const rb = rank(b, needle);
+    if (ra !== rb) return ra - rb;
+    return a.id.localeCompare(b.id);
+  });
+  const capped = matches.slice(0, 50);
+
+  if (capped.length === 0) {
+    return `No matches for "${pattern}" in ${snap.nodes.length} nodes.\nTry a shorter or different substring.`;
+  }
+
+  // Persist handle table for this find. Indices are 1-based.
+  saveHandles(baseDir, worktreeId, capped.map((n) => n.id), pattern);
+
+  const lines: string[] = [];
+  lines.push(`${matches.length} match${matches.length === 1 ? "" : "es"} for "${pattern}"${matches.length > capped.length ? ` (showing first ${capped.length})` : ""}:`);
+  lines.push("");
+  for (let i = 0; i < capped.length; i++) {
+    const n = capped[i]!;
+    const tag = n.exported ? "exported" : "internal";
+    lines.push(`  [${i + 1}]  ${n.id}   ${n.kind} (${tag})`);
+  }
+  lines.push("");
+  lines.push("Use: cat ~/.deeplake/memory/graph/show/<N> to see node + 1-hop neighbors");
+  return lines.join("\n");
+}
+
+function renderShow(snap: GraphSnapshot, key: string, baseDir: string, worktreeId: string): string {
+  // 1. Digit → resolve via handle map from last find.
+  if (/^\d+$/.test(key)) {
+    const idx = parseInt(key, 10);
+    const handles = loadHandles(baseDir, worktreeId);
+    if (handles === null) {
+      return `Handle [${idx}] not resolvable: no recent find/ in this worktree. Run cat memory/graph/find/<pattern> first.`;
+    }
+    if (idx < 1 || idx > handles.ids.length) {
+      return `Handle [${idx}] out of range. Last find/${handles.pattern} produced ${handles.ids.length} matches.`;
+    }
+    const nodeId = handles.ids[idx - 1]!;
+    const node = snap.nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      return `Handle [${idx}] points at "${nodeId}" but that node is no longer in the snapshot (graph rebuilt since last find?). Re-run find.`;
+    }
+    return renderNodeDetail(snap, node);
+  }
+
+  // 2. Pattern → unique match? Show. Multiple? Disambiguation.
+  const needle = key.toLowerCase();
+  const matches = snap.nodes.filter((n) => n.id.toLowerCase().includes(needle));
+  if (matches.length === 0) {
+    return `No node matches "${key}". Try cat memory/graph/find/${key} for fuzzy search.`;
+  }
+  if (matches.length === 1) {
+    return renderNodeDetail(snap, matches[0]!);
+  }
+  // Save these as handles too — agent can drill via show/N
+  saveHandles(baseDir, worktreeId, matches.slice(0, 50).map((n) => n.id), key);
+  const lines: string[] = [];
+  lines.push(`"${key}" matches ${matches.length} nodes. Pick one:`);
+  lines.push("");
+  for (let i = 0; i < Math.min(matches.length, 50); i++) {
+    lines.push(`  [${i + 1}]  ${matches[i]!.id}`);
+  }
+  lines.push("");
+  lines.push("Use: cat ~/.deeplake/memory/graph/show/<N>");
+  return lines.join("\n");
+}
+
+function renderNodeDetail(snap: GraphSnapshot, node: GraphNode): string {
+  const incoming: GraphEdge[] = [];
+  const outgoing: GraphEdge[] = [];
+  for (const e of snap.links) {
+    if (e.target === node.id) incoming.push(e);
+    if (e.source === node.id) outgoing.push(e);
+  }
+  const groupBy = (es: GraphEdge[]): Map<string, GraphEdge[]> => {
+    const m = new Map<string, GraphEdge[]>();
+    for (const e of es) {
+      const list = m.get(e.relation) ?? [];
+      list.push(e);
+      m.set(e.relation, list);
+    }
+    return m;
+  };
+  const inGrp = groupBy(incoming);
+  const outGrp = groupBy(outgoing);
+
+  const lines: string[] = [];
+  lines.push(`Node: ${node.id}`);
+  lines.push(`  source: ${node.source_file}:${node.source_location}`);
+  lines.push(`  kind:   ${node.kind}`);
+  lines.push(`  label:  ${node.label}`);
+  lines.push(`  ${node.exported ? "exported" : "internal"}`);
+  lines.push("");
+  // Honest caveat: Phase 1 extractor resolves CALL edges intra-file only.
+  // A node with "Incoming (0)" may still be called from OTHER files. Don't
+  // let the agent infer "dead code" from this number alone.
+  const inHint = incoming.length === 0
+    ? "  — no edges from THIS file (intra-file only; may still be called from other files)"
+    : ":";
+  lines.push(`Incoming (${incoming.length})${inHint}`);
+  for (const [rel, es] of [...inGrp.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`  ${rel} (${es.length}):`);
+    for (const e of es.slice(0, 20)) {
+      lines.push(`    ${e.source}`);
+    }
+    if (es.length > 20) lines.push(`    ... and ${es.length - 20} more`);
+  }
+  lines.push("");
+  lines.push(`Outgoing (${outgoing.length})${outgoing.length === 0 ? "  — this node has no edges out" : ":"}`);
+  for (const [rel, es] of [...outGrp.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`  ${rel} (${es.length}):`);
+    for (const e of es.slice(0, 20)) {
+      lines.push(`    ${e.target}`);
+    }
+    if (es.length > 20) lines.push(`    ... and ${es.length - 20} more`);
+  }
+  return lines.join("\n");
+}
+
+// ── Ranking ────────────────────────────────────────────────────────────
+
+function rank(n: GraphNode, needle: string): number {
+  const lbl = n.label.toLowerCase();
+  const id = n.id.toLowerCase();
+  if (lbl === needle) return 0;
+  if (lbl.startsWith(needle)) return 1;
+  if (lbl.includes(needle)) return 2;
+  if (id.includes(needle)) return 3;
+  return 4;
+}
+
+// ── Handle map persistence ─────────────────────────────────────────────
+
+interface HandleMap {
+  pattern: string;
+  ts: number;
+  ids: string[];
+}
+
+function handlesPath(baseDir: string, worktreeId: string): string {
+  return join(baseDir, "worktrees", worktreeId, ".find-handles.json");
+}
+
+function saveHandles(baseDir: string, worktreeId: string, ids: string[], pattern: string): void {
+  const path = handlesPath(baseDir, worktreeId);
+  const payload: HandleMap = { pattern, ts: Date.now(), ids };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+    writeFileSync(tmp, JSON.stringify(payload));
+    renameSync(tmp, path);
+  } catch {
+    // best-effort: a handle-map write failure means show/<N> won't work
+    // until the next find/, but doesn't break find/ itself.
+  }
+}
+
+function loadHandles(baseDir: string, worktreeId: string): HandleMap | null {
+  const path = handlesPath(baseDir, worktreeId);
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object") return null;
+    const o = parsed as Partial<HandleMap>;
+    if (typeof o.pattern !== "string") return null;
+    if (typeof o.ts !== "number") return null;
+    if (!Array.isArray(o.ids)) return null;
+    if (!o.ids.every((s) => typeof s === "string")) return null;
+    return { pattern: o.pattern, ts: o.ts, ids: o.ids };
+  } catch {
+    return null;
+  }
+}

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   deriveProjectKey,
@@ -97,6 +97,43 @@ describe("deriveProjectKey", () => {
   it("derives project name from the basename of cwd", () => {
     const { project } = deriveProjectKey("/tmp/some-project-name");
     expect(project).toBe("some-project-name");
+  });
+
+  it("CodeRabbit P1 regression: relative vs absolute cwd → same key (when no git remote)", () => {
+    // Before the fix, deriveProjectKey hashed the raw `cwd` argument. A
+    // caller passing `.` from inside a directory would hash to a different
+    // key than a caller passing the absolute path of the SAME directory.
+    // After the fix we `path.resolve(cwd)` first so both forms collapse.
+    const abs = mkdtempSync(join(tmpdir(), "deriveProjectKey-rel-abs-"));
+    const prev = process.cwd();
+    try {
+      process.chdir(abs);
+      const fromDot = deriveProjectKey(".");
+      const fromAbs = deriveProjectKey(abs);
+      expect(fromDot.key).toBe(fromAbs.key);
+    } finally {
+      process.chdir(prev);
+      // CodeRabbit Minor: clean up directly — trackedKeys only handles
+      // STATE_DIR children, not arbitrary temp dirs we create here.
+      rmSync(abs, { recursive: true, force: true });
+    }
+  });
+
+  it("CodeRabbit P1 regression: project basename derived from RESOLVED cwd, not raw", () => {
+    // Same dir, accessed via "." should still yield the correct basename
+    // (not "" or "." which `basename(".")` would have returned).
+    const abs = mkdtempSync(join(tmpdir(), "deriveProjectKey-basename-"));
+    const prev = process.cwd();
+    try {
+      process.chdir(abs);
+      const { project } = deriveProjectKey(".");
+      // CodeRabbit Minor: path.basename is portable across separators
+      // (was `split("/").pop()` which broke on Windows).
+      expect(project).toBe(basename(abs));
+    } finally {
+      process.chdir(prev);
+      rmSync(abs, { recursive: true, force: true });
+    }
   });
 });
 

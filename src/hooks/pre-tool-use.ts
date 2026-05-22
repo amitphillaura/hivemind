@@ -11,6 +11,7 @@ import { sqlLike } from "../utils/sql.js";
 import { log as _log } from "../utils/debug.js";
 import { isDirectRun } from "../utils/direct-run.js";
 import { type GrepParams, parseBashGrep, handleGrepDirect } from "./grep-direct.js";
+import { handleGraphVfs } from "../graph/vfs-handler.js";
 import { executeCompiledBashCommand } from "./bash-command-compiler.js";
 import {
   findVirtualPaths,
@@ -181,6 +182,7 @@ interface ClaudePreToolDeps {
   createApi?: (table: string, config: NonNullable<ReturnType<typeof loadConfig>>) => DeeplakeApi;
   executeCompiledBashCommandFn?: typeof executeCompiledBashCommand;
   handleGrepDirectFn?: typeof handleGrepDirect;
+  handleGraphVfsFn?: typeof handleGraphVfs;
   readVirtualPathContentsFn?: typeof readVirtualPathContents;
   readVirtualPathContentFn?: typeof readVirtualPathContent;
   listVirtualPathRowsFn?: typeof listVirtualPathRows;
@@ -204,6 +206,7 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
     ),
     executeCompiledBashCommandFn = executeCompiledBashCommand,
     handleGrepDirectFn = handleGrepDirect,
+    handleGraphVfsFn = handleGraphVfs,
     readVirtualPathContentsFn = readVirtualPathContents,
     readVirtualPathContentFn = readVirtualPathContent,
     listVirtualPathRowsFn = listVirtualPathRows,
@@ -351,6 +354,41 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
         const wcMatch = shellCmd.match(/^wc\s+-l\s+(\S+)\s*$/);
         if (wcMatch) { virtualPath = wcMatch[1]; lineLimit = -1; }
       }
+    }
+
+    // Graph VFS dispatch — synthesized text responses for the
+    // <memory>/graph/... subtree. Lives under the memory mount as a
+    // SUBDIR (not a separate mount) so the existing touchesMemory()
+    // intercept already brought us here. We just route /graph/* away
+    // from the SQL-backed memory dispatch below to the local snapshot.
+    //
+    // Trimmed surface per codex review: index.md / find/<pattern> /
+    // show/<handle-or-pattern>. Hits return synthesized text via
+    // `echo <body>` exactly like the BM25 grep path does. From the
+    // agent's perspective it's just `cat` on a file.
+    if (virtualPath && virtualPath.startsWith("/graph/") && !virtualPath.endsWith("/")) {
+      const subpath = virtualPath.slice("/graph/".length);
+      logFn(`graph vfs: ${subpath}`);
+      const result = handleGraphVfsFn(subpath, process.cwd());
+      const body = result.kind === "ok"
+        ? result.body
+        : `(${result.kind}) ${result.message}`;
+      // CodeRabbit P1: Read tool requires a file_path-shaped decision
+      // (the harness reads the cached file directly). Bash gets the
+      // command-shaped decision (echo) like the rest of the intercepts.
+      if (input.tool_name === "Read") {
+        const file_path = writeReadCacheFileFn(input.session_id, virtualPath, body);
+        return buildReadDecision(file_path, `[hivemind graph] ${virtualPath}`);
+      }
+      return buildAllowDecision(`echo ${JSON.stringify(body)}`, `[hivemind graph] /graph/${subpath}`);
+    }
+    if (lsDir === "/graph" || lsDir === "/graph/") {
+      const body = "index.md\nfind/\nshow/\n";
+      if (input.tool_name === "Read") {
+        const file_path = writeReadCacheFileFn(input.session_id, "/graph", body);
+        return buildReadDecision(file_path, "[hivemind graph] ls /graph");
+      }
+      return buildAllowDecision(`echo ${JSON.stringify(body)}`, `[hivemind graph] ls /graph`);
     }
 
     if (virtualPath && !virtualPath.endsWith("/")) {
