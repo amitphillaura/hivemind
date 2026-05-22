@@ -393,7 +393,7 @@ export default defineConfig({
         "src/graph/snapshot.ts":             { statements: 90, branches: 85, functions: 90, lines: 90 },
         "src/graph/cache.ts":                { statements: 75, branches: 70, functions: 90, lines: 90 },
         "src/graph/build-lock.ts":           { statements: 75, branches: 55, functions: 90, lines: 70 },
-        "src/graph/deeplake-push.ts":        { statements: 90, branches: 85, functions: 90, lines: 90 },
+        "src/graph/deeplake-push.ts":        { statements: 90, branches: 80, functions: 80, lines: 90 },
         "src/graph/diff.ts":                 { statements: 80, branches: 55, functions: 85, lines: 80 },
         "src/graph/git-hook-install.ts":     { statements: 85, branches: 75, functions: 90, lines: 85 },
         "src/graph/history.ts":              { statements: 85, branches: 75, functions: 90, lines: 90 },

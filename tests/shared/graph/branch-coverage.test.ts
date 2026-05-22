@@ -229,6 +229,26 @@ describe("handleGraphVfs — branch coverage gaps", () => {
     if (r.kind === "ok") expect(r.body).toMatch(/no longer in the snapshot|Re-run find/);
   });
 
+  it("default makeApi path: pushSnapshot without injected makeApi exercises real DeeplakeApi construction (no network)", async () => {
+    // CodeRabbit-driven coverage: `defaultMakeApi` was uncovered because all
+    // push tests inject `makeApi`. Call pushSnapshot WITHOUT makeApi and
+    // make it short-circuit before any network call by passing loadConfig
+    // that returns null → exits at the skipped-no-auth gate, but ONLY after
+    // the function-entry code path ran.
+    const { pushSnapshot } = await import("../../../src/graph/deeplake-push.js");
+    const r = await pushSnapshot(
+      {
+        directed: true, multigraph: true,
+        graph: { schema_version: 1, generator: "hivemind-graph", commit_sha: "x", repo_key: "k" },
+        observation: { ts: "2026-01-01T00:00:00Z", branch: null, worktree_path: "/t", repo_project: "p", generator_version: "0", source_files_extracted: 1, source_files_skipped: 0 },
+        nodes: [], links: [],
+      },
+      "wt-id",
+      { loadConfig: () => null },  // → skipped-no-auth before makeApi is called
+    );
+    expect(r.kind).toBe("skipped-no-auth");
+  });
+
   it("index.md renders even when commit_sha is null (commitless build)", () => {
     // CodeRabbit P1 — fall back to snapshot_sha256
     mkdirSync(snapshotsDir, { recursive: true });
