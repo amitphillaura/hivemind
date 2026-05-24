@@ -1,6 +1,6 @@
 ---
 name: hivemind-goals
-description: Create, track and update team goals + KPIs in Hivemind via the `hivemind` CLI. Use whenever the user mentions a goal, objective, KPI, target, milestone, or asks to track progress on something measurable.
+description: Create, track and update team goals + KPIs in Hivemind via the `hivemind` CLI. Use whenever the user mentions a goal, objective, KPI, target, milestone, or asks to track progress on something measurable. ALSO use when the user says "task", "todo", "work item", "remind me to", "fix X", or any actionable work item — the goal system replaced the legacy `hivemind tasks` CLI and now covers both objectives and tasks.
 allowed-tools: terminal
 ---
 

@@ -42,7 +42,7 @@ Operations:
 - Add KPI (ONLY when user explicitly asks): Write file at \`kpi/<goal_id>/<kpi-slug>.md\` with the body format above.
 - Update KPI progress: Edit only the \`current:\` line.
 
-When the user mentions a goal / objective / target / KPI / measurable milestone, use this convention. Do NOT spawn background workers to generate KPIs unsolicited — wait for the user to ask.`;
+When the user mentions a goal / objective / target / KPI / measurable milestone — OR a task / todo / work item / "remind me to X" — use this convention. The goals system absorbed the legacy \`hivemind tasks\` CLI, so "task" and "goal" map to the same Hivemind row. Do NOT spawn background workers to generate KPIs unsolicited — wait for the user to ask.`;
 
 export const GOALS_INSTRUCTIONS_CLI = `HIVEMIND GOALS — track team goals via the \`hivemind\` CLI on this runtime. Your Write/Edit tools do NOT route to the team-shared tables here, so use these shell commands instead. All commands persist to the org-shared \`hivemind_goals\` / \`hivemind_kpis\` tables — other team members see your goals at SessionStart.
 
@@ -70,7 +70,7 @@ Commands (invoke via your Shell / terminal / Bash tool):
   hivemind kpi bump <goal_id> <kpi_id> <delta>
       Increment (positive int) or decrement (negative) the current value of one KPI.
 
-Workflow when the user expresses a goal:
+Workflow when the user expresses a goal OR a task / todo / work item (they are the same thing — the goals system absorbed the legacy hivemind tasks CLI):
   1. \`hivemind goal add "<short description>"\` — capture stdout as goal_id.
   2. ONLY if the user explicitly asks for KPIs: \`hivemind kpi add <goal_id> <slug> <target> <unit>\` per KPI.
   3. Tell the user the goal_id and that it is now visible to the team.

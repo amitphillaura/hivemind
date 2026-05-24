@@ -1,6 +1,6 @@
 ---
 name: hivemind-goals
-description: Create, track and update team goals + KPIs via the Deeplake virtual filesystem at memory/goal/ and memory/kpi/. Use whenever the user mentions a goal, objective, KPI, target, milestone, or asks to track progress on something measurable.
+description: Create, track and update team goals + KPIs via the Deeplake virtual filesystem at memory/goal/ and memory/kpi/. Use whenever the user mentions a goal, objective, KPI, target, milestone, or asks to track progress on something measurable. ALSO use when the user says "task", "todo", "work item", "remind me to", "fix X", or any actionable work item — the goal system replaced the legacy `hivemind tasks` CLI and now covers both objectives and tasks.
 allowed-tools: Bash
 ---
 
@@ -15,6 +15,7 @@ Activate when the user expresses any of:
 - "add a goal", "add a KPI", "what are my goals?"
 - "mark this as done", "close that goal"
 - "shipping X by Friday", "5 PRs this week", any measurable target
+- "create a task", "add a todo", "remind me to fix X", any work item (the goals system absorbs the old `hivemind tasks` CLI — there is no separate task store)
 
 For "list my goals" → run `ls ~/.deeplake/memory/goal/<userName>/opened/` and `ls ~/.deeplake/memory/goal/<userName>/in_progress/`. If empty, ask the user if they want to create one.
 
