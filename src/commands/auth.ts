@@ -179,8 +179,12 @@ export async function switchOrg(orgId: string, orgName?: string): Promise<void> 
   // /users/me/tokens). Re-mint against the destination org so the claim
   // matches creds.orgId — otherwise anything that trusts the token claim
   // instead of the X-Activeloop-Org-Id header resolves to the old org.
+  // Name suffix uses Date.now() (not the date) because Deeplake's
+  // /users/me/tokens rejects duplicate (user_id, name) with a misleading
+  // 500 — same hazard the heal path documents; two switches the same day
+  // would otherwise fail.
   const apiUrl = creds.apiUrl ?? DEFAULT_API_URL;
-  const tokenName = `deeplake-plugin-${new Date().toISOString().slice(0, 10)}`;
+  const tokenName = `deeplake-plugin-switch-${Date.now()}`;
   const tokenData = await apiPost("/users/me/tokens", {
     name: tokenName,
     duration: 365 * 24 * 3600,

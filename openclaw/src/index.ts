@@ -302,8 +302,12 @@ let authUrl: string | null = null;
 // Heal the legacy `org switch` regression at most once per process: if
 // creds.token's JWT org_id claim differs from creds.orgId, re-mint a
 // token bound to the destination org and rewrite ~/.deeplake/credentials.json.
-// Sentinel prevents re-running on every getApi() invocation.
-let driftHealAttempted = false;
+// Promise sentinel — not a boolean — because the heal awaits I/O and a
+// boolean would let a concurrent getApi() caller see `attempted=true`
+// while the first heal was still in flight, then skip ahead and build/cache
+// the api from still-stale credentials. With a promise, the second caller
+// awaits the first's heal and reads the freshly-healed creds.
+let driftHealPromise: Promise<void> | null = null;
 // Set by the background version check in register() when a newer version is
 // available on ClawHub. Read by before_prompt_build to inject an
 // agent-facing directive nudging it to install via its own exec tool.
@@ -676,13 +680,18 @@ async function getApi(): Promise<DeeplakeApi | null> {
   // Heal token/org drift before loadConfig reads credentials.json. Heal is
   // a no-op when claim matches orgId or when the JWT carries no claim, so
   // the only added cost on the steady-state path is a base64 decode.
-  if (!driftHealAttempted) {
-    driftHealAttempted = true;
-    try {
-      const creds = await loadCredentials();
-      if (creds?.token) await healDriftedOrgToken(creds);
-    } catch { /* heal never throws; this catch is belt + braces */ }
+  // First caller initiates the promise; subsequent concurrent callers
+  // await the same promise so they all see freshly-healed creds before
+  // loadConfig() runs (see comment on driftHealPromise above).
+  if (!driftHealPromise) {
+    driftHealPromise = (async () => {
+      try {
+        const creds = await loadCredentials();
+        if (creds?.token) await healDriftedOrgToken(creds);
+      } catch { /* heal never throws; this catch is belt + braces */ }
+    })();
   }
+  await driftHealPromise;
 
   const config = await loadConfig();
   if (!config) {
