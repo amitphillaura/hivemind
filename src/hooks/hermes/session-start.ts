@@ -136,7 +136,7 @@ async function main(): Promise<void> {
   // (DDL writes), so they're gated on captureEnabled too. Renderer
   // is read-only and runs regardless. See cursor session-start for
   // the same layering rationale.
-  let rulesTasksBlock = "";
+  let rulesBlock = "";
   if (creds?.token) {
     try {
       const config = loadConfig();
@@ -150,14 +150,13 @@ async function main(): Promise<void> {
         } else {
           log("placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)");
         }
-        // T6: read-only renderer. Hermes's context field is invisible
-        // to the user (model-only). Renderer absorbs its own errors.
-        rulesTasksBlock = await renderContextBlock(
+        // Read-only renderer. Hermes's context field is invisible to
+        // the user (model-only). Renderer absorbs its own errors.
+        rulesBlock = await renderContextBlock(
           (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>,
           {
             rulesTable: config.rulesTableName,
-            tasksTable: config.tasksTableName,
-            taskEventsTable: config.taskEventsTableName,
+            goalsTable: config.goalsTableName,
             currentUser: config.userName,
           },
           { log },
@@ -199,8 +198,8 @@ async function main(): Promise<void> {
   // `hivemind goal add/list/...` via terminal. End state in tables
   // is identical to the VFS-routed path.
   const baseWithGoals = creds?.token ? `${baseContext}\n\n${GOALS_INSTRUCTIONS_CLI}` : baseContext;
-  const additional = rulesTasksBlock
-    ? `${baseWithGoals}\n\n${rulesTasksBlock}`
+  const additional = rulesBlock
+    ? `${baseWithGoals}\n\n${rulesBlock}`
     : baseWithGoals;
 
   // Hermes expects { context: "..." } on stdout

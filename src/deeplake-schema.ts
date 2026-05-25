@@ -115,50 +115,6 @@ export const RULES_COLUMNS: readonly ColumnDef[] = Object.freeze([
 ]);
 
 /**
- * Tasks table — per-team or per-user task tracking with agent-generated KPIs.
- *
- * Immutable + version-bumped (same shape as SKILLS_COLUMNS and
- * RULES_COLUMNS). `kpis` is a nullable JSONB column holding the agent's
- * KPI metadata; the canonical KPI current-value source is
- * TASK_EVENTS_COLUMNS (SUM(value)), not this snapshot.
- */
-export const TASKS_COLUMNS: readonly ColumnDef[] = Object.freeze([
-  { name: "id",             sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "task_id",        sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "text",           sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "scope",          sql: "TEXT NOT NULL DEFAULT 'me'" },
-  { name: "status",         sql: "TEXT NOT NULL DEFAULT 'active'" },
-  { name: "assigned_to",    sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "assigned_by",    sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "kpis",           sql: "JSONB" },
-  { name: "version",        sql: "BIGINT NOT NULL DEFAULT 1" },
-  { name: "created_at",     sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "agent",          sql: "TEXT NOT NULL DEFAULT 'manual'" },
-  { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
-]);
-
-/**
- * Task events table — append-only stream of KPI progress events.
- *
- * Every INSERT is a fresh row; never UPDATE. KPI current value =
- * SUM(value) WHERE task_id=? AND kpi_id=?. This is the only shape that
- * fully sidesteps the Deeplake UPDATE-coalescing bug for high-churn data
- * (auto-extract can emit many events per session).
- */
-export const TASK_EVENTS_COLUMNS: readonly ColumnDef[] = Object.freeze([
-  { name: "id",             sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "task_id",        sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "task_version",   sql: "BIGINT NOT NULL DEFAULT 1" },
-  { name: "kpi_id",         sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "value",          sql: "BIGINT NOT NULL DEFAULT 0" },
-  { name: "note",           sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "source",         sql: "TEXT NOT NULL DEFAULT 'user'" },
-  { name: "agent",          sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "ts",             sql: "TEXT NOT NULL DEFAULT ''" },
-  { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
-]);
-
-/**
  * Goals table — user-tracked objectives backed by the VFS path
  * convention `memory/goal/<owner>/<status>/<goal_id>.md`.
  *
@@ -169,7 +125,7 @@ export const TASK_EVENTS_COLUMNS: readonly ColumnDef[] = Object.freeze([
  * content does not replicate path-encoded fields.
  *
  * Immutable + version-bumped (same shape as SKILLS_COLUMNS /
- * RULES_COLUMNS / TASKS_COLUMNS). Every VFS write produces v=N+1;
+ * RULES_COLUMNS). Every VFS write produces v=N+1;
  * `rm` translates to v=N+1 with status='closed' (soft-close, full
  * audit trail preserved).
  *
@@ -289,8 +245,6 @@ validateSchema("MEMORY_COLUMNS", MEMORY_COLUMNS);
 validateSchema("SESSIONS_COLUMNS", SESSIONS_COLUMNS);
 validateSchema("SKILLS_COLUMNS", SKILLS_COLUMNS);
 validateSchema("RULES_COLUMNS", RULES_COLUMNS);
-validateSchema("TASKS_COLUMNS", TASKS_COLUMNS);
-validateSchema("TASK_EVENTS_COLUMNS", TASK_EVENTS_COLUMNS);
 validateSchema("GOALS_COLUMNS", GOALS_COLUMNS);
 validateSchema("KPIS_COLUMNS", KPIS_COLUMNS);
 validateSchema("CODEBASE_COLUMNS", CODEBASE_COLUMNS);

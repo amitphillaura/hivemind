@@ -48,8 +48,7 @@ const validConfig = {
   // T6 fields — needed so the renderer's sqlIdent doesn't render
   // FROM "undefined" when the mock loadConfig is consulted.
   rulesTableName: "hivemind_rules",
-  tasksTableName: "hivemind_tasks",
-  taskEventsTableName: "hivemind_task_events",
+  goalsTableName: "hivemind_goals",
   skillsTableName: "skills",
 };
 
@@ -107,9 +106,8 @@ describe("cursor session-start hook — placeholder creation", () => {
     await runHook();
     expect(ensureTableMock).toHaveBeenCalledTimes(1);
     expect(ensureSessionsTableMock).toHaveBeenCalledTimes(1);
-    // 2 placeholder + 3 T6 renderer (rules + team-tasks + mine-tasks)
-    // = 5. computeAllForTasks skipped because tasks lists empty.
-    expect(queryMock).toHaveBeenCalledTimes(5);
+    // 2 placeholder + 1 renderer (rules only) = 3.
+    expect(queryMock).toHaveBeenCalledTimes(4);
     const insertSql = queryMock.mock.calls[1][0] as string;
     expect(insertSql).toMatch(/INSERT INTO "memory"/);
     expect(insertSql).toContain("'cursor'");
@@ -119,8 +117,8 @@ describe("cursor session-start hook — placeholder creation", () => {
   it("skips INSERT when placeholder already exists", async () => {
     queryMock.mockResolvedValueOnce([{ path: "/summaries/alice/sid-1.md" }]);
     await runHook();
-    // 1 placeholder SELECT + 3 T6 renderer (rules + team + mine) = 4.
-    expect(queryMock).toHaveBeenCalledTimes(4);
+    // 1 placeholder SELECT + 1 renderer (rules only) = 2.
+    expect(queryMock).toHaveBeenCalledTimes(3);
   });
 
   it("HIVEMIND_CAPTURE=false: no placeholder, no DDL ensure, but renderer still runs (codex P2 pass 2 + pass 4)", async () => {
@@ -131,9 +129,10 @@ describe("cursor session-start hook — placeholder creation", () => {
     await runHook({ HIVEMIND_CAPTURE: "false" });
     expect(ensureTableMock).not.toHaveBeenCalled();
     expect(ensureSessionsTableMock).not.toHaveBeenCalled();
-    // 3 renderer SELECTs (rules + team-tasks + mine-tasks).
-    expect(queryMock).toHaveBeenCalledTimes(3);
+    // 2 renderer SELECTs (rules + goals).
+    expect(queryMock).toHaveBeenCalledTimes(2);
     expect(queryMock.mock.calls[0][0]).toMatch(/^SELECT .* FROM "hivemind_rules"/);
+    expect(queryMock.mock.calls[1][0]).toMatch(/^SELECT .* FROM "hivemind_goals"/);
   });
 
   it("skips placeholder when no token in credentials", async () => {

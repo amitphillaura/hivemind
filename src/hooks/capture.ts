@@ -22,7 +22,6 @@ import {
 } from "./summary-state.js";
 import { bundleDirFromImportMeta, spawnWikiWorker, wikiLog } from "./spawn-wiki-worker.js";
 import { tryStopCounterTrigger } from "../skillify/triggers.js";
-import { tryAutoExtract } from "./auto-extract.js";
 import { EmbedClient } from "../embeddings/client.js";
 import { embeddingSqlLiteral } from "../embeddings/sql.js";
 import { embeddingsDisabled } from "../embeddings/disable.js";
@@ -169,47 +168,6 @@ async function main(): Promise<void> {
   }
 
   log("capture ok → cloud");
-
-  // Auto-extract: best-effort KPI event emission for known shell
-  // patterns (currently `gh pr merge` only). Wrapped in try/catch so a
-  // failure here NEVER breaks the session capture path above — the
-  // session row is already INSERTed at this point. On missing-table
-  // error we ensure + retry once (mirror of the sessions-table lazy
-  // pattern), because no SessionStart hook currently ensures
-  // task_events; the first event in a fresh session pays a one-time
-  // create cost. Pre-ensuring task_events at session-start is a v1.1
-  // optimization tracked in the plan.
-  //
-  // tool_response is passed through so the orchestrator can gate
-  // emission on Bash success — failed `gh pr merge 99999` (bad PR id,
-  // auth failure, conflict, interrupted) MUST NOT count as KPI
-  // progress. Codex review pass 2 surfaced this regression.
-  try {
-    const queryFn = (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>;
-    const kind = await tryAutoExtract(queryFn, config.taskEventsTableName, input, {
-      agent: "claude_code",
-      plugin_version: PLUGIN_VERSION,
-    });
-    if (kind) log(`auto-extract: ${kind}`);
-  } catch (e: any) {
-    const msg: string = e?.message ?? String(e);
-    if (msg.includes("does not exist") || msg.includes("permission denied")) {
-      try {
-        log("auto-extract: task_events missing, creating and retrying");
-        await api.ensureTaskEventsTable(config.taskEventsTableName);
-        const queryFn = (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>;
-        const kind = await tryAutoExtract(queryFn, config.taskEventsTableName, input, {
-          agent: "claude_code",
-          plugin_version: PLUGIN_VERSION,
-        });
-        if (kind) log(`auto-extract: ${kind} (after ensure)`);
-      } catch (retryErr: any) {
-        log(`auto-extract retry failed: ${retryErr?.message ?? String(retryErr)}`);
-      }
-    } else {
-      log(`auto-extract failed: ${msg}`);
-    }
-  }
 
   // Commit-driven KPI auto-extract is disabled for now — the
   // fire-and-forget sub-agent spawned per `git commit` (see

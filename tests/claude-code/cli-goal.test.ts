@@ -53,8 +53,6 @@ const VALID_CONFIG = {
   sessionsTableName: "sessions",
   skillsTableName: "skills",
   rulesTableName: "hivemind_rules",
-  tasksTableName: "hivemind_tasks",
-  taskEventsTableName: "hivemind_task_events",
   goalsTableName: "hivemind_goals_test",
   kpisTableName: "hivemind_kpis_test",
   memoryPath: "/tmp/mem",

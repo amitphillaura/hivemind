@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   // + pass 4 together surfaced this layering: only writes (placeholder
   // + ensure DDL) are gated; reads (renderer) always run.
   const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false";
-  let rulesTasksBlock = "";
+  let rulesBlock = "";
   if (creds?.token) {
     try {
       const config = loadConfig();
@@ -179,17 +179,15 @@ async function main(): Promise<void> {
         } else {
           log("placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)");
         }
-        // T6: read-only renderer. Cursor's additional_context is
-        // invisible to the user (model-only), so the full block is
-        // fine. Renderer absorbs its own errors and returns "" on
-        // any failure (including missing rules/tasks/events tables —
-        // see context-renderer.ts for the per-section sub-tries).
-        rulesTasksBlock = await renderContextBlock(
+        // Read-only renderer. Cursor's additional_context is invisible
+        // to the user (model-only), so the full block is fine. Renderer
+        // absorbs its own errors and returns "" on any failure (including
+        // missing rules table — see context-renderer.ts).
+        rulesBlock = await renderContextBlock(
           (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>,
           {
             rulesTable: config.rulesTableName,
-            tasksTable: config.tasksTableName,
-            taskEventsTable: config.taskEventsTableName,
+            goalsTable: config.goalsTableName,
             currentUser: config.userName,
           },
           { log },
@@ -232,8 +230,8 @@ async function main(): Promise<void> {
   // shell commands. Same end state (rows in hivemind_goals /
   // hivemind_kpis), different code path inside the agent.
   const baseWithGoals = creds?.token ? `${baseContext}\n\n${GOALS_INSTRUCTIONS_CLI}` : baseContext;
-  const additionalContext = rulesTasksBlock
-    ? `${baseWithGoals}\n\n${rulesTasksBlock}`
+  const additionalContext = rulesBlock
+    ? `${baseWithGoals}\n\n${rulesBlock}`
     : baseWithGoals;
 
   console.log(JSON.stringify({ additional_context: additionalContext }));

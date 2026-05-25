@@ -17,7 +17,6 @@ import { runGraphCommand } from "../commands/graph.js";
 import { runDashboardCommand } from "../commands/dashboard.js";
 import { runSkillifyCommand } from "../commands/skillify.js";
 import { runRulesCommand } from "../commands/rules.js";
-import { runTasksCommand } from "../commands/tasks.js";
 import { runGoalCommand, runKpiCommand } from "../commands/goal.js";
 import { runContextCommand } from "../commands/context.js";
 import { confirm, detectPlatforms, allPlatformIds, log, promptLine, warn, type PlatformId } from "./util.js";
@@ -136,24 +135,8 @@ Team-wide rules:
   Note: active rules are auto-injected into the SessionStart block for
   claude-code / cursor / hermes; codex / pi / openclaw use 'hivemind context'.
 
-Personal + team tasks:
-  hivemind tasks add "<text>" [--scope me|team] [--assign <user>]
-                                               Add a task (default --scope me, self-assigned).
-  hivemind tasks list [--mine|--team|--all] [--status active|done|all] [--limit N]
-                                               List tasks. Default --mine + active + 10 newest.
-  hivemind tasks edit <task-id> "<new text>"   Edit a task (bumps version).
-  hivemind tasks done <task-id>                Mark a task done.
-  hivemind tasks assign <task-id> <user>       Reassign a task.
-  hivemind tasks progress <task-id> <kpi-id> --value N [--note "..."]
-                                               Append a KPI progress event.
-  hivemind tasks report [<task-id>]            KPI progress summary (computed from events).
-  Note: KPIs are generated automatically from task text when
-  ANTHROPIC_API_KEY is set (set HIVEMIND_KPI_LLM=disable to opt out).
-  <user> values must match the target user's 'hivemind whoami' output
-  exactly (no fuzzy email matching in v1).
-
 Cross-agent helpers:
-  hivemind context                             Print the rules+tasks block on demand.
+  hivemind context                             Print the rules + open-goals block on demand.
                                                Fallback for pi/openclaw agents (no SessionStart hook)
                                                and read-only diagnostic for any agent.
 
@@ -403,11 +386,6 @@ async function main(): Promise<void> {
 
   if (cmd === "rules") {
     await runRulesCommand(args.slice(1));
-    return;
-  }
-
-  if (cmd === "tasks") {
-    await runTasksCommand(args.slice(1));
     return;
   }
 

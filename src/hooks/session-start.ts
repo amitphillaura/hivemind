@@ -182,10 +182,10 @@ async function main(): Promise<void> {
   // (DDL writes), so they MUST be gated on captureEnabled. Codex
   // review pass 4 surfaced this — the prior code ran ensure* even
   // under capture=false. The renderer is read-only and runs
-  // regardless; the rules/tasks/task_events tables it queries are
-  // lazy-created by their own CLI writes (rules/tasks/progress).
+  // regardless; the rules table it queries is lazy-created by the
+  // CLI write path (`hivemind rules add`).
   const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false";
-  let rulesTasksBlock = "";
+  let rulesBlock = "";
   if (input.session_id && creds?.token) {
     try {
       const config = loadConfig();
@@ -204,13 +204,12 @@ async function main(): Promise<void> {
         // Renderer is read-only and runs regardless of captureEnabled.
         // It absorbs its own errors (missing table, network, etc.)
         // and returns "" on any failure — SessionStart MUST NOT fail
-        // because of a bad rules/tasks read.
-        rulesTasksBlock = await renderContextBlock(
+        // because of a bad rules read.
+        rulesBlock = await renderContextBlock(
           (sql: string) => api.query(sql) as Promise<Array<Record<string, unknown>>>,
           {
             rulesTable: config.rulesTableName,
-            tasksTable: config.tasksTableName,
-            taskEventsTable: config.taskEventsTableName,
+            goalsTable: config.goalsTableName,
             currentUser: config.userName,
           },
           { log },
@@ -254,8 +253,8 @@ async function main(): Promise<void> {
   const localMined = countLocalManifestEntries();
   // Use the shared renderer (extracted on main for testability / codex
   // review on PR #197) — keep `baseContext` here as the intermediate
-  // because the rules+tasks block append below depends on a separate
-  // name from the final `additionalContext` emitted to stdout.
+  // because the rules block append below depends on a separate name
+  // from the final `additionalContext` emitted to stdout.
   const localMinedNote = renderLocalMinedNote({ totalCount: localMined });
 
   // Local code graph context (Phase 3 v1.1). Cheap: reads ~/.hivemind/...
@@ -278,13 +277,13 @@ async function main(): Promise<void> {
   const baseContext = creds?.token
     ? `${resolvedContext}\n\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${updateNotice}`
     : `${resolvedContext}\n\n⚠️ Not logged in to Deeplake. Memory search will not work. Ask the user to run /hivemind:login to authenticate.${localMinedNote}${updateNotice}`;
-  // Append the rules + tasks block when there's something to show, then
+  // Append the rules block when there's something to show, then
   // append the graph note (single line, may be empty). The renderer
   // returns "" on empty state OR failure, so the ternary stays terse.
-  const withRulesTasks = rulesTasksBlock
-    ? `${baseContext}\n\n${rulesTasksBlock}`
+  const withRules = rulesBlock
+    ? `${baseContext}\n\n${rulesBlock}`
     : baseContext;
-  const additionalContext = `${withRulesTasks}${graphNote}`;
+  const additionalContext = `${withRules}${graphNote}`;
 
   console.log(JSON.stringify({
     hookSpecificOutput: {

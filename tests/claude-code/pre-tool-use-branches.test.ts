@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   buildAllowDecision,
+  buildDenyDecision,
   buildReadDecision,
   extractGrepParams,
   getShellCommand,
@@ -52,6 +53,15 @@ describe("pre-tool-use: pure helpers", () => {
     const d = buildReadDecision("/tmp/x", "desc");
     expect(d.file_path).toBe("/tmp/x");
     expect(d.description).toBe("desc");
+  });
+
+  it("buildDenyDecision returns a deny-shaped decision with reason set", () => {
+    const d = buildDenyDecision("nope", "blocked");
+    expect(d.deny).toBe("nope");
+    expect(d.description).toBe("blocked");
+    // Default fields stay empty so main() emits the deny envelope, not allow.
+    expect(d.command).toBe("");
+    expect(d.file_path).toBeUndefined();
   });
 
   it("rewritePaths collapses all memory-path forms to `/`", () => {
@@ -251,6 +261,93 @@ describe("processPreToolUse: non-memory / no-op paths", () => {
       { config: BASE_CONFIG as any, logFn: vi.fn() },
     );
     expect(d?.command).toContain("RETRY REQUIRED");
+  });
+
+  it("Write on a memory path returns a deny decision (not the [RETRY REQUIRED] bash guidance)", async () => {
+    // The deny branch fires BEFORE the unsupported-command branch so the
+    // harness gets a properly shaped permissionDecision: "deny" instead
+    // of a Bash-shaped allow that breaks Write tool with "Path must be
+    // a string, received undefined".
+    const d = await processPreToolUse(
+      {
+        session_id: "s",
+        tool_name: "Write",
+        tool_input: { file_path: `${MEM_ABS}/goal/u/opened/x.md`, content: "hi" },
+        tool_use_id: "t",
+      },
+      { config: BASE_CONFIG as any, logFn: vi.fn() },
+    );
+    expect(d?.deny).toBeDefined();
+    expect(d?.deny).toContain("Bash");
+    expect(d?.deny).toContain("echo");
+    expect(d?.deny).toContain("cat >");
+    // Should NOT be the unsupported-command fallback.
+    expect(d?.command).toBe("");
+  });
+
+  it("Edit on a memory path returns the same deny decision (Edit is identical to Write)", async () => {
+    const d = await processPreToolUse(
+      {
+        session_id: "s",
+        tool_name: "Edit",
+        tool_input: { file_path: `${MEM_ABS}/goal/u/opened/x.md`, old_string: "a", new_string: "b" },
+        tool_use_id: "t",
+      },
+      { config: BASE_CONFIG as any, logFn: vi.fn() },
+    );
+    expect(d?.deny).toBeDefined();
+    expect(d?.deny).toContain("Bash");
+  });
+
+  it("Write OUTSIDE memory paths returns null (no intercept)", async () => {
+    const d = await processPreToolUse(
+      {
+        session_id: "s",
+        tool_name: "Write",
+        tool_input: { file_path: "/tmp/unrelated.txt", content: "x" },
+        tool_use_id: "t",
+      },
+      { config: BASE_CONFIG as any },
+    );
+    expect(d).toBeNull();
+  });
+
+  it("Read on /graph (directory path) hits the graph-VFS ls Read branch", async () => {
+    // Only Read tool sets lsDir BEFORE the graph dispatch — Glob/Bash
+    // parse lsDir later. So Read on a memory directory path is the only
+    // way to hit the lsDir==='/graph' branch from a unit test.
+    const writeReadCacheFileFn = vi.fn(() => "/tmp/cache/graph-ls");
+    const d = await processPreToolUse(
+      { session_id: "s", tool_name: "Read", tool_input: { file_path: "~/.deeplake/memory/graph" }, tool_use_id: "t" },
+      { config: BASE_CONFIG as any, createApi: vi.fn(() => makeApi()), writeReadCacheFileFn },
+    );
+    expect(d?.file_path).toBe("/tmp/cache/graph-ls");
+    expect(d?.description).toBe("[hivemind graph] ls /graph");
+  });
+
+  it("direct read of /index.md writes the cache and returns content (lines 439, 451-452)", async () => {
+    const readCachedIndexContentFn = vi.fn(() => null);
+    const writeCachedIndexContentFn = vi.fn();
+    const readVirtualPathContentFn = vi.fn(async () => "INDEX CONTENT");
+    // Read tool variant exercises lines 451-452 (writeReadCacheFile + buildReadDecision).
+    const writeReadCacheFileFn = vi.fn(() => "/tmp/cache/index.md");
+    const d = await processPreToolUse(
+      { session_id: "s2", tool_name: "Read", tool_input: { file_path: "~/.deeplake/memory/index.md" }, tool_use_id: "t" },
+      {
+        config: BASE_CONFIG as any,
+        createApi: vi.fn(() => makeApi()),
+        readCachedIndexContentFn,
+        writeCachedIndexContentFn,
+        readVirtualPathContentFn,
+        writeReadCacheFileFn,
+      },
+    );
+    // Line 439: writeCachedIndexContentFn called with the fetched body.
+    expect(writeCachedIndexContentFn).toHaveBeenCalledWith("s2", "INDEX CONTENT");
+    // Lines 451-452: Read tool gets a file_path-shaped decision.
+    expect(d?.file_path).toBe("/tmp/cache/index.md");
+    expect(d?.description).toContain("[DeepLake direct]");
+    expect(d?.description).toContain("/index.md");
   });
 });
 

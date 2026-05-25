@@ -307,25 +307,15 @@ hivemind skillify unpull                     # remove pulled skills
 
 Triggers, generation flow, full `pull` / `unpull` semantics, gate-CLI table per agent, env vars, logs: **[docs/SKILLIFY.md](docs/SKILLIFY.md)**.
 
-## Rules + tasks (cross-agent KPIs)
+## Rules (cross-agent team principles)
 
-Hivemind **shares team rules and tasks across every agent in the org**, injected at SessionStart so every claude-code / cursor / hermes session starts knowing them. Tasks come with LLM-generated KPIs; the agent records progress via a CLI; `tasks report` shows current/target.
+Hivemind **shares team rules across every agent in the org**, injected at SessionStart so every claude-code / cursor / hermes session starts knowing them. For personal or team work items with progress tracking, use [Goals + KPIs](#goals--kpis) (VFS-backed) instead.
 
 ```bash
-# Rules — team-wide principles ("never DROP TABLE on prod")
 hivemind rules add "no DROP TABLE on prod creds"
 hivemind rules list                          # latest 10 active
 hivemind rules edit <rule-id> "<new text>"   # bumps version
 hivemind rules done <rule-id>                # mark closed
-
-# Tasks — personal or team work items, with agent-generated KPIs
-hivemind tasks add "ship the search bar" [--scope me|team] [--assign <user>]
-hivemind tasks list [--mine|--team|--all] [--status active|done|all]
-hivemind tasks edit <task-id> "<new text>"
-hivemind tasks done <task-id>
-hivemind tasks assign <task-id> <user>
-hivemind tasks progress <task-id> <kpi-id> --value N [--note "..."]
-hivemind tasks report [<task-id>]            # SUM events per KPI
 
 # Cross-agent diagnostic / pi/openclaw fallback
 hivemind context                             # print the injection block on demand
@@ -340,36 +330,28 @@ fall back to `hivemind context`):
 - <rule_id>: <text>
 (X more — run 'hivemind rules list' to see all)
 
-=== HIVEMIND TASKS (N active) ===
-[team] <task_id>: <text> ★YOU | PRs merged: 3/5 count
-[me]   <task_id>: <text>      | Lines reviewed: 75/200 lines
-(X more — run 'hivemind tasks list' to see all)
-
 === HIVEMIND HOW-TO ===
 - Rules above are team principles. Treat any action that would violate one as a critical error and surface it to the user before proceeding.
-- Tasks above are your current work. Use 'hivemind tasks progress <task-id> <kpi-id> --value N' to record progress on a KPI.
-- Run 'hivemind rules list' / 'hivemind tasks list' for the full inventories beyond what's shown here.
+- Run 'hivemind rules list' for the full inventory beyond what's shown here.
 ```
 
-**Auto-extract** — `gh pr merge` from inside an agent's Bash tool
-appends an event to `hivemind_task_events` automatically (failed
-merges, `--auto` enablement, interrupted commands all skipped). The
-event is "orphan" in v1 (no task binding yet); v1.1 ships
-`hivemind events attribute` for retroactive binding.
-
-**KPI generation** — `hivemind tasks add` calls Claude Sonnet to
-produce 1-3 KPIs from the task text. Failure modes (no API key,
-timeout, parse error) degrade to empty kpis; the task still INSERTs
-and the user can record progress manually.
-
 **Env vars:**
-- `HIVEMIND_RULES_TABLE`, `HIVEMIND_TASKS_TABLE`, `HIVEMIND_TASK_EVENTS_TABLE` — table names (default `hivemind_rules` / `hivemind_tasks` / `hivemind_task_events`).
-- `HIVEMIND_KPI_MODEL` — model id for KPI generation (default `claude-sonnet-4-6`).
-- `HIVEMIND_KPI_LLM=disable` — opt out of LLM KPI gen.
-- `ANTHROPIC_API_KEY` — required for KPI gen; absence is a silent no-op (kpis = `[]`).
+- `HIVEMIND_RULES_TABLE` — table name (default `hivemind_rules`).
 - `HIVEMIND_CAPTURE=false` — full read-only mode. Skips placeholder + ensure DDL; renderer still injects.
 
-Full data model, identity contract, per-agent injection status, auto-extract pipeline, KPI LLM details, and known v1 limitations: **[docs/RULES_TASKS_KPIS.md](docs/RULES_TASKS_KPIS.md)**.
+## Goals + KPIs
+
+Personal / team objectives + measurable targets live in the Deeplake virtual filesystem under `~/.deeplake/memory/goal/<owner>/<status>/<uuid>.md` and `~/.deeplake/memory/kpi/<goal_id>/<kpi-slug>.md`. Path encodes structure (owner, status, goal_id); the file body holds the human-readable description.
+
+```bash
+# CLI fallback for runtimes that can't route VFS writes (cursor/hermes/pi)
+hivemind goal add "ship the search bar"
+hivemind goal list [--all|--mine]
+hivemind goal done <goal_id>
+hivemind goal progress <goal_id> opened|in_progress|closed
+```
+
+For VFS-capable runtimes (claude-code/codex) the `hivemind-goals` skill creates and edits goals/KPIs directly via Bash heredoc against the VFS path — `mv` between `opened/`, `in_progress/`, and `closed/` is the canonical status transition. KPIs are manual files; the body format is documented in the skill (`target:`, `current:`, `unit:`).
 
 ## Architecture
 
