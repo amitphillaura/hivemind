@@ -275,3 +275,67 @@ jobs:
         # broken `files` array trips on the PR — never on a release run
         # where tokens are reachable.
         run: npm run pack:check
+
+  cross-node-install:
+    # Cross-Node-major install + build canary. Catches the class of bug
+    # where a native dep's prebuild ABI no longer matches a newer Node
+    # major and the fall-back compile fails — silently, because the
+    # offending package is now an optionalDependency. That exact pattern
+    # broke the post-merge Release run on PR #206 (tree-sitter@0.21 vs
+    # Node 24): the main `test` job above runs only on Node 22 where
+    # the prebuild matches, so the failure was invisible at PR time and
+    # only surfaced on `main` when release.yaml booted Node 24.12.
+    #
+    # This job runs the same install + build on every Node major the
+    # `engines` field admits, with HIVEMIND_STRICT_POSTINSTALL=1 so the
+    # ensure-tree-sitter.mjs heal turns "WARNING: bindings still
+    # unavailable" into a hard `exit 1` instead of swallowing it. The
+    # result: a Node-24-only install regression now fails this canary
+    # job at PR time with a clear error, not on the post-merge Release.
+    #
+    # `continue-on-error: true` keeps PRs unblocked while a known
+    # upstream Node-major break (e.g. the current tree-sitter@0.21 +
+    # Node 24 incompatibility) is being resolved. The signal is visible
+    # in the PR checks table as a yellow/red row. Once the underlying
+    # incompatibility is fixed (or matrix entries adjusted), flip this
+    # to `continue-on-error: false` to make the canary blocking.
+    name: Cross-Node install canary (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      # fail-fast: false so a failure on one Node major doesn't cancel
+      # the other — both signals are useful in the PR checks table.
+      fail-fast: false
+      matrix:
+        # Each major the `engines` field (">=22.0.0") admits. Bump this
+        # list when a new LTS lands (28, 30, …) or when 22 falls out of
+        # the support window. setup-node picks the latest available
+        # minor/patch for each major.
+        node-version: [22, 24]
+    env:
+      # Opt the heal into strict mode for our own CI runs only.
+      # Downstream consumers of @deeplake/hivemind never see this flag,
+      # so their install stays non-fatal.
+      HIVEMIND_STRICT_POSTINSTALL: "1"
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        # If the postinstall heal cannot make tree-sitter loadable under
+        # this Node major, HIVEMIND_STRICT_POSTINSTALL=1 makes ensure-
+        # tree-sitter.mjs exit 1 here, failing the job at the earliest
+        # possible step (instead of swallowing the warning and failing
+        # later in tsc with a confusing "Cannot find module" error).
+        run: npm install
+
+      - name: Build (typecheck + emit bundle artefacts)
+        # Second backstop: if the strict-postinstall path somehow doesn't
+        # catch a broken native dep, the tsc step downstream of it will,
+        # because `import Parser from 'tree-sitter'` (src/graph/extract/
+        # typescript.ts) needs the package resolvable at type-check time.
+        run: npm run build

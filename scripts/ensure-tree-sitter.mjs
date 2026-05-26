@@ -75,8 +75,17 @@ if (bindingsLoad()) {
   console.error('[ensure-tree-sitter] OK — bindings compiled from source and loadable.');
   process.exit(0);
 }
+
+// Strict mode: turn the warning into a hard failure. Opt-in via
+// HIVEMIND_STRICT_POSTINSTALL=1 — set by this repo's own CI workflows so a
+// heal failure surfaces as a red check on the PR instead of getting swallowed
+// and re-emerging downstream as `tsc: Cannot find module 'tree-sitter'`.
+// Default stays non-fatal so end-user consumers of @deeplake/hivemind never
+// get a hard install break — the runtime check at use-time is enough for them.
+const strict = process.env.HIVEMIND_STRICT_POSTINSTALL === '1';
 console.error(
   '[ensure-tree-sitter] WARNING: tree-sitter bindings still unavailable. ' +
-    'Install a C/C++ toolchain and re-run `npm run rebuild:native`. (non-fatal)',
+    'Install a C/C++ toolchain and re-run `npm run rebuild:native`.' +
+    (strict ? ' (strict mode — failing this install)' : ' (non-fatal)'),
 );
-process.exit(0);
+process.exit(strict ? 1 : 0);
