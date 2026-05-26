@@ -2,9 +2,12 @@
  * Open-goals SessionStart summary.
  *
  * Reads the user's open goals from the dedicated hivemind_goals
- * table (owner + status filter on indexed columns, no LIKE scan)
- * and produces a short one-line summary the primary banner appends
- * to its body.
+ * table via the shared `listOpenGoals` reader (canonical owner-form
+ * matching + version=MAX dedup) and produces a short one-line summary
+ * the primary banner appends to its body. Sharing that reader keeps
+ * the banner and the SessionStart context block in agreement — both
+ * count one row per goal_id and never leak another user's goals via a
+ * substring collision.
  *
  * Returns null when:
  *   - creds are missing
@@ -19,7 +22,7 @@
 
 import type { Credentials } from "../../commands/auth-creds.js";
 import { DeeplakeApi } from "../../deeplake-api.js";
-import { sqlIdent, sqlStr } from "../../utils/sql.js";
+import { listOpenGoals } from "../../hooks/shared/context-renderer.js";
 import { log as _log } from "../../utils/debug.js";
 
 const log = (msg: string) => _log("notifications-open-goals", msg);
@@ -49,44 +52,23 @@ export async function fetchOpenGoals(
       creds.workspaceId ?? "default",
       goalsTableName,
     );
-    const safe = sqlIdent(goalsTableName);
-    // Latest version per goal_id, filtered to current owner +
-    // non-closed status. The (goal_id, version) and (owner, status)
-    // indexes both apply, so this stays a cheap point lookup even
-    // on a large hivemind_goals table.
-    //
-    // We tolerate userName in either short ("emanuele.fenocchi") or
-    // full-email form ("emanuele.fenocchi@activeloop.ai") by using
-    // a LIKE substring match on the owner column. Different agents
-    // historically populated this field with one or the other; the
-    // skill instructs the agent to use whatever userName the
-    // credentials carry, but staleness in older rows is real.
-    const sql =
-      // One row per goal_id (UPDATE-or-INSERT model), so a direct
-      // WHERE on owner+status is the cheap and correct path.
-      `SELECT goal_id, owner, status, content FROM "${safe}" ` +
-      `WHERE owner LIKE '%${sqlStr(creds.userName)}%' ` +
-      `  AND status IN ('opened', 'in_progress') ` +
-      `ORDER BY created_at DESC LIMIT 25`;
-    const rows = (await api.query(sql)) as Array<{
-      goal_id?: string;
-      owner?: string;
-      status?: string;
-      content?: string;
-    }>;
-    if (!Array.isArray(rows) || rows.length === 0) return null;
+    // Reuse the canonical goal reader: it matches the owner by exact
+    // full form, exact short form, and `short@%` alias (never a
+    // `'%user%'` substring scan, which collides — e.g. 'ali' matching
+    // 'malice@…') and keeps only the latest version per goal_id, so
+    // multiple stored versions of one goal count exactly once.
+    const rows = await listOpenGoals(
+      sql => api.query(sql) as Promise<Array<Record<string, unknown>>>,
+      goalsTableName,
+      creds.userName,
+      { limit: 25 },
+    );
+    if (rows.length === 0) return null;
 
     const goals: Array<{ label: string }> = [];
     for (const r of rows) {
-      const owner = String(r.owner ?? "");
-      const content = String(r.content ?? "");
-      if (!owner || !content) continue;
-      // Bi-directional substring match — same userName variant
-      // problem as the previous LIKE narrowing did at the SQL
-      // layer. Belt-and-braces guard for older rows.
-      const u = creds.userName;
-      if (owner !== u && !owner.includes(u) && !u.includes(owner)) continue;
-      goals.push({ label: firstLine(content) });
+      if (!r.content) continue;
+      goals.push({ label: firstLine(r.content) });
     }
     if (goals.length === 0) return null;
     return {

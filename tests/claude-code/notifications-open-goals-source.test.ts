@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * `query` method) and capture the exact SQL the banner caused, so any
  * regression in:
  *   - SQL injection escaping of `creds.userName`
- *   - the owner-LIKE matching that tolerates short vs full-email forms
+ *   - the canonical owner-form matching that tolerates short vs
+ *     full-email forms without admitting substring collisions
  *   - the status filter (must not surface closed goals)
  *   - the limit (banner is bounded — never lets a flood of goals stretch)
  * fails fast.
@@ -72,26 +73,30 @@ describe("fetchOpenGoals — auth gating", () => {
 // ── SQL shape ───────────────────────────────────────────────────────────────
 
 describe("fetchOpenGoals — SQL shape", () => {
-  it("issues a single SELECT scoped to current owner with LIKE + non-closed status filter + limit 25", async () => {
+  it("issues a single SELECT scoped to current owner with canonical-form match + non-closed status filter + version dedup + limit 25", async () => {
     queryMock.mockResolvedValue([]);
     await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals_test");
     expect(queryMock).toHaveBeenCalledTimes(1);
     const sql = queryMock.mock.calls[0][0] as string;
     expect(sql).toMatch(/^SELECT goal_id, owner, status, content FROM "hivemind_goals_test"/);
-    // owner LIKE is intentional — tolerates short vs full-email forms
-    expect(sql).toContain(`WHERE owner LIKE '%alice@activeloop.ai%'`);
+    // Canonical owner forms (exact full / exact short / `short@%` alias)
+    // instead of a `'%user%'` substring scan, which collides across users.
+    expect(sql).toContain(`(owner = 'alice@activeloop.ai' OR owner = 'alice' OR owner LIKE 'alice@%')`);
+    expect(sql).not.toContain(`LIKE '%alice`);
     expect(sql).toContain(`status IN ('opened', 'in_progress')`);
     // 'closed' status must never show up in the banner — that would
     // surface user's already-done work as if it were still open.
     expect(sql).not.toMatch(/closed/);
-    expect(sql).toContain("ORDER BY created_at DESC LIMIT 25");
+    // One row per goal_id — multiple stored versions count once.
+    expect(sql).toContain("version = (SELECT MAX(version)");
+    expect(sql).toContain("LIMIT 25");
   });
 
   it("escapes single quotes in userName (SQL injection guard)", async () => {
     queryMock.mockResolvedValue([]);
     await fetchOpenGoals({ ...BASE_CREDS, userName: "O'Brien" } as any, "hivemind_goals");
     const sql = queryMock.mock.calls[0][0] as string;
-    expect(sql).toContain(`'%O''Brien%'`);
+    expect(sql).toContain(`owner = 'O''Brien'`);
   });
 
   it("refuses to issue a query when goalsTableName is not a valid SQL identifier", async () => {
@@ -133,10 +138,10 @@ describe("fetchOpenGoals — result mapping", () => {
     expect(summary!.sample).toEqual(["Ship search", "Land memory", "Onboard team"]);
   });
 
-  it("filters out rows where owner doesn't substring-match userName (defense-in-depth past the LIKE)", async () => {
+  it("filters out rows whose owner isn't a canonical form of userName (defense-in-depth past the SQL gate)", async () => {
     queryMock.mockResolvedValue([
       { goal_id: "g1", owner: "alice@activeloop.ai", status: "opened", content: "mine" },
-      // A stray row that the LIKE allowed through but logically isn't this user
+      // A stray row that slipped past the SQL gate but logically isn't this user
       { goal_id: "g2", owner: "bob@activeloop.ai",   status: "opened", content: "his" },
     ]);
     const summary = await fetchOpenGoals(BASE_CREDS as any, "hivemind_goals");
