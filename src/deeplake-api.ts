@@ -54,6 +54,20 @@ function traceSql(msg: string): void {
 // queue.ts's sameDedupKey check.
 let _signalledBalanceExhausted = false;
 
+// Process-local once-only flag for the "approaching empty" warning.
+// Symmetrical with _signalledBalanceExhausted — see maybeSignalLowBalance.
+let _signalledLowBalance = false;
+
+// Mirror of the backend's billing.LowBalanceThresholdCents. Hardcoded
+// rather than fetched because (a) the threshold rarely changes, (b)
+// fetching it would mean a round-trip just to render a banner, and (c)
+// the backend ALSO sets the header value only when balance < threshold —
+// so the client never actually decides; it just renders what the header
+// hints at. Keep this value in sync with internal/billing/low_balance.go
+// if the backend constant ever moves.
+const LOW_BALANCE_THRESHOLD_CENTS = 200;
+const BALANCE_HEADER = "X-Activeloop-Balance-Cents";
+
 /**
  * If the response is the server's "out of credits" 402
  * (`{"balance_cents":0,"error":"insufficient balance, please top up"}`),
@@ -89,6 +103,48 @@ function maybeSignalBalanceExhausted(status: number, bodyText: string): void {
     dedupKey: { reason: "balance-zero" },
   }).catch((e: unknown) => {
     log(`enqueue balance-exhausted failed: ${e instanceof Error ? e.message : String(e)}`);
+  });
+}
+
+/**
+ * Read the backend's `X-Activeloop-Balance-Cents` response header and, if
+ * the balance is below the warning threshold, enqueue a one-shot
+ * mid-session banner pointing the user at the billing page. Mirrors the
+ * 402-driven `maybeSignalBalanceExhausted` path but fires while requests
+ * still SUCCEED — the goal is to give the user a chance to top up before
+ * the hard 402 wall kicks in.
+ *
+ * Once-only semantics:
+ *  - Process-local `_signalledLowBalance` collapses repeated calls within
+ *    one hivemind process to a single enqueue.
+ *  - `transient: true` means the drain doesn't persist to `state.shown`,
+ *    so the next session that still sees a low-balance header re-fires
+ *    the banner — natural client-side rearm without explicit signalling.
+ *  - When the backend's `MaybeRearm` path dismisses the notification row
+ *    after a top-up, subsequent requests stop carrying the low-balance
+ *    header (because balance is now ≥ threshold), so this function no-ops.
+ */
+function maybeSignalLowBalance(resp: Response): void {
+  if (_signalledLowBalance) return;
+  const raw = resp.headers.get(BALANCE_HEADER);
+  if (!raw) return;
+  const balance = Number.parseInt(raw, 10);
+  if (!Number.isFinite(balance)) return;
+  if (balance >= LOW_BALANCE_THRESHOLD_CENTS) return;
+  // Suppress the soft warning when the user is already at hard zero — the
+  // 402-driven exhausted banner is louder and more accurate.
+  if (balance <= 0) return;
+  _signalledLowBalance = true;
+  log(`balance below threshold (${balance}¢) — enqueuing low-balance banner`);
+  enqueueNotification({
+    id: "low-balance-warning",
+    severity: "warn",
+    transient: true,
+    title: "Hivemind balance is running low — top up before it runs out",
+    body: `Only $${(balance / 100).toFixed(2)} of prepaid balance remains. Top up at ${billingUrl()} to avoid interruption when requests start failing.`,
+    dedupKey: { reason: "low-balance" },
+  }).catch((e: unknown) => {
+    log(`enqueue low-balance failed: ${e instanceof Error ? e.message : String(e)}`);
   });
 }
 
@@ -257,6 +313,11 @@ export class DeeplakeApi {
         }
         throw lastError;
       }
+      // Mid-session low-balance signal: fire on both success and 402
+      // paths so users get warned BEFORE their balance hits zero. The
+      // function is process-local-deduped, so it's cheap to call on every
+      // response.
+      maybeSignalLowBalance(resp);
       if (resp.ok) {
         const raw = await resp.json() as { columns?: string[]; rows?: unknown[][]; row_count?: number } | null;
         if (!raw?.rows || !raw?.columns) return [];
@@ -439,6 +500,7 @@ export class DeeplakeApi {
             ...deeplakeClientHeader(),
           },
         });
+        maybeSignalLowBalance(resp);
         if (resp.ok) {
           const data = await resp.json() as { tables?: { table_name: string }[] };
           return {
@@ -671,5 +733,6 @@ export class DeeplakeApi {
 /** Reset module-local flags so tests start clean. Not for production use. */
 export function _resetSdkStateForTesting(): void {
   _signalledBalanceExhausted = false;
+  _signalledLowBalance = false;
 }
 
