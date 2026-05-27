@@ -279,6 +279,8 @@ This plugin captures session activity and stores it in your Deeplake workspace:
 | `HIVEMIND_SESSIONS_TABLE` | `sessions`                | SQL table for per-event session capture    |
 | `HIVEMIND_MEMORY_PATH`    | `~/.deeplake/memory`      | Path that triggers interception            |
 | `HIVEMIND_CAPTURE`        | `true`                    | Set to `false` to disable capture          |
+| `HIVEMIND_CAPTURE_ONLY_CLI` | —                       | Set to `true` to capture only interactive CLI sessions. Sessions spawned by the Claude Agent SDK (Python/TypeScript) are skipped — their `CLAUDE_CODE_ENTRYPOINT` is `sdk-py` / `sdk-ts`, so they fail the substring check for `cli`. |
+| `HIVEMIND_SKILLIFY_EVERY_N_TURNS` | `20`              | Assistant turns between auto skill-mining attempts. Lower = more frequent mining (cheaper sessions, noisier output); higher = fewer attempts on longer histories. |
 | `HIVEMIND_EMBEDDINGS`     | `true`                    | Set to `false` to force lexical-only mode  |
 | `HIVEMIND_DEBUG`          | —                         | Set to `1` for verbose hook debug logs     |
 

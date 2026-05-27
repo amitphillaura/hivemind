@@ -31,6 +31,7 @@ import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { getInstalledVersion } from "../utils/version-check.js";
+import { entrypointPassesOnlyCliGate } from "./shared/capture-gate.js";
 const log = (msg: string) => _log("capture", msg);
 
 function resolveEmbedDaemonPath(): string {
@@ -74,6 +75,7 @@ const CAPTURE = process.env.HIVEMIND_CAPTURE !== "false";
 
 async function main(): Promise<void> {
   if (!CAPTURE) return;
+  if (!entrypointPassesOnlyCliGate()) return;
   const input = await readStdin<HookInput>();
   const config = loadConfig();
   if (!config) { log("no config"); return; }

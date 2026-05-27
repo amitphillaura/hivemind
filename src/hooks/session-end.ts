@@ -16,6 +16,7 @@ import { tryAcquireLock, releaseLock } from "./summary-state.js";
 import { forceSessionEndTrigger } from "../skillify/triggers.js";
 import { parseTranscript } from "../notifications/transcript-parser.js";
 import { appendUsageRecord } from "../notifications/usage-tracker.js";
+import { entrypointPassesOnlyCliGate } from "./shared/capture-gate.js";
 
 const log = (msg: string) => _log("session-end", msg);
 
@@ -51,6 +52,7 @@ function recordSessionUsage(transcriptPath: string | undefined, sessionId: strin
 async function main(): Promise<void> {
   if (process.env.HIVEMIND_WIKI_WORKER === "1") return;
   if (process.env.HIVEMIND_CAPTURE === "false") return;
+  if (!entrypointPassesOnlyCliGate()) return;
 
   const input = await readStdin<StopInput>();
   const sessionId = input.session_id;

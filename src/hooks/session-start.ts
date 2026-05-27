@@ -26,6 +26,7 @@ import { renderLocalMinedNote } from "../skillify/local-mined-banner.js";
 import { maybeAutoMineLocal } from "../skillify/spawn-mine-local-worker.js";
 import { graphContextLine } from "../graph/session-context.js";
 import { spawnGraphPullWorker } from "../graph/spawn-pull-worker.js";
+import { entrypointPassesOnlyCliGate } from "./shared/capture-gate.js";
 const log = (msg: string) => _log("session-start", msg);
 
 const __bundleDir = dirname(fileURLToPath(import.meta.url));
@@ -189,7 +190,7 @@ async function main(): Promise<void> {
   // under capture=false. The renderer is read-only and runs
   // regardless; the rules table it queries is lazy-created by the
   // CLI write path (`hivemind rules add`).
-  const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false";
+  const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false" && entrypointPassesOnlyCliGate();
   let rulesBlock = "";
   if (input.session_id && creds?.token) {
     try {
@@ -204,7 +205,10 @@ async function main(): Promise<void> {
           await createPlaceholder(api, table, input.session_id, input.cwd ?? "", config.userName, config.orgName, config.workspaceId, pluginVersion);
           log("placeholder created");
         } else {
-          log("placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)");
+          const reason = process.env.HIVEMIND_CAPTURE === "false"
+            ? "HIVEMIND_CAPTURE=false"
+            : "HIVEMIND_CAPTURE_ONLY_CLI gate";
+          log(`placeholder + schema ensure skipped (${reason})`);
         }
         // Renderer is read-only and runs regardless of captureEnabled.
         // It absorbs its own errors (missing table, network, etc.)
