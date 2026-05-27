@@ -20,12 +20,13 @@ import { tmpdir } from "node:os";
 // internal SQL-wrapping lambda) is uncoverable in tests, dropping the file's
 // function-coverage below the configured 90% threshold.
 const apiQueryMock = vi.fn();
+const apiKnownTablesMock = vi.fn();
 vi.mock("../../src/deeplake-api.js", () => ({
   // Class form is required because the source code uses `new DeeplakeApi(...)`.
   // `vi.fn().mockImplementation(arrow)` won't work as a constructor.
   DeeplakeApi: class {
     query(sql: string) { return apiQueryMock(sql); }
-    async knownTablesOrNull() { return null; }
+    knownTablesOrNull() { return apiKnownTablesMock(); }
   },
 }));
 
@@ -46,6 +47,7 @@ beforeEach(() => {
   process.env.HOME = tmpHome;
   delete process.env.HIVEMIND_AUTOPULL_DISABLED;
   apiQueryMock.mockReset();
+  apiKnownTablesMock.mockReset().mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -249,5 +251,22 @@ describe("autoPullSkills — no-queryFn path (uses DeeplakeApi)", () => {
     expect(apiQueryMock).toHaveBeenCalledTimes(1);
     expect(apiQueryMock.mock.calls[0][0]).toContain(`FROM "skills"`);
     expect(existsSync(join(tmpHome, ".claude/skills/shared-skill--alice/SKILL.md"))).toBe(true);
+  });
+
+  it("a hanging table-discovery (knownTablesOrNull) is bounded by the timeout", async () => {
+    // Regression: table discovery must run INSIDE the withTimeout budget, not
+    // before it — otherwise a slow GET /tables blocks SessionStart past
+    // timeoutMs. knownTablesOrNull never resolves here.
+    apiKnownTablesMock.mockReturnValue(new Promise(() => { /* never */ }));
+    apiQueryMock.mockResolvedValue([sampleRow()]);
+    const loadConfigFn = () => makeConfig();
+    const start = Date.now();
+    const result = await autoPullSkills({
+      loadConfigFn, install: "project", cwd: tmpHome, timeoutMs: 100,
+    });
+    const elapsed = Date.now() - start;
+    expect(result).toEqual({ pulled: 0, skipped: true, reason: "error" });
+    expect(elapsed).toBeLessThan(1000); // bounded by the 100ms timeout
+    expect(apiQueryMock).not.toHaveBeenCalled(); // never got past discovery
   });
 });

@@ -89,11 +89,14 @@ export async function autoPullSkills(deps: AutoPullDeps = {}): Promise<AutoPullR
 
   // Build the query function. Tests inject one; real callers get the API client.
   let query: QueryFn;
-  // Existence predicate from a trusted table list — lets runPull skip the
-  // SELECT (and the server-side 42P01) when `skills` doesn't exist yet on a
-  // fresh workspace. Undefined when the list can't be fetched or a test
-  // injects its own query, in which case runPull falls back to its catch.
-  let tableExists: ((name: string) => boolean) | undefined;
+  // Deferred table-existence discovery — resolved INSIDE the timeout budget
+  // below, NOT here, so a slow `GET /tables` can't make SessionStart block
+  // past timeoutMs. Resolves to a predicate that lets runPull skip the SELECT
+  // (and the server-side 42P01) when `skills` doesn't exist yet on a fresh
+  // workspace, or undefined when the list can't be fetched / a test injects
+  // its own query (runPull then falls back to its isMissingTableError catch).
+  let discoverTableExists: () => Promise<((name: string) => boolean) | undefined> =
+    async () => undefined;
   if (deps.queryFn) {
     query = deps.queryFn;
   } else {
@@ -105,8 +108,10 @@ export async function autoPullSkills(deps: AutoPullDeps = {}): Promise<AutoPullR
       config.skillsTableName,
     );
     query = (sql: string) => api.query(sql) as Promise<Record<string, unknown>[]>;
-    const known = await api.knownTablesOrNull();
-    if (known) tableExists = (name: string) => known.includes(name);
+    discoverTableExists = async () => {
+      const known = await api.knownTablesOrNull();
+      return known ? (name: string) => known.includes(name) : undefined;
+    };
   }
 
   const install = deps.install ?? "global";
@@ -114,16 +119,21 @@ export async function autoPullSkills(deps: AutoPullDeps = {}): Promise<AutoPullR
 
   try {
     const summary = await withTimeout(
-      runPull({
-        query,
-        tableName: config.skillsTableName,
-        install,
-        cwd: install === "project" ? (deps.cwd ?? process.cwd()) : undefined,
-        users: [],
-        dryRun: false,
-        force: false,
-        tableExists,
-      }),
+      // Table discovery + pull share one budget: if `GET /tables` hangs the
+      // whole thing times out and we degrade, instead of blocking startup.
+      (async () => {
+        const tableExists = await discoverTableExists();
+        return runPull({
+          query,
+          tableName: config.skillsTableName,
+          install,
+          cwd: install === "project" ? (deps.cwd ?? process.cwd()) : undefined,
+          users: [],
+          dryRun: false,
+          force: false,
+          tableExists,
+        });
+      })(),
       timeoutMs,
     );
     log(`pulled scanned=${summary.scanned} wrote=${summary.wrote} skipped=${summary.skipped}`);
