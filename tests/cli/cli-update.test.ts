@@ -85,7 +85,7 @@ describe("runUpdate — branches", () => {
     });
     expect(code).toBe(0);
     expect(stdoutText()).toContain("Update available: 1.2.3 → 1.3.0");
-    expect(stdoutText()).toContain("(dry-run) Would run: npm install -g @deeplake/hivemind@latest");
+    expect(stdoutText()).toContain("(dry-run) Would run: npm install -g @deeplake/hivemind@1.3.0");
     expect(stdoutText()).toContain("(dry-run) Would re-run: hivemind install --skip-auth");
     expect(spawn).not.toHaveBeenCalled();
   });
@@ -147,7 +147,7 @@ describe("runUpdate — branches", () => {
     });
     expect(code).toBe(0);
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(spawn.mock.calls[0]).toEqual(["npm", ["install", "-g", "@deeplake/hivemind@latest"]]);
+    expect(spawn.mock.calls[0]).toEqual(["npm", ["install", "-g", "@deeplake/hivemind@1.3.0"]]);
     expect(spawn.mock.calls[1]).toEqual(["hivemind", ["install", "--skip-auth"]]);
     expect(stdoutText()).toContain("Updated to 1.3.0");
   });
@@ -542,7 +542,7 @@ describe("runUpdate — concurrency lock", () => {
     });
     expect(code).toBe(0);
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(spawn.mock.calls[0]).toEqual(["npm", ["install", "-g", "@deeplake/hivemind@latest"]]);
+    expect(spawn.mock.calls[0]).toEqual(["npm", ["install", "-g", "@deeplake/hivemind@1.3.0"]]);
     expect(spawn.mock.calls[1]).toEqual(["hivemind", ["install", "--skip-auth"]]);
     // Released on success.
     expect(existsSync(LOCK)).toBe(false);
