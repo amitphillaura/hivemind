@@ -249,9 +249,10 @@ jobs:
           cache: "npm"
 
       - name: Load secrets from 1Password
+        id: op_secrets
         uses: 1Password/load-secrets-action@v4.0.0
         with:
-          export-env: true
+          export-env: false
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           CLAWHUB_TOKEN: "op://GitHub Actions/hivemind/CLAWHUB_TOKEN"
@@ -319,8 +320,11 @@ jobs:
       - name: Authenticate ClawHub CLI
         # `clawhub login --token` writes a credential file inside the
         # runner's $HOME, which is ephemeral and discarded when the job
-        # ends. The token only ever appears as ${{ secrets.* }}, which
-        # GitHub auto-masks in logs.
+        # ends. The token is scoped to this step only (not exported to all
+        # steps via export-env) to limit the blast radius if any build step
+        # is compromised.
+        env:
+          CLAWHUB_TOKEN: ${{ steps.op_secrets.outputs.CLAWHUB_TOKEN }}
         run: clawhub login --token "$CLAWHUB_TOKEN" --no-browser
 
       - name: Publish openclaw bundle to ClawHub
