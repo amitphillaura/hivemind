@@ -25,9 +25,9 @@ function hookCmd(bundleFile: string, timeout: number, matcher?: string): Record<
 function buildHooksJson(): Record<string, unknown> {
   return {
     hooks: {
-      SessionStart: [hookCmd("session-start.js", 120)],
+      SessionStart: [hookCmd("session-start.js", 10, "startup|resume")],
       UserPromptSubmit: [hookCmd("capture.js", 10)],
-      PreToolUse: [hookCmd("pre-tool-use.js", 15, "Bash")],
+      PreToolUse: [hookCmd("pre-tool-use.js", 10, "Bash")],
       PostToolUse: [hookCmd("capture.js", 15)],
       Stop: [hookCmd("stop.js", 30)],
     },

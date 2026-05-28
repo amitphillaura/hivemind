@@ -104,6 +104,32 @@ function cleanup(): void {
   }
 }
 
+function tailText(text: string, maxChars = 240): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.length <= maxChars ? compact : `…${compact.slice(-maxChars)}`;
+}
+
+function formatExecFailure(error: any): string {
+  const parts: string[] = [];
+  if (error?.code) parts.push(`code=${error.code}`);
+  if (error?.status !== undefined && error?.status !== null) parts.push(`status=${error.status}`);
+  if (error?.signal) parts.push(`signal=${error.signal}`);
+  if (error?.message) parts.push(`message=${tailText(String(error.message))}`);
+  const stderr = Buffer.isBuffer(error?.stderr)
+    ? error.stderr.toString("utf-8")
+    : typeof error?.stderr === "string"
+      ? error.stderr
+      : "";
+  if (stderr.trim()) parts.push(`stderr=${tailText(stderr)}`);
+  const stdout = Buffer.isBuffer(error?.stdout)
+    ? error.stdout.toString("utf-8")
+    : typeof error?.stdout === "string"
+      ? error.stdout
+      : "";
+  if (stdout.trim()) parts.push(`stdout=${tailText(stdout)}`);
+  return parts.length > 0 ? parts.join(", ") : "unknown failure";
+}
+
 async function main(): Promise<void> {
   try {
     // 1. Fetch session events from sessions table
@@ -161,6 +187,8 @@ async function main(): Promise<void> {
       .replace(/__JSONL_SERVER_PATH__/g, jsonlServerPath);
 
     wlog("running codex exec");
+    let execSucceeded = false;
+    const summaryBeforeExec = existsSync(tmpSummary) ? readFileSync(tmpSummary, "utf-8") : null;
     try {
       execFileSync(cfg.codexBin, [
         "exec",
@@ -171,14 +199,21 @@ async function main(): Promise<void> {
         timeout: 120_000,
         env: { ...process.env, HIVEMIND_WIKI_WORKER: "1", HIVEMIND_CAPTURE: "false" },
       });
+      execSucceeded = true;
       wlog("codex exec exited (code 0)");
     } catch (e: any) {
-      wlog(`codex exec failed: ${e.status ?? e.message}`);
+      const detail = formatExecFailure(e);
+      wlog(`codex exec failed: ${detail}`);
     }
 
     // 4. Upload summary to memory table
     if (existsSync(tmpSummary)) {
       const text = readFileSync(tmpSummary, "utf-8");
+      const summaryChanged = summaryBeforeExec === null ? text.trim().length > 0 : text !== summaryBeforeExec;
+      if (!execSucceeded && !summaryChanged) {
+        wlog("codex exec failed without producing a new summary; skipping upload");
+        return;
+      }
       if (text.trim()) {
         const fname = `${cfg.sessionId}.md`;
         const vpath = `/summaries/${cfg.userName}/${fname}`;

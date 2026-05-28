@@ -93,8 +93,11 @@ describe("installCodex — happy path", () => {
     for (const event of Object.keys(hooks.hooks)) {
       expect(hooks.hooks[event]).toHaveLength(1);
     }
+    expect(hooks.hooks.SessionStart[0].matcher).toBe("startup|resume");
+    expect(hooks.hooks.SessionStart[0].hooks[0].timeout).toBe(10);
     // PreToolUse carries the Bash matcher.
     expect(hooks.hooks.PreToolUse[0].matcher).toBe("Bash");
+    expect(hooks.hooks.PreToolUse[0].hooks[0].timeout).toBe(10);
   });
 
   it("creates the agentskills symlink at ~/.agents/skills/hivemind-memory", async () => {
@@ -248,7 +251,7 @@ describe("installCodex — happy path", () => {
       join(tmpHome, ".codex", "hooks.json"),
       JSON.stringify({
         hooks: {
-          SessionStart: [{ hooks: [{ type: "command", command: foreignCmd, timeout: 120 }] }],
+          SessionStart: [{ matcher: "startup|resume", hooks: [{ type: "command", command: foreignCmd, timeout: 10 }] }],
         },
       }),
     );

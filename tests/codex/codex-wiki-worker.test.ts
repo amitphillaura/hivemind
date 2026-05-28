@@ -258,13 +258,17 @@ describe("codex wiki-worker — codex exec failure", () => {
     });
   });
 
-  it("logs status and skips upload when codex exec throws without producing a summary", async () => {
+  it("logs detailed failure and skips upload when codex exec throws without producing a summary", async () => {
     const err: any = new Error("codex crashed");
     err.status = 99;
+    err.signal = "SIGTERM";
+    err.stderr = Buffer.from("backend blew up");
     execFileSyncMock.mockImplementation(() => { throw err; });
     await runWorker();
     const log = readFileSync(join(hooksDir, "wiki.log"), "utf-8");
-    expect(log).toContain("codex exec failed: 99");
+    expect(log).toContain("codex exec failed: status=99");
+    expect(log).toContain("signal=SIGTERM");
+    expect(log).toContain("stderr=backend blew up");
     expect(log).toContain("no summary file generated");
     expect(uploadSummaryMock).not.toHaveBeenCalled();
     expect(releaseLockMock).toHaveBeenCalled();
@@ -274,7 +278,19 @@ describe("codex wiki-worker — codex exec failure", () => {
     execFileSyncMock.mockImplementation(() => { throw new Error("no status here"); });
     await runWorker();
     const log = readFileSync(join(hooksDir, "wiki.log"), "utf-8");
-    expect(log).toContain("codex exec failed: no status here");
+    expect(log).toContain("codex exec failed: message=no status here");
+  });
+
+  it("does not re-upload a stale existing summary after a failed regeneration", async () => {
+    fetchMock.mockImplementation(async (_url: string, init: any) => {
+      const sql = JSON.parse(init.body).query as string;
+      if (sql.startsWith("SELECT message")) return jsonResp({ columns: ["message", "creation_date"], rows: [["{}", "t"]] });
+      if (sql.startsWith("SELECT DISTINCT path")) return jsonResp({ columns: ["path"], rows: [["/x.jsonl"]] });
+      return jsonResp({ columns: ["summary"], rows: [["# Session X\n- **JSONL offset**: 7\n\n## What Happened\nprior"]] });
+    });
+    execFileSyncMock.mockImplementation(() => { throw new Error("timed out"); });
+    await runWorker();
+    expect(uploadSummaryMock).not.toHaveBeenCalled();
   });
 });
 
