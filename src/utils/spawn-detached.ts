@@ -55,6 +55,9 @@ export function spawnDetachedNodeWorker(
     const child = spawn(execPath, [workerPath, ...args], {
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
+      // Suppress the transient console window Windows would otherwise pop for
+      // the detached worker. No-op on POSIX.
+      windowsHide: true,
     });
     // ENOENT / EPERM arrive as an ASYNC 'error' event, never a sync throw.
     // Without this listener the event is unhandled and crashes the parent.

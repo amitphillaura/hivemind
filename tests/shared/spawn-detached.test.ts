@@ -57,6 +57,8 @@ describe("spawnDetachedNodeWorker", () => {
     expect(opts).toMatchObject({
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
+      // windowsHide suppresses the console-window flash on Windows (no-op on POSIX).
+      windowsHide: true,
     });
   });
 
