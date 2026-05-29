@@ -17,7 +17,7 @@
         "source": "git-subdir",
         "url": "https://github.com/activeloopai/hivemind.git",
         "path": "claude-code",
-        "sha": "92157e9b689a955c5b05da7a641223e4ef06fa13"
+        "sha": "1b089b2e268cffb7387c5366eef9272d89d3b6e3"
       },
       "homepage": "https://github.com/activeloopai/hivemind"
     }
