@@ -70,6 +70,7 @@ describe("fetchOrgStats — success path", () => {
     expect(got).toEqual({
       org:  { sessionsCount: 187, memoryRecallCount: 42000, memorySearchBytes: 119_000_000 },
       user: { sessionsCount: 22,  memoryRecallCount: 510,   memorySearchBytes: 800_000 },
+      balanceCents: null,
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
@@ -79,6 +80,17 @@ describe("fetchOrgStats — success path", () => {
     const cached = JSON.parse(readFileSync(cacheFile, "utf-8"));
     expect(cached.scopeKey).toContain("https://api.example.com");
     expect(cached.data.org.memoryRecallCount).toBe(42000);
+  });
+
+  it("reads balanceCents live from the X-Activeloop-Balance-Cents header", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ org: { sessions_count: 1 }, user: {} }),
+        { status: 200, headers: { "Content-Type": "application/json", "X-Activeloop-Balance-Cents": "113" } },
+      ),
+    );
+    const got = await fetchOrgStats({ token: "t", apiUrl: "https://api.example.com" } as any);
+    expect(got?.balanceCents).toBe(113);
   });
 
   it("coerces non-numeric / missing fields to 0 (defensive: server may roll out fields gradually)", async () => {
@@ -96,6 +108,7 @@ describe("fetchOrgStats — success path", () => {
     expect(got).toEqual({
       org:  { sessionsCount: 100, memoryRecallCount: 0, memorySearchBytes: 0 },
       user: { sessionsCount: 0,   memoryRecallCount: 0, memorySearchBytes: 0 },
+      balanceCents: null,
     });
   });
 });

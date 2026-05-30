@@ -177,14 +177,15 @@ export async function pickPrimaryBanner(
     log(`session brief threw: ${(e as Error).message}`);
   }
 
+  const balanceCents = orgStats?.balanceCents ?? null;
   if (tokensSaved > MEANINGFUL_SAVINGS_TOKENS) {
     const banner = orgStats != null
       ? renderOnlineSavings(sessionId, orgStats, creds.userName, openGoals)
       : renderOfflineSavings(sessionId, creds.userName, openGoals);
-    return prependBrief(banner, prefix);
+    return appendBalance(prependBrief(banner, prefix), balanceCents, creds);
   }
   const welcome = renderWelcome(sessionId, creds, openGoals, firstRun);
-  return prependBrief(welcome, prefix);
+  return appendBalance(prependBrief(welcome, prefix), balanceCents, creds);
 }
 
 /**
@@ -194,6 +195,39 @@ export async function pickPrimaryBanner(
 function prependBrief(n: Notification, brief: string | null): Notification {
   if (!brief) return n;
   return { ...n, body: `${brief}\n\n${n.body}` };
+}
+
+/** Below this prepaid balance (cents) we warn the user. Mirrors the SDK's
+ *  LOW_BALANCE_THRESHOLD_CENTS — kept here so the live SessionStart check
+ *  and the legacy query-path check agree on the boundary. */
+const LOW_BALANCE_THRESHOLD_CENTS = 200;
+
+/** Org-scoped billing page, falling back to the bare host when creds lack
+ *  the org/workspace names. Mirrors deeplake-api.ts billingUrl(). */
+function billingUrl(creds: Credentials): string {
+  if (creds.orgName && creds.workspaceId) {
+    return `https://deeplake.ai/${encodeURIComponent(creds.orgName)}/workspace/${encodeURIComponent(creds.workspaceId)}/billing`;
+  }
+  return "https://deeplake.ai";
+}
+
+/**
+ * Merge a live low-balance notice into the banner body, detected THIS
+ * SessionStart from the `X-Activeloop-Balance-Cents` header (see org-stats).
+ * Replaces the lagging, separately-queued low-balance notice so the warning
+ * shows the moment we see it, in the same banner the user is already reading.
+ *
+ * Scope: the soft warning only (0 < balance < threshold). Hard exhaustion
+ * (balance ≤ 0) stays on the 402-driven `balance-exhausted` queue path in
+ * deeplake-api — surfacing it here too would double up. No-op when balance
+ * is unknown or healthy. The banner is userVisibleOnly, so this never
+ * reaches the model.
+ */
+function appendBalance(n: Notification, balanceCents: number | null, creds: Credentials): Notification {
+  if (balanceCents === null || balanceCents <= 0 || balanceCents >= LOW_BALANCE_THRESHOLD_CENTS) return n;
+  const line = `⚠️ Hivemind balance low — only $${(balanceCents / 100).toFixed(2)} of prepaid credit left. `
+    + `Top up at ${billingUrl(creds)} before requests start failing.`;
+  return { ...n, body: `${n.body}\n\n${line}` };
 }
 
 /** "🐝 Welcome back, kamo.aghbalyan / Connected to org mind (workspace default)."

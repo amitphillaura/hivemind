@@ -49,6 +49,21 @@ export interface OrgStatsScope {
 export interface OrgStats {
   org: OrgStatsScope;
   user: OrgStatsScope;
+  /** Org prepaid balance in cents, read live from the
+   *  `X-Activeloop-Balance-Cents` response header. `null` when the backend
+   *  didn't send it. Lets the SessionStart banner surface a low-balance
+   *  notice the moment it's detected, not a session later via the queue. */
+  balanceCents: number | null;
+}
+
+/** Response header carrying the org's current prepaid balance, in cents. */
+const BALANCE_HEADER = "X-Activeloop-Balance-Cents";
+
+function parseBalanceHeader(resp: Response): number | null {
+  const raw = resp.headers?.get?.(BALANCE_HEADER);
+  if (!raw || !/^-?\d+$/.test(raw.trim())) return null;
+  const n = Number(raw.trim());
+  return Number.isFinite(n) ? n : null;
 }
 
 interface ServerScope {
@@ -179,6 +194,7 @@ export async function fetchOrgStats(creds: Credentials | null): Promise<OrgStats
     const data: OrgStats = {
       org: scopeFromServer(body.org),
       user: scopeFromServer(body.user),
+      balanceCents: parseBalanceHeader(resp),
     };
     writeCache(scopeKey, data);
     log(`fetched org stats from ${apiUrl}`);
