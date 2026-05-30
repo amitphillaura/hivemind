@@ -175,10 +175,6 @@ function stripDanglingOpener(s: string): string {
   return out.replace(/[\s,;:(]+$/, "").trim();
 }
 
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
-}
-
 function deriveProjectLabel(projDirName: string, cwdSeen: string | undefined): string {
   if (cwdSeen) {
     const seg = cwdSeen.split(/[/\\]/).filter(Boolean);
@@ -350,67 +346,14 @@ function pickSignal(sessions: SessionMeta[]): Signal {
 function renderBrief(sessions: SessionMeta[], signal: Signal, authed: boolean): string | null {
   if (sessions.length === 0 || signal.kind === "quiet") return null;
 
-  const earliest = Math.min(...sessions.map((s) => s.firstTs.getTime()));
-  const days = Math.round((Date.now() - earliest) / 86_400_000);
-  const windowStr = days <= 1 ? "your last day" : `your last ${days} days`;
-
-  const projCount = new Map<string, number>();
-  for (const s of sessions) projCount.set(s.project, (projCount.get(s.project) ?? 0) + 1);
-  const top = [...projCount.entries()].sort((a, b) => b[1] - a[1])[0];
-  // Suppress "mostly on X" in S1 when the observation is itself about
-  // project concentration (redundant).
-  const showTop = top && top[1] / sessions.length >= 0.4 && signal.kind !== "volume";
-  const topPart = showTop ? `, mostly on ${top![0]}` : "";
-
-  const parts: string[] = [];
-
-  // S1: window grounding. No greeting — the banner title already greets.
-  parts.push(`Across ${sessions.length} sessions in ${windowStr}${topPart}, one thing stood out.`);
-  // S2: the observation.
-  parts.push(`${capitalize(signal.description)}.`);
-  // S3: the "that's the gap I close" beat — only for the recall story.
-  if (signal.kind === "recall") parts.push(`That's exactly the gap I close.`);
-  // S4: the action.
-  parts.push(actionLine(signal, authed));
-
-  while (parts.length > 4) parts.pop();
-  return parts.join(" ");
-}
-
-/**
- * The closing line — a promise of what happens NEXT, as a plain statement,
- * not a question. Every variant maps to behaviour that actually ships
- * (resume-brief.ts surfaces "where you left off" next session); we never
- * promise the unbuilt living-todo.
- *
- * Branches on sign-in:
- *   • anonymous → the action IS signing in (that's the conversion). State
- *     the value, make sign-in the way to unlock it. The banner appends the
- *     `→ hivemind login` line.
- *   • signed in → the promise is already armed; no login ask.
- */
-function actionLine(signal: Signal, authed: boolean): string {
-  const proj = signal.project ?? "your work";
-  if (!authed) {
-    switch (signal.kind) {
-      case "recall":
-        return `Sign in and I'll keep that thread, so your next session on ${proj} starts where you left off.`;
-      case "abandoned":
-        return `Sign in and I'll hold onto it — next time you're in ${proj} it'll be waiting at the top.`;
-      default:
-        return `Sign in and I'll remember your sessions, so you can pick up where you left off.`;
-    }
-  }
-  switch (signal.kind) {
-    case "recall":
-      return `From now on I'll keep that thread, so your next session on ${proj} starts where you left off.`;
-    case "abandoned":
-      return `I'll hold onto it — next time you're in ${proj}, it'll be waiting at the top.`;
-    case "volume":
-      return `I'll track ${proj} as you go, so each session picks up with what changed.`;
-    default:
-      return `From now on I'll remember your sessions so you can pick up where you left off.`;
-  }
+  // Generic, privacy-safe copy. The mined signal is used only as a GATE
+  // (is there enough recent local history to warrant a brief?) — we do NOT
+  // quote the user's private sessions back at them. A verbatim snippet on
+  // first contact reads as surveillance; "I found context" conveys the
+  // value without it.
+  return authed
+    ? "I found context from your recent sessions — from now on I'll keep it, so your next session picks up where you left off."
+    : "I found context from your recent sessions. Sign in to save it, so future sessions start with what you've already learned.";
 }
 
 // ─── Public entry point ────────────────────────────────────────────────
