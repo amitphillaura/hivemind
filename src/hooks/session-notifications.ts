@@ -14,20 +14,19 @@
 
 import { loadCredentials } from "../commands/auth.js";
 import { readStdin } from "../utils/stdin.js";
-import { drainSessionStart, registerRule } from "../notifications/index.js";
-import { localMinedRule } from "../notifications/rules/local-mined.js";
-import { countLocalManifestEntries, getLatestInsightEntry } from "../skillify/local-manifest.js";
+import { drainSessionStart } from "../notifications/index.js";
 import { log as _log } from "../utils/debug.js";
 
 const log = (msg: string) => _log("session-notifications", msg);
 
-// Register the rule set. Welcome is no longer a rule — it's the default
-// fallback rendered by pickPrimaryBanner inside drainSessionStart (see
-// src/notifications/sources/primary-banner.ts for the priority logic).
-// localMinedRule stays as a rule because it's additive to the primary
-// banner (fires alongside it, not in its slot — different concept than
-// the welcome→savings priority).
-registerRule(localMinedRule);
+// No session_start rules are registered. Welcome/savings and the anonymous
+// signup brief are all rendered by pickPrimaryBanner inside
+// drainSessionStart (see sources/primary-banner.ts). localMinedRule used to
+// fire here as an additional anonymous "N skills mined → login" nudge, but
+// the cold-start signup brief now owns the anonymous conversion slot — two
+// login nudges in one session was noise. The rule + its unit tests remain
+// in the tree, just unregistered, so it can be revived if we want a
+// separate skill-sharing surface later.
 
 interface SessionStartInput {
   session_id?: string;
@@ -52,19 +51,7 @@ async function main(): Promise<void> {
   const sessionId = rawSessionId.length > 0 ? rawSessionId : undefined;
 
   const creds = loadCredentials();
-  // Read the local-mined count + latest insight entry here (rules stay
-  // pure / IO-free). countLocalManifestEntries returns 0 when the manifest
-  // is missing or malformed — we coerce to null in that case so the rule
-  // can distinguish "no mining run yet" from "ran, found 0".
-  // getLatestInsightEntry returns null cleanly when no insight-bearing
-  // entry exists, so the rule's concrete-insight branch stays gated.
-  let localSkillsCount: number | null = null;
-  let latestInsightEntry: ReturnType<typeof getLatestInsightEntry> = null;
-  try { localSkillsCount = countLocalManifestEntries(); }
-  catch { /* keep null */ }
-  try { latestInsightEntry = getLatestInsightEntry(); }
-  catch { /* keep null */ }
-  await drainSessionStart({ agent: "claude-code", creds, sessionId, localSkillsCount, latestInsightEntry });
+  await drainSessionStart({ agent: "claude-code", creds, sessionId });
 }
 
 main().catch((e) => { log(`fatal: ${e?.message ?? String(e)}`); process.exit(0); });

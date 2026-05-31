@@ -291,7 +291,7 @@ async function main(): Promise<void> {
 
   const baseContext = creds?.token
     ? `${resolvedContext}\n\nLogged in to Deeplake as org: ${creds.orgName ?? creds.orgId} (workspace: ${creds.workspaceId ?? "default"})${updateNotice}`
-    : `${resolvedContext}\n\n⚠️ Not logged in to Deeplake. Memory search will not work. Ask the user to run /hivemind:login to authenticate.${localMinedNote}${updateNotice}`;
+    : `${resolvedContext}\n\nNot logged in to Deeplake; memory search is unavailable this session.${localMinedNote}${updateNotice}`;
   // Append the rules block when there's something to show, then
   // append the graph note (single line, may be empty). The renderer
   // returns "" on empty state OR failure, so the ternary stays terse.

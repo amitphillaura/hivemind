@@ -36,6 +36,8 @@ import type { Credentials } from "../../commands/auth-creds.js";
 import type { Notification } from "../types.js";
 import { fetchOrgStats, type OrgStats } from "./org-stats.js";
 import { fetchOpenGoals, formatOpenGoalsLine, type OpenGoalsSummary } from "./open-goals.js";
+import { pickColdStartBrief } from "./cold-start-brief.js";
+import { pickResumeBrief } from "./resume-brief.js";
 import { countUserGeneratedSkills, readUsageRecords, sumMetric } from "../usage-tracker.js";
 import { loadConfig } from "../../config.js";
 import { log as _log } from "../../utils/debug.js";
@@ -113,8 +115,23 @@ export async function pickPrimaryBanner(
     return null;
   }
   if (!creds?.token) {
-    // Not logged in — no welcome, no savings.
-    return null;
+    // Anonymous — no welcome/savings, but THIS is the install→sign-in
+    // conversion slot. The cold-start brief mines local history for one
+    // recognized insight and pitches sign-in as the way to keep it. It
+    // re-nudges itself (24h cap, see cold-start-brief) until they convert;
+    // once signed in, the welcome/savings + resume path below takes over.
+    // userVisibleOnly: the mined prose must not reach the model's context
+    // (prompt-injection guard, same as localMinedRule).
+    const cold = await pickColdStartBrief(creds);
+    if (!cold?.brief) return null;
+    return {
+      id: "signup-brief",
+      severity: "info",
+      title: "Hey 👋 I'm Hivemind",
+      body: `${cold.brief}\n\n→ hivemind login`,
+      dedupKey: { session: sessionId },
+      userVisibleOnly: true,
+    };
   }
 
   const orgStats = await fetchOrgStats(creds ?? null);
@@ -137,12 +154,80 @@ export async function pickPrimaryBanner(
     log(`open-goals lookup failed: ${(e as Error).message}`);
   }
 
+  // Session brief — onboarding vs continuity, both gated on sign-in
+  // (this whole function returns early when !creds.token above):
+  //   • first signed-in session → cold-start brief: one recognized
+  //     insight from local history + the promise that future sessions
+  //     resume. Greeting flips to "Hey <name>".
+  //   • every later session      → resume brief: "where you left off"
+  //     from captured summaries — the payoff that promise owes.
+  // pickColdStartBrief writes its first-run state, so exactly one of the
+  // two fires per session and they never both show.
+  let prefix: string | null = null;
+  let firstRun = false;
+  try {
+    const cold = await pickColdStartBrief(creds);
+    if (cold) {
+      prefix = cold.brief;
+      firstRun = cold.firstRun;
+    } else {
+      prefix = (await pickResumeBrief(creds))?.brief ?? null;
+    }
+  } catch (e: unknown) {
+    log(`session brief threw: ${(e as Error).message}`);
+  }
+
+  const balanceCents = orgStats?.balanceCents ?? null;
   if (tokensSaved > MEANINGFUL_SAVINGS_TOKENS) {
-    return orgStats != null
+    const banner = orgStats != null
       ? renderOnlineSavings(sessionId, orgStats, creds.userName, openGoals)
       : renderOfflineSavings(sessionId, creds.userName, openGoals);
+    return appendBalance(prependBrief(banner, prefix), balanceCents, creds);
   }
-  return renderWelcome(sessionId, creds, openGoals);
+  const welcome = renderWelcome(sessionId, creds, openGoals, firstRun);
+  return appendBalance(prependBrief(welcome, prefix), balanceCents, creds);
+}
+
+/**
+ * Prepend the cold-start brief above a notification's body so it's the
+ * first thing the user reads. Returns the input unchanged when null.
+ */
+function prependBrief(n: Notification, brief: string | null): Notification {
+  if (!brief) return n;
+  return { ...n, body: `${brief}\n\n${n.body}` };
+}
+
+/** Below this prepaid balance (cents) we warn the user. Mirrors the SDK's
+ *  LOW_BALANCE_THRESHOLD_CENTS — kept here so the live SessionStart check
+ *  and the legacy query-path check agree on the boundary. */
+const LOW_BALANCE_THRESHOLD_CENTS = 200;
+
+/** Org-scoped billing page, falling back to the bare host when creds lack
+ *  the org/workspace names. Mirrors deeplake-api.ts billingUrl(). */
+function billingUrl(creds: Credentials): string {
+  if (creds.orgName && creds.workspaceId) {
+    return `https://deeplake.ai/${encodeURIComponent(creds.orgName)}/workspace/${encodeURIComponent(creds.workspaceId)}/billing`;
+  }
+  return "https://deeplake.ai";
+}
+
+/**
+ * Merge a live low-balance notice into the banner body, detected THIS
+ * SessionStart from the `X-Activeloop-Balance-Cents` header (see org-stats).
+ * Replaces the lagging, separately-queued low-balance notice so the warning
+ * shows the moment we see it, in the same banner the user is already reading.
+ *
+ * Scope: the soft warning only (0 < balance < threshold). Hard exhaustion
+ * (balance ≤ 0) stays on the 402-driven `balance-exhausted` queue path in
+ * deeplake-api — surfacing it here too would double up. No-op when balance
+ * is unknown or healthy. The banner is userVisibleOnly, so this never
+ * reaches the model.
+ */
+function appendBalance(n: Notification, balanceCents: number | null, creds: Credentials): Notification {
+  if (balanceCents === null || balanceCents <= 0 || balanceCents >= LOW_BALANCE_THRESHOLD_CENTS) return n;
+  const line = `⚠️ Hivemind balance low — only $${(balanceCents / 100).toFixed(2)} of prepaid credit left. `
+    + `Top up at ${billingUrl(creds)} before requests start failing.`;
+  return { ...n, body: `${n.body}\n\n${line}` };
 }
 
 /** "🐝 Welcome back, kamo.aghbalyan / Connected to org mind (workspace default)."
@@ -153,15 +238,21 @@ function renderWelcome(
   sessionId: string,
   creds: Credentials,
   openGoals: OpenGoalsSummary | null,
+  firstEver = false,
 ): Notification {
   // Personalization is optional. If creds.userName is missing (malformed
   // credentials.json — rare), drop the comma-clause rather than fall back
   // to a generic "there" that reads awkwardly. If creds.orgName is missing,
   // say "your organization" rather than expose the orgId UUID — UUIDs are
   // unreadable to humans and worse UX than no label at all.
+  //
+  // Greeting depends on whether this is the first time Hivemind has ever
+  // surfaced a brief for this user: "Hey <name>" on first contact (an
+  // introduction — "welcome back" would be a lie), "Welcome back" after.
+  const greeting = firstEver ? "Hey" : "Welcome back";
   const title = creds.userName
-    ? `Welcome back, ${creds.userName}`
-    : "Welcome back";
+    ? `${greeting}, ${creds.userName}`
+    : greeting;
   const orgPhrase = creds.orgName ? `org ${creds.orgName}` : "your organization";
   const workspace = creds.workspaceId ?? "default";
   return {
@@ -170,6 +261,13 @@ function renderWelcome(
     title,
     body: appendGoals(`Connected to ${orgPhrase} (workspace ${workspace}).`, openGoals),
     dedupKey: { session: sessionId },
+    // User-facing only. This banner (welcome / savings / any prepended
+    // cold-start or resume brief) carries mined and summary-derived prose,
+    // which must never enter the model's additionalContext — that would be
+    // a prompt-injection channel (codex P1). The model gets its memory
+    // instructions from the sibling session-start hook; this slot is purely
+    // for the human reading their terminal.
+    userVisibleOnly: true,
   };
 }
 
@@ -221,6 +319,10 @@ function renderOnlineSavings(
     title,
     body,
     dedupKey: { session: sessionId },
+    // User-facing only — see the welcome renderer's note. A prepended
+    // resume/cold-start brief rides in this body, so it must not reach the
+    // model's additionalContext.
+    userVisibleOnly: true,
   };
 }
 
@@ -255,5 +357,9 @@ function renderOfflineSavings(
     title,
     body,
     dedupKey: { session: sessionId },
+    // User-facing only — see the welcome renderer's note. A prepended
+    // resume/cold-start brief rides in this body, so it must not reach the
+    // model's additionalContext.
+    userVisibleOnly: true,
   };
 }

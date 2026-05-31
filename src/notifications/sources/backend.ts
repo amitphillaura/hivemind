@@ -65,6 +65,13 @@ function toClient(n: ServerNotification): Notification | null {
     // dedup_key is hashed in here so a server that reuses the same UUID
     // with a fresh dedup_key (rare but supported) re-fires for the user.
     dedupKey: { id: n.id, dedup_key: n.dedup_key ?? "" },
+    // The body is server-controlled free text shown to the user as a banner
+    // (e.g. the deeplake-api low-balance "top up to avoid service
+    // interruption" push). Like every user-facing notification, it must NOT
+    // reach the model's additionalContext — an imperative/billing string in
+    // the agent prompt is the prompt-injection shape we're closing. User
+    // channel only.
+    userVisibleOnly: true,
   };
 }
 

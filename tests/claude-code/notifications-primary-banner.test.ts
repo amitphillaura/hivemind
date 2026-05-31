@@ -10,6 +10,13 @@ vi.mock("../../src/notifications/sources/org-stats.js", () => ({
   fetchOrgStats: orgStatsMock,
 }));
 
+// Mock the resume brief too — it issues a DeeplakeApi query that would
+// otherwise retry against the dead test endpoint. Default: nothing to resume.
+const { resumeMock } = vi.hoisted(() => ({ resumeMock: vi.fn() }));
+vi.mock("../../src/notifications/sources/resume-brief.js", () => ({
+  pickResumeBrief: resumeMock,
+}));
+
 import { pickPrimaryBanner, formatTokens } from "../../src/notifications/sources/primary-banner.js";
 import { appendUsageRecord } from "../../src/notifications/usage-tracker.js";
 import type { Credentials } from "../../src/commands/auth-creds.js";
@@ -35,6 +42,9 @@ beforeEach(() => {
   orgStatsMock.mockReset();
   // Default: server unreachable → primary-banner falls back to local jsonl.
   orgStatsMock.mockResolvedValue(null);
+  resumeMock.mockReset();
+  // Default: no prior summary for this project → no resume brief.
+  resumeMock.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -76,6 +86,30 @@ describe("pickPrimaryBanner — welcome (default when savings ≤ 1M)", () => {
     });
     const n = await pickPrimaryBanner("s-edge", FRESH_CREDS);
     expect(n!.id).toBe("welcome");
+  });
+
+  it("merges a live low-balance line into the banner when balanceCents is below threshold", async () => {
+    orgStatsMock.mockResolvedValue({
+      org:  { sessionsCount: 2, memoryRecallCount: 1, memorySearchBytes: 4_000 },
+      user: { sessionsCount: 1, memoryRecallCount: 1, memorySearchBytes: 4_000 },
+      balanceCents: 113,
+    });
+    const n = await pickPrimaryBanner("s-lowbal", FRESH_CREDS);
+    expect(n!.body).toContain("balance low");
+    expect(n!.body).toContain("$1.13");
+    expect(n!.body).toContain("Connected to org acme"); // merged, not replacing
+    expect(n!.userVisibleOnly).toBe(true);              // never the model channel
+  });
+
+  it("does NOT add a balance line when balance is healthy or unknown", async () => {
+    orgStatsMock.mockResolvedValue({
+      org:  { sessionsCount: 2, memoryRecallCount: 1, memorySearchBytes: 4_000 },
+      user: { sessionsCount: 1, memoryRecallCount: 1, memorySearchBytes: 4_000 },
+      balanceCents: 5_000,
+    });
+    expect((await pickPrimaryBanner("s-ok", FRESH_CREDS))!.body).not.toContain("balance low");
+    orgStatsMock.mockResolvedValue(null); // unknown
+    expect((await pickPrimaryBanner("s-unk", FRESH_CREDS))!.body).not.toContain("balance low");
   });
 
   it("drops comma-clause when userName is missing", async () => {

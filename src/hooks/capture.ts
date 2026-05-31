@@ -29,8 +29,6 @@ import { embeddingsDisabled } from "../embeddings/disable.js";
 import { ensurePluginNodeModulesLink } from "../embeddings/self-heal.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { getInstalledVersion } from "../utils/version-check.js";
 import { entrypointPassesOnlyCliGate } from "./shared/capture-gate.js";
 const log = (msg: string) => _log("capture", msg);
@@ -235,57 +233,16 @@ function maybeTriggerPeriodicSummary(sessionId: string, cwd: string, config: Con
 main().catch((e) => {
   const msg: string = e?.message ?? String(e);
   log(`fatal: ${msg}`);
-  // Mid-session signal: if this capture failed because the org ran out of
-  // credits (server returns 402 with `balance_cents` in the body), surface
-  // it INLINE so the user sees it on the very tool call that triggered the
-  // failure — not at the next session-start. The same notification is also
-  // enqueued by the SDK for the session-start banner (deeplake-api.ts's
-  // maybeSignalBalanceExhausted) so users get reminded on every fresh
-  // session too. Both are intentional: this is a critical error.
-  if (msg.includes("402") && msg.includes("balance_cents")) {
-    try {
-      emitBalanceExhaustedInline();
-    } catch (emitErr: any) {
-      log(`inline emit failed: ${emitErr?.message ?? String(emitErr)}`);
-    }
-  }
+  // We deliberately surface NOTHING mid-session here. Claude Code only
+  // renders `systemMessage` (the user-visible channel) for SessionStart
+  // hooks — for PostToolUse it is silently dropped, so the only channel
+  // that would reach mid-session is `additionalContext`, which is the
+  // MODEL's prompt. Writing a user-facing "credits exhausted, top up at
+  // <url>" notice there is a prompt-injection pattern (imperative text +
+  // URL injected into the model's context) and external agents correctly
+  // flag it. The credit-exhausted condition is surfaced to the USER via the
+  // SessionStart banner instead — deeplake-api.ts enqueues a
+  // `userVisibleOnly` `balance-exhausted` notification. Hard rule: nothing
+  // user-facing is ever written into the model/agent prompt.
   process.exit(0);
 });
-
-/**
- * Write a hook response JSON to stdout that Claude Code renders as a
- * user-visible banner mid-session (`systemMessage`) AND surfaces to the
- * model as additional context (`additionalContext`). The model can then
- * mention the issue in its next turn if it's relevant to the user's task.
- *
- * Reads creds for the org/workspace-scoped billing URL, falling back to
- * the bare host when creds are missing/malformed. Mirrors the URL logic
- * in deeplake-api.ts's billingUrl() so the session-start banner and the
- * mid-session signal point at the same place.
- */
-function emitBalanceExhaustedInline(): void {
-  let url = "https://deeplake.ai";
-  try {
-    const credsPath = join(homedir(), ".deeplake", "credentials.json");
-    const c = JSON.parse(readFileSync(credsPath, "utf-8")) as { orgName?: string; workspaceId?: string };
-    if (c.orgName && c.workspaceId) {
-      url = `https://deeplake.ai/${encodeURIComponent(c.orgName)}/workspace/${encodeURIComponent(c.workspaceId)}/billing`;
-    }
-  } catch { /* fall back to bare host */ }
-
-  // additionalContext is the model-facing channel — Claude Code injects
-  // it as a system reminder for the next turn. The model will then
-  // surface the issue to the user (verified live: claude wrote
-  // "Hivemind credits are exhausted, so live memory recalls are
-  // failing — top up at <url>" in its response).
-  //
-  // systemMessage is intentionally OMITTED. We tested it: Claude Code
-  // only renders systemMessage for SessionStart hooks. For PostToolUse /
-  // UserPromptSubmit / Stop, the value is silently dropped. Including
-  // it would just be dead weight in the response payload.
-  const msg = `⚠️ HIVEMIND ALERT: This capture failed because the org is out of Deeplake credits (balance is 0). Memory recall is also returning empty. Tell the user clearly: "Hivemind credits are exhausted — sessions are not being saved and memory recall is empty. Top up at ${url} to restore."`;
-  const payload = {
-    hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: msg },
-  };
-  process.stdout.write(JSON.stringify(payload));
-}

@@ -93,7 +93,9 @@ export async function drainSessionStart(opts: DrainOptions): Promise<void> {
       pickPrimaryBanner(opts.sessionId, opts.creds),
     ]);
     const fromPrimary = primary != null ? [primary] : [];
-    const all: Notification[] = [...fromRules, ...fromQueue, ...fromBackend, ...fromPrimary];
+    // Primary banner first so the user reads "Welcome back / <brief>" at the
+    // top, then everything else (low-balance, backend pushes, rules) below.
+    const all: Notification[] = [...fromPrimary, ...fromRules, ...fromQueue, ...fromBackend];
 
     const fresh = all.filter(n => !alreadyShown(state, n));
     if (fresh.length === 0) {
