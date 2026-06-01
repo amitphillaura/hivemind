@@ -65,6 +65,9 @@ Format: **entity** (type) — what was done with it, its current state>
 ## Open Questions / TODO
 <Anything unresolved, blocked, or explicitly deferred>
 
+## Next Steps
+<The single concrete next action to resume with, as one imperative line (e.g. "Wire the resume-brief Next Steps fallback and run the tests"). If the session reached a clean stopping point with nothing pending, write exactly: none>
+
 IMPORTANT: Be exhaustive. Extract EVERY entity, decision, and fact.
 PRIVACY: Never include absolute filesystem paths in the summary.
 LENGTH LIMIT: Keep the total summary under 4000 characters.`;

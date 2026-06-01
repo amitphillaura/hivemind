@@ -210,6 +210,58 @@ describe("runGoalCommand — add", () => {
   });
 });
 
+// ── goal add --agent (capture provenance) ───────────────────────────────────
+
+describe("runGoalCommand — add --agent (capture provenance)", () => {
+  it("default provenance stays 'manual' when --agent is absent", async () => {
+    await runGoalCommand(["add", "a plain goal"]);
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toContain("'manual'");
+    expect(sql).not.toContain("'capture'");
+  });
+
+  it("`--agent capture` stamps the agent column as 'capture', not 'manual'", async () => {
+    await runGoalCommand(["add", "--agent", "capture", "Add rate-limiting to webhook handler"]);
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toContain("'capture'");
+    // the literal must not also carry the default
+    expect(sql).not.toMatch(/'manual', ''\)$/);
+    expect(sql).toContain("E'Add rate-limiting to webhook handler'");
+  });
+
+  it("parses --agent regardless of position relative to the text", async () => {
+    await runGoalCommand(["add", "park this", "--agent", "capture"]);
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toContain("'capture'");
+    // flag is stripped out of the text, not joined into it
+    expect(sql).toContain("E'park this'");
+    expect(sql).not.toContain("--agent");
+  });
+
+  it("preserves a multi-line body passed as a single arg (the capture context package)", async () => {
+    const body = "Add rate-limiting to webhook handler\n\nStart here: add a per-IP token bucket\nFiles: src/webhook/handler.ts";
+    await runGoalCommand(["add", "--agent", "capture", body]);
+    const sql = queryMock.mock.calls[0][0] as string;
+    // newlines survive as real characters into the E'...' content literal
+    // (sqlStr strips other control chars but preserves \n), so a single
+    // quoted multi-line arg is enough to store the whole context package.
+    expect(sql).toContain("Start here: add a per-IP token bucket\nFiles: src/webhook/handler.ts");
+  });
+
+  it("rejects an unknown --agent value (no INSERT issued — guards the SQL literal)", async () => {
+    await expectExit(1, () => runGoalCommand(["add", "--agent", "robert'); DROP TABLE", "x"]));
+    expect(allErr()).toContain("invalid --agent");
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects --agent with no value (no INSERT issued)", async () => {
+    await expectExit(1, () => runGoalCommand(["add", "x", "--agent"]));
+    expect(allErr()).toContain("--agent requires a value");
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+});
+
 // ── goal list ───────────────────────────────────────────────────────────────
 
 describe("runGoalCommand — list", () => {
@@ -258,6 +310,42 @@ describe("runGoalCommand — list", () => {
     queryMock.mockRejectedValueOnce(new Error("net down"));
     await expectExit(1, () => runGoalCommand(["list"]));
     expect(allErr()).toContain("hivemind goal list: net down");
+  });
+});
+
+// ── goal get (full context package for resume) ──────────────────────────────
+
+describe("runGoalCommand — get", () => {
+  it("prints the FULL multi-line content (not just the first line) for the latest version", async () => {
+    const pkg = "Add rate-limiting to webhook handler\n\nStart here: per-IP token bucket\nFiles: src/webhook/handler.ts";
+    queryMock.mockResolvedValueOnce([{ content: pkg }]);
+    await runGoalCommand(["get", "g-uuid"]);
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toMatch(/^SELECT content FROM "hivemind_goals_test"/);
+    expect(sql).toContain(`WHERE goal_id = 'g-uuid'`);
+    // latest version wins so a re-saved package isn't served stale
+    expect(sql).toContain("ORDER BY version DESC, created_at DESC LIMIT 1");
+    // whole body reaches stdout — this is what resume transfers into the session
+    expect(allOut()).toContain(pkg);
+    expect(allOut()).toContain("Files: src/webhook/handler.ts");
+  });
+
+  it("exits 1 when the goal_id is unknown (no body to transfer)", async () => {
+    queryMock.mockResolvedValueOnce([]);
+    await expectExit(1, () => runGoalCommand(["get", "missing"]));
+    expect(allErr()).toContain("goal not found: missing");
+  });
+
+  it("exits 1 with usage when goal_id is missing", async () => {
+    await expectExit(1, () => runGoalCommand(["get"]));
+    expect(allErr()).toContain("usage: hivemind goal get");
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("gates on login", async () => {
+    loadConfigMock.mockReturnValue(null);
+    await expectExit(1, () => runGoalCommand(["get", "g-uuid"]));
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });
 

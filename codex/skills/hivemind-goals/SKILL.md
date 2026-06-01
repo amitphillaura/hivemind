@@ -67,6 +67,36 @@ When the user expresses a new goal:
 
 **Do NOT auto-generate KPIs.** A goal is created with zero KPI files by default. Generate KPIs ONLY when the user explicitly asks you to ("aggiungi KPI per …", "add metrics for this goal", "track these metrics: …"). When the user asks, write each KPI as a separate file at `~/.deeplake/memory/kpi/<goal_id>/<kpi-slug>.md` with the body format documented above.
 
+### 1a. Capture a task for later (with resumable context)
+
+Use this when the user **parks a tangential task** mid-session — "save this for later", "remind me to …", "don't let me forget …", "let's do X later". The value is NOT the one-liner — it's storing enough **context to resume cold** in a future session without the user re-explaining anything.
+
+Write it via the **CLI** so the row is tagged `agent: capture`, which separates parked side-tasks from hand-made goals:
+
+```bash
+hivemind goal add --agent capture "Add rate-limiting to the webhook handler
+
+Start here: add a per-IP token bucket on the handler entry path
+Files: src/webhook/handler.ts:120-160, src/webhook/limits.ts
+Branch: feat/webhook-hardening
+Run: pnpm test webhook
+Why: bursty clients hammer the endpoint; agreed to defer until the retry-backoff work lands"
+```
+
+- **Line 1 is the label** — short; it's what `goal list` and the SessionStart banner show.
+- Fill `Start here / Files / Branch / Run / Why` from the live conversation. Include only the lines you can fill; `Start here:` (the concrete first action) matters most.
+- Pass the whole package as **one double-quoted argument** (newlines are preserved into the stored body).
+- Confirm to the user: the label + that it'll resume cleanly next session.
+
+### 1b. Resume a parked task (automatic context transfer)
+
+When the user says "let's work on that task / that goal", "let's start the `<X>` task", or "pick up the parked `<X>`", pull its stored context back into the session and continue — the user should NOT have to re-explain anything.
+
+1. **Find it:** `hivemind goal list --mine` and match the user's reference to a `goal_id`. If ambiguous, show the candidates and ask.
+2. **Transfer the context:** `hivemind goal get <goal_id>` prints the full package (`Start here / Files / Branch / Run / Why`). Read it as your working context — `goal list` only shows the first line, so always use `goal get` for the full body.
+3. **Flip to in_progress:** `mv ~/.deeplake/memory/goal/<owner>/opened/<uuid>.md ~/.deeplake/memory/goal/<owner>/in_progress/<uuid>.md`
+4. **Act on it:** open the `Files:`, switch to the `Branch:` if given, and begin from `Start here:`. You are resumed — continue as if the context was never lost.
+
 ### 2. List goals
 
 ```bash

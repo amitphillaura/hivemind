@@ -56,6 +56,13 @@ Tool choice on this mount:
   ❌ Built-in Grep tool — not supported on this path; use Bash grep instead.
   ❌ \`grep\` without a \`summaries/\` or \`sessions/\` suffix — too noisy, drowns the answer.
 
+Resuming work (user says "pick up where I left off" / "load that from hivemind" / "continue where we stopped"):
+  The resume target is the most recent session summary for the CURRENT project. Find and load it from the VFS — do not wait for or expect it to be pre-loaded:
+  1. \`cat ~/.deeplake/memory/index.md\` and take the newest rows whose \`Project\` matches this repo (or \`ls -t ~/.deeplake/memory/summaries/<your-username>/\` for the latest files).
+  2. \`cat\` the newest matching summary. If its \`## Next Steps\` (or older \`## Open Questions / TODO\`) is empty or says "none", move to the next-newest until you find one with real open work.
+  3. Load THAT summary as context, then RECONCILE with the current git state (branch, uncommitted changes) before acting — the summary can be stale. Tell the user where they left off and confirm before continuing; don't silently execute the next step.
+  4. Don't bulk-read \`sessions/\` — drill into the raw jsonl only for a specific detail the summary is missing.
+
 Organization management — each argument is SEPARATE (do NOT quote subcommands together):
 - hivemind login                              — SSO login
 - hivemind whoami                             — show current user/org

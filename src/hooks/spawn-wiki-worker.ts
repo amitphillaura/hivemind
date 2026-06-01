@@ -65,6 +65,9 @@ Example: "- The memory table uses DELETE+INSERT, not UPDATE (WASM doesn't suppor
 ## Open Questions / TODO
 <Anything unresolved, blocked, or explicitly deferred>
 
+## Next Steps
+<The single concrete next action to resume with, as one imperative line (e.g. "Wire the resume-brief Next Steps fallback and run the tests"). If the session reached a clean stopping point with nothing pending, write exactly: none>
+
 IMPORTANT: Be exhaustive. Extract EVERY entity, decision, and fact. Future you will search this wiki to answer questions like "who worked on X", "why did we choose Y", "what's the status of Z". If a detail exists in the session, it should be in the wiki.
 
 PRIVACY: Never include absolute filesystem paths (e.g. /home/user/..., /Users/..., C:\\\\...) in the summary. Use only project-relative paths or the project name. The Source and Project fields above are already correct — do not change them.

@@ -29,6 +29,31 @@ hivemind kpi bump <goal_id> <kpi_id> <delta>                # increment current 
 2. If the user explicitly asks for KPIs: `hivemind kpi add <goal_id> <slug> <target> <unit>` per KPI.
 3. Tell the user the goal_id and that it is now team-visible in Deeplake.
 
+## Capture a task for later (with resumable context)
+
+When the user **parks a tangential task** mid-session — "save this for later", "remind me to …", "don't let me forget …", "let's do X later" — store enough **context to resume cold** later, not just a one-liner. Tag it `--agent capture` so parked side-tasks are separable from hand-made goals:
+
+```
+hivemind goal add --agent capture "Add rate-limiting to the webhook handler
+
+Start here: add a per-IP token bucket on the handler entry path
+Files: src/webhook/handler.ts:120-160, src/webhook/limits.ts
+Branch: feat/webhook-hardening
+Run: pnpm test webhook
+Why: bursty clients hammer the endpoint; defer until retry-backoff lands"
+```
+
+Line 1 is the label (what `goal list` shows). Fill `Start here / Files / Branch / Run / Why` from the conversation; `Start here:` matters most. Pass the whole package as **one double-quoted argument** so the newlines are preserved.
+
+## Resume a parked task (automatic context transfer)
+
+When the user says "let's work on that task / goal" or "pick up the `<X>` task":
+
+1. `hivemind goal list --mine` — match the user's reference to a `goal_id`.
+2. `hivemind goal get <goal_id>` — prints the **full** package (`goal list` shows only the first line, so always use `goal get`). Read it as your working context.
+3. `hivemind goal progress <goal_id> in_progress` — mark it started.
+4. Begin from `Start here:` using the `Files` / `Branch` / `Run` lines. Continue as if the context was never lost.
+
 ## What NOT to do
 
 - Do NOT call `write_file` on any path under `~/.deeplake/memory/goal/` or `~/.deeplake/memory/kpi/`.

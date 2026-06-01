@@ -367,6 +367,11 @@ export default defineConfig({
         "src/notifications/rules/registry.ts":    { statements: 90, branches: 90, functions: 90, lines: 90 },
         "src/notifications/rules/welcome.ts":     { statements: 90, branches: 90, functions: 90, lines: 90 },
         "src/notifications/sources/backend.ts":   { statements: 90, branches: 90, functions: 80, lines: 90 },
+        // feat/resume-next-steps — resume-brief windowing (skip placeholders +
+        // dedup) and the goal capture/get CLI. pickResumeBrief is exercised via
+        // a mocked DeeplakeApi boundary (see resume-brief.test.ts).
+        "src/notifications/sources/resume-brief.ts": { statements: 90, branches: 90, functions: 90, lines: 90 },
+        "src/commands/goal.ts":                   { statements: 90, branches: 90, functions: 90, lines: 90 },
         "src/notifications/delivery/index.ts":    { statements: 90, branches: 90, functions: 90, lines: 90 },
         "src/notifications/delivery/claude-code.ts": { statements: 90, branches: 90, functions: 90, lines: 90 },
         // feat/hivemind-savings-recap — per-session "Hivemind has saved you Nk tokens"
