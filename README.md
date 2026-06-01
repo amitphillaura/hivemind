@@ -173,6 +173,20 @@ git clone https://github.com/activeloopai/hivemind.git ~/.codex/hivemind
 ```
 
 Restart Codex to activate.
+
+**First launch — trust the hooks.** Codex shows a **"Hooks need review"** prompt before it will run hivemind's hooks:
+
+```text
+Hooks need review
+2 hooks are new or changed.
+Hooks can run outside the sandbox after you trust them.
+
+   1. Review hooks
+ › 2. Trust all and continue
+   3. Continue without trusting (hooks won't run)
+```
+
+Choose **`2. Trust all and continue`** — otherwise the hooks won't run and hivemind stays inactive.
 </details>
 
 <details>
