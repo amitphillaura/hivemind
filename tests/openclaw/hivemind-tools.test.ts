@@ -348,8 +348,8 @@ describe("hivemind_goal_add (Path C — write-side via registered tool)", () => 
     const sql = goalInserts[0][0] as string;
 
     // shape — must include the per-row uuid + goal_id + owner + status + content +
-    // version + created_at + agent + plugin_version columns in that order
-    expect(sql).toMatch(/INSERT INTO "hivemind_goals_test" \(id, goal_id, owner, status, content, version, created_at, agent, plugin_version\)/);
+    // version + created_at + updated_at + agent + plugin_version columns in that order
+    expect(sql).toMatch(/INSERT INTO "hivemind_goals_test" \(id, goal_id, owner, status, content, version, created_at, updated_at, agent, plugin_version\)/);
     // owner is the userName from the config mock
     expect(sql).toContain("'alice'");
     // status is hardcoded to 'opened' for new goals
@@ -415,7 +415,7 @@ describe("hivemind_kpi_add (Path C — write-side via registered tool)", () => {
     expect(kpiInserts).toHaveLength(1);
     const sql = kpiInserts[0][0] as string;
 
-    expect(sql).toMatch(/INSERT INTO "hivemind_kpis_test" \(id, goal_id, kpi_id, content, version, created_at, agent, plugin_version\)/);
+    expect(sql).toMatch(/INSERT INTO "hivemind_kpis_test" \(id, goal_id, kpi_id, content, version, created_at, updated_at, agent, plugin_version\)/);
     expect(sql).toContain("'11111111-2222-3333-4444-555555555555'");
     expect(sql).toContain("'k-prs'");
     expect(sql).toContain("'openclaw'");

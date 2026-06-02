@@ -141,6 +141,7 @@ export const GOALS_COLUMNS: readonly ColumnDef[] = Object.freeze([
   { name: "content",        sql: "TEXT NOT NULL DEFAULT ''" },
   { name: "version",        sql: "BIGINT NOT NULL DEFAULT 1" },
   { name: "created_at",     sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "updated_at",     sql: "TEXT NOT NULL DEFAULT ''" },
   { name: "agent",          sql: "TEXT NOT NULL DEFAULT 'manual'" },
   { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
 ]);
@@ -168,6 +169,7 @@ export const KPIS_COLUMNS: readonly ColumnDef[] = Object.freeze([
   { name: "content",        sql: "TEXT NOT NULL DEFAULT ''" },
   { name: "version",        sql: "BIGINT NOT NULL DEFAULT 1" },
   { name: "created_at",     sql: "TEXT NOT NULL DEFAULT ''" },
+  { name: "updated_at",     sql: "TEXT NOT NULL DEFAULT ''" },
   { name: "agent",          sql: "TEXT NOT NULL DEFAULT 'manual'" },
   { name: "plugin_version", sql: "TEXT NOT NULL DEFAULT ''" },
 ]);

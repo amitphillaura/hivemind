@@ -174,7 +174,7 @@ describe("runGoalCommand — add", () => {
     expect(ensureGoalsTableMock).toHaveBeenCalledExactlyOnceWith("hivemind_goals_test");
     expect(queryMock).toHaveBeenCalledTimes(1);
     const sql = queryMock.mock.calls[0][0] as string;
-    expect(sql).toMatch(/^INSERT INTO "hivemind_goals_test" \(id, goal_id, owner, status, content, version, created_at, agent, plugin_version\)/);
+    expect(sql).toMatch(/^INSERT INTO "hivemind_goals_test" \(id, goal_id, owner, status, content, version, created_at, updated_at, agent, plugin_version\)/);
     expect(sql).toContain("'opened'");
     expect(sql).toContain("'alice@activeloop.ai'");
     expect(sql).toContain("'manual'");
@@ -395,7 +395,7 @@ describe("runKpiCommand — add", () => {
     expect(ensureKpisTableMock).toHaveBeenCalledExactlyOnceWith("hivemind_kpis_test");
     expect(queryMock).toHaveBeenCalledTimes(1);
     const sql = queryMock.mock.calls[0][0] as string;
-    expect(sql).toMatch(/^INSERT INTO "hivemind_kpis_test" \(id, goal_id, kpi_id, content, version, created_at, agent, plugin_version\)/);
+    expect(sql).toMatch(/^INSERT INTO "hivemind_kpis_test" \(id, goal_id, kpi_id, content, version, created_at, updated_at, agent, plugin_version\)/);
     expect(sql).toContain("'g-uuid'");
     expect(sql).toContain("'k-prs'");
     expect(sql).toContain("'manual'");

@@ -109,13 +109,14 @@ async function goalAdd(text: string, agent: string = "manual"): Promise<void> {
   const goalId = randomUUID();
   const ts = new Date().toISOString();
   await query(
-    `INSERT INTO "${safe}" (id, goal_id, owner, status, content, version, created_at, agent, plugin_version) VALUES (` +
+    `INSERT INTO "${safe}" (id, goal_id, owner, status, content, version, created_at, updated_at, agent, plugin_version) VALUES (` +
     `'${randomUUID()}', ` +
     `'${sqlStr(goalId)}', ` +
     `'${sqlStr(cfg.userName)}', ` +
     `'opened', ` +
     `E'${sqlStr(text)}', ` +
     `1, ` +
+    `'${sqlStr(ts)}', ` +
     `'${sqlStr(ts)}', ` +
     `'${sqlStr(agent)}', ` +
     `''` +
@@ -188,7 +189,7 @@ async function goalProgress(goalId: string, status: string): Promise<void> {
   const safe = sqlIdent(cfg.goalsTableName);
   const ts = new Date().toISOString();
   await query(
-    `UPDATE "${safe}" SET status = '${sqlStr(status)}', created_at = '${sqlStr(ts)}' WHERE goal_id = '${sqlStr(goalId)}'`
+    `UPDATE "${safe}" SET status = '${sqlStr(status)}', updated_at = '${sqlStr(ts)}' WHERE goal_id = '${sqlStr(goalId)}'`
   );
   process.stdout.write(`${goalId} -> ${status}\n`);
 }
@@ -215,12 +216,13 @@ async function kpiAdd(args: string[]): Promise<void> {
   const content = `${name}\n\n- target: ${target}\n- current: 0\n- unit: ${unit}`;
   const ts = new Date().toISOString();
   await query(
-    `INSERT INTO "${safe}" (id, goal_id, kpi_id, content, version, created_at, agent, plugin_version) VALUES (` +
+    `INSERT INTO "${safe}" (id, goal_id, kpi_id, content, version, created_at, updated_at, agent, plugin_version) VALUES (` +
     `'${randomUUID()}', ` +
     `'${sqlStr(goalId)}', ` +
     `'${sqlStr(kpiId)}', ` +
     `E'${sqlStr(content)}', ` +
     `1, ` +
+    `'${sqlStr(ts)}', ` +
     `'${sqlStr(ts)}', ` +
     `'manual', ` +
     `''` +
@@ -284,7 +286,7 @@ async function kpiBump(goalId: string, kpiId: string, deltaStr: string): Promise
   }
   const ts = new Date().toISOString();
   await query(
-    `UPDATE "${safe}" SET content = E'${sqlStr(newContent)}', created_at = '${sqlStr(ts)}' WHERE goal_id = '${sqlStr(goalId)}' AND kpi_id = '${sqlStr(kpiId)}'`
+    `UPDATE "${safe}" SET content = E'${sqlStr(newContent)}', updated_at = '${sqlStr(ts)}' WHERE goal_id = '${sqlStr(goalId)}' AND kpi_id = '${sqlStr(kpiId)}'`
   );
   process.stdout.write(`${goalId}/${kpiId} +${delta}\n`);
 }
