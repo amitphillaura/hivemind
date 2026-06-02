@@ -271,29 +271,12 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
   }
 
   if (!shellCmd && (touchesMemory(cmd) || touchesMemory(toolPath))) {
-    // Fast-path: a clean single-file read attempt by an unsupported interpreter
-    // (python/node/ruby/perl, no shell metacharacters) gets rewritten to
-    // `cat '<path>'` so the agent doesn't burn a turn on a RETRY. Anything with
-    // $(...), backticks, pipes, redirects, or chains falls through to the
-    // guidance below — safer than trying to rewrite composite commands.
-    const isReadLike = /^(?:python3?|node|deno|bun|ruby|perl)\b/.test(cmd.trim());
-    const hasShellMeta = /[$`;|&<>()\\]/.test(cmd);
-    if (isReadLike && !hasShellMeta) {
-      // Rewrite ONLY the argument that actually touches memory — not the first
-      // absolute-looking token. Otherwise `python3 script.py /etc/hosts
-      // ~/.deeplake/memory/index.md` would become `cat '/etc/hosts'` and leak a
-      // real host file. Normalize just that token (~/, $HOME/, or absolute) to /.
-      const memoryArg = cmd.trim().split(/\s+/).slice(1).find((arg) => touchesMemory(arg));
-      const cleanPath = memoryArg ? rewritePaths(memoryArg) : "";
-      if (cleanPath && !cleanPath.endsWith("/")) {
-        logFn(`unsupported command on file, converting to cat: ${cleanPath}`);
-        return buildAllowDecision(
-          `cat '${cleanPath.replace(/'/g, "'\\''")}'`,
-          "[DeepLake] converted unsupported interpreter read to cat",
-        );
-      }
-    }
-
+    // Unsupported/unsafe command targeting memory (interpreter, $(), pipes,
+    // chains, …). Do NOT rewrite it to a host `cat`: that decision runs on the
+    // real filesystem, not the VFS, so `python3 ~/.deeplake/memory/../../etc/passwd`
+    // would become `cat '/../../etc/passwd'` and read a real host file. Return
+    // guidance; the agent reissues a supported builtin (e.g. `cat …`) which IS
+    // routed through the VFS.
     logFn(`unsupported command, returning guidance: ${cmd}`);
     return buildRetryGuidanceDecision(input.tool_name);
   }
@@ -510,6 +493,15 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
         }
       }
       const lsOutput = capOutputForClaude(lines.join("\n") || "(empty directory)", { kind: "ls" });
+      if (input.tool_name === "Read") {
+        // Read needs a file_path-shaped decision (a {command} payload would
+        // leave file_path undefined). Materialize the listing under a synthetic
+        // leaf inside the dir — not the dir path itself — so later child reads
+        // can still create files alongside it in the cache.
+        const leaf = (dir === "/" ? "" : dir) + "/_listing.txt";
+        const file_path = writeReadCacheFileFn(input.session_id, leaf, lsOutput);
+        return buildReadDecision(file_path, `[DeepLake direct] ls ${dir}`);
+      }
       return buildAllowDecision(`echo ${JSON.stringify(lsOutput)}`, `[DeepLake direct] ls ${dir}`);
     }
 
