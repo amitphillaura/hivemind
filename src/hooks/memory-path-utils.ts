@@ -58,14 +58,30 @@ export function isSafe(cmd: string): boolean {
   return true;
 }
 
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// A mount prefix only counts when it is the mount root or a descendant — i.e.
+// followed by `/`, end-of-string, or a non-path character. Matching it as a
+// bare substring false-positives on siblings like `~/.deeplake/memory-backup/x`
+// and on literals like `grep "~/.deeplake/memory" README.md`.
+const MEMORY_BOUNDARY = "(?![A-Za-z0-9._-])";
+const MEMORY_PREFIX_RE = new RegExp(
+  "(?:" + [MEMORY_PATH, TILDE_PATH, HOME_VAR_PATH].map(escapeRe).join("|") + ")" + MEMORY_BOUNDARY,
+);
+
 export function touchesMemory(p: string): boolean {
-  return p.includes(MEMORY_PATH) || p.includes(TILDE_PATH) || p.includes(HOME_VAR_PATH);
+  return MEMORY_PREFIX_RE.test(p);
 }
 
 export function rewritePaths(cmd: string): string {
+  // Consume a trailing slash if present, otherwise require a boundary so a
+  // sibling like `memory-backup` is left untouched.
+  const tail = "(?:\\/|" + MEMORY_BOUNDARY + ")";
   return cmd
-    .replace(new RegExp(MEMORY_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/?", "g"), "/")
-    .replace(/~\/.deeplake\/memory\/?/g, "/")
-    .replace(/\$HOME\/.deeplake\/memory\/?/g, "/")
-    .replace(/"\$HOME\/.deeplake\/memory\/?"/g, '"/"');
+    .replace(new RegExp(escapeRe(MEMORY_PATH) + tail, "g"), "/")
+    .replace(new RegExp(escapeRe(TILDE_PATH) + tail, "g"), "/")
+    .replace(new RegExp('"' + escapeRe(HOME_VAR_PATH) + tail + '"', "g"), '"/"')
+    .replace(new RegExp(escapeRe(HOME_VAR_PATH) + tail, "g"), "/");
 }
