@@ -207,6 +207,18 @@ describe("processPreToolUse: non-memory / no-op paths", () => {
     expect(d?.command).toContain("bash builtins");
   });
 
+  it("denies (shape-safe) an unserviceable Read instead of returning a command-shaped decision", async () => {
+    // A command-shaped {command} decision would leave the Read tool's file_path
+    // undefined → harness error. Deny carries the guidance via permissionDecisionReason.
+    const d = await processPreToolUse(
+      { session_id: "s", tool_name: "Read", tool_input: { file_path: "~/.deeplake/memory/index.md" }, tool_use_id: "t" },
+      { config: null as any },
+    );
+    expect(d?.deny).toContain("[RETRY REQUIRED]");
+    expect(d?.command).toBe("");
+    expect(d?.file_path).toBeUndefined();
+  });
+
   it("returns retry guidance (NOT a host passthrough) when no config is loaded", async () => {
     const d = await processPreToolUse(
       { session_id: "s", tool_name: "Bash", tool_input: { command: "cat ~/.deeplake/memory/index.md" }, tool_use_id: "t" },

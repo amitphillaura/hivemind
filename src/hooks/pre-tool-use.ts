@@ -106,12 +106,19 @@ const MEMORY_RETRY_GUIDANCE =
   "You MUST rewrite your command using only the bash tools listed above and try again. " +
   "For example, to parse JSON use: cat file.json | jq '.key'. To count keys: cat file.json | jq 'keys | length'.";
 
-// Replace an unserviceable memory command with a harmless `echo` of the retry
-// guidance. Crucially this is an *allow* decision that REWRITES the command, so
-// the original (e.g. `sort /etc/passwd ~/.deeplake/memory/x > /tmp/out`) never
-// reaches the host shell — the agent just sees the guidance and retries. Used
-// for unconfigured and unroutable memory commands alike.
-function buildRetryGuidanceDecision(): ClaudePreToolDecision {
+// Send an unserviceable memory request back to the agent as retry guidance,
+// shaped per tool so the original never reaches the host shell.
+//   - Bash/Grep/Glob: an *allow* decision that REWRITES the command to a
+//     harmless `echo`, so e.g. `sort /etc/passwd ~/.deeplake/memory/x >
+//     /tmp/out` is replaced before it can run.
+//   - Read: a *deny*. Claude Code's Read tool reads `updatedInput.file_path`;
+//     handing it a `{command}` payload leaves file_path undefined and the
+//     harness errors with "Path must be a string". Deny is shape-safe and
+//     still tells the agent how to retry via Bash.
+function buildRetryGuidanceDecision(toolName: string): ClaudePreToolDecision {
+  if (toolName === "Read") {
+    return buildDenyDecision(MEMORY_RETRY_GUIDANCE, "[DeepLake] memory Read unavailable — use Bash builtins");
+  }
   return buildAllowDecision(
     `echo ${JSON.stringify(MEMORY_RETRY_GUIDANCE)}`,
     "[DeepLake] unsupported command — rewrite using bash builtins",
@@ -288,7 +295,7 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
     }
 
     logFn(`unsupported command, returning guidance: ${cmd}`);
-    return buildRetryGuidanceDecision();
+    return buildRetryGuidanceDecision(input.tool_name);
   }
 
   if (!shellCmd) return null;
@@ -296,7 +303,7 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
   // unreachable. Do NOT return null here — that hands the original command to
   // the host shell. Return the retry guidance instead so the command never
   // touches the real filesystem.
-  if (!config) return buildRetryGuidanceDecision();
+  if (!config) return buildRetryGuidanceDecision(input.tool_name);
 
   const table = process.env["HIVEMIND_TABLE"] ?? "memory";
   const sessionsTable = process.env["HIVEMIND_SESSIONS_TABLE"] ?? "sessions";
@@ -530,7 +537,7 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
   // /tmp/out` would still read/write real files. Replace it with the retry
   // guidance so nothing reaches the host shell.
   logFn(`unroutable memory command, returning guidance: ${shellCmd}`);
-  return buildRetryGuidanceDecision();
+  return buildRetryGuidanceDecision(input.tool_name);
 }
 
 /* c8 ignore start */

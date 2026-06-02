@@ -435,9 +435,11 @@ describe("pre-tool-use: non-Bash tools targeting memory", () => {
     const r = runPreToolUse("Read", { file_path: "~/.deeplake/memory/index.md" });
     expect(r.empty).toBe(false);
     if (!r.empty) {
-      expect(r.decision).toBe("allow");
-      // Should rewrite to cat via shell or direct SQL
-      expect(r.updatedCommand).toBeDefined();
+      // Unconfigured harness (no HIVEMIND_TOKEN): the VFS can't serve the read.
+      // Read must be DENIED (not a command-shaped allow) — a {command} payload
+      // would leave the Read tool's file_path undefined and error the harness.
+      expect(r.decision).toBe("deny");
+      expect(r.reason).toContain("RETRY REQUIRED");
     }
   });
 
@@ -445,11 +447,10 @@ describe("pre-tool-use: non-Bash tools targeting memory", () => {
     const r = runPreToolUse("Read", { path: "~/.deeplake/memory" });
     expect(r.empty).toBe(false);
     if (!r.empty) {
-      expect(r.decision).toBe("allow");
-      // Unconfigured harness (no HIVEMIND_TOKEN): the VFS can't serve the listing,
-      // so the hook emits retry guidance rather than the old shell-fallback
-      // rewrite. It is still intercepted (never passed through to the host).
-      expect(r.updatedCommand).toContain("RETRY REQUIRED");
+      // Same as above: still intercepted (never passed to the host), but as a
+      // shape-safe deny rather than the old shell-fallback command rewrite.
+      expect(r.decision).toBe("deny");
+      expect(r.reason).toContain("RETRY REQUIRED");
     }
   });
 
