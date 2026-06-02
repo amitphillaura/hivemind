@@ -165,6 +165,8 @@ describe("runUpdate — branches", () => {
     expect(code).toBe(1);
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(stderrText()).toContain("npm install failed: ENOENT");
+    // The manual-retry hint must also be pinned, not @latest.
+    expect(stderrText()).toContain("Try running it manually: npm install -g @deeplake/hivemind@1.3.0");
   });
 
   it("npm-global: returns 1 if the post-install agent refresh fails", async () => {
