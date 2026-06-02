@@ -279,12 +279,12 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
     const isReadLike = /^(?:python3?|node|deno|bun|ruby|perl)\b/.test(cmd.trim());
     const hasShellMeta = /[$`;|&<>()\\]/.test(cmd);
     if (isReadLike && !hasShellMeta) {
-      // Normalize path prefix (~/, $HOME/, or absolute /home/user/) to / via
-      // rewritePaths, then extract the leading memory-relative path.
-      // This catches all three forms that touchesMemory() accepts.
-      const normalized = rewritePaths(cmd) + " " + rewritePaths(toolPath);
-      const pathMatch = normalized.match(/\s(\/[\w./_-]+)/);
-      const cleanPath = pathMatch ? pathMatch[1] : "";
+      // Rewrite ONLY the argument that actually touches memory — not the first
+      // absolute-looking token. Otherwise `python3 script.py /etc/hosts
+      // ~/.deeplake/memory/index.md` would become `cat '/etc/hosts'` and leak a
+      // real host file. Normalize just that token (~/, $HOME/, or absolute) to /.
+      const memoryArg = cmd.trim().split(/\s+/).slice(1).find((arg) => touchesMemory(arg));
+      const cleanPath = memoryArg ? rewritePaths(memoryArg) : "";
       if (cleanPath && !cleanPath.endsWith("/")) {
         logFn(`unsupported command on file, converting to cat: ${cleanPath}`);
         return buildAllowDecision(
@@ -514,7 +514,11 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
     }
 
     if (input.tool_name === "Bash") {
-      const findMatch = shellCmd.match(/^find\s+(\S+)\s+(?:-type\s+\S+\s+)?-name\s+'([^']+)'/);
+      // Anchor to the exact shape the VFS serves: `find <dir> [-type X] -name
+      // '<pat>'` optionally piped to `wc -l`. A prefix match would accept
+      // `find … -name '*.md' -delete` or `… -o -name '…'` and silently drop the
+      // trailing semantics; anything else falls through to guidance.
+      const findMatch = shellCmd.match(/^find\s+(\S+)\s+(?:-type\s+\S+\s+)?-name\s+'([^']+)'\s*(?:\|\s*wc\s+-l)?\s*$/);
       if (findMatch) {
         const dir = findMatch[1].replace(/\/+$/, "") || "/";
         const namePattern = sqlLike(findMatch[2]).replace(/\*/g, "%").replace(/\?/g, "_");
