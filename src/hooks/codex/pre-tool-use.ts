@@ -307,7 +307,10 @@ export async function processCodexPreToolUse(
       // Anchor to the exact shape the VFS serves (optionally piped to wc -l);
       // a prefix match would accept `find … -name '*.md' -delete` and silently
       // drop the suffix. Everything else falls through to block+guidance.
-      const findMatch = rewritten.match(/^find\s+(\S+)\s+(?:-type\s+\S+\s+)?-name\s+(?:'([^']+)'|"([^"]+)"|([^\s|]+))\s*(?:\|\s*wc\s+-l)?\s*$/);
+      // No `-type` clause: the VFS find handler can't enforce a type filter, so
+      // accepting `-type d` and ignoring it would return wrong results. Such
+      // commands fall through to block+guidance instead.
+      const findMatch = rewritten.match(/^find\s+(\S+)\s+-name\s+(?:'([^']+)'|"([^"]+)"|([^\s|]+))\s*(?:\|\s*wc\s+-l)?\s*$/);
       if (findMatch) {
         const dir = findMatch[1].replace(/\/+$/, "") || "/";
         const rawPattern = findMatch[2] ?? findMatch[3] ?? findMatch[4] ?? "";

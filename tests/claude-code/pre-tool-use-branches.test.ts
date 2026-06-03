@@ -523,6 +523,23 @@ describe("processPreToolUse: find / grep / fallback", () => {
     expect(d?.command).not.toContain("RETRY REQUIRED");
   });
 
+  it("Bash `find <dir> -type d -name '<pat>'` falls through to guidance (type filter unsupported)", async () => {
+    const findVirtualPathsFn = vi.fn(async () => ["/x.json"]) as any;
+    const d = await processPreToolUse(
+      { session_id: "s", tool_name: "Bash", tool_input: { command: "find ~/.deeplake/memory/sessions -type d -name '*.json'" }, tool_use_id: "t" },
+      {
+        config: BASE_CONFIG as any,
+        createApi: vi.fn(() => makeApi()),
+        findVirtualPathsFn,
+        executeCompiledBashCommandFn: vi.fn(async () => null) as any,
+        logFn: vi.fn(),
+      },
+    );
+    // Must NOT be served (the -type filter would be silently dropped).
+    expect(findVirtualPathsFn).not.toHaveBeenCalled();
+    expect(d?.command).toContain("RETRY REQUIRED");
+  });
+
   it("Bash `find … | wc -l` returns the count", async () => {
     const findVirtualPathsFn = vi.fn(async () => ["/a.json", "/b.json", "/c.json"]) as any;
     const d = await processPreToolUse(

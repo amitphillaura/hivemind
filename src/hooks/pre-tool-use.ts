@@ -522,7 +522,10 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
       // '<pat>'` optionally piped to `wc -l`. A prefix match would accept
       // `find … -name '*.md' -delete` or `… -o -name '…'` and silently drop the
       // trailing semantics; anything else falls through to guidance.
-      const findMatch = shellCmd.match(/^find\s+(\S+)\s+(?:-type\s+\S+\s+)?-name\s+(?:'([^']+)'|"([^"]+)"|([^\s|]+))\s*(?:\|\s*wc\s+-l)?\s*$/);
+      // No `-type` clause: the VFS find handler can't enforce a type filter, so
+      // accepting `-type d` and ignoring it would return wrong results. Such
+      // commands fall through to guidance instead.
+      const findMatch = shellCmd.match(/^find\s+(\S+)\s+-name\s+(?:'([^']+)'|"([^"]+)"|([^\s|]+))\s*(?:\|\s*wc\s+-l)?\s*$/);
       if (findMatch) {
         const dir = findMatch[1].replace(/\/+$/, "") || "/";
         const rawPattern = findMatch[2] ?? findMatch[3] ?? findMatch[4] ?? "";
