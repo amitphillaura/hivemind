@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { resolveCrossFileCalls, resolveModule } from "../../../src/graph/resolve/cross-file.js";
-import type { FileExtraction, GraphNode, ImportBinding, RawCall } from "../../../src/graph/types.js";
+import { repointImportEdges, resolveCrossFileCalls, resolveModule } from "../../../src/graph/resolve/cross-file.js";
+import type { FileExtraction, GraphEdge, GraphNode, ImportBinding, RawCall } from "../../../src/graph/types.js";
 
 function node(id: string, label: string, source_file: string, exported = true, kind: GraphNode["kind"] = "function"): GraphNode {
   return { id, label, kind, source_file, source_location: "L1", language: "typescript", exported };
@@ -155,5 +155,45 @@ describe("resolveCrossFileCalls", () => {
     );
     const b = extraction("src/b.ts", [node("src/b.ts:foo:function", "foo", "src/b.ts")]);
     expect(resolveCrossFileCalls([a, b], [...a.nodes, ...b.nodes])).toHaveLength(1);
+  });
+});
+
+describe("repointImportEdges (B2)", () => {
+  const known = new Set(["src/a.ts", "src/b.ts", "src/util/index.ts"]);
+  const imp = (source: string, target: string): GraphEdge =>
+    ({ source, target, relation: "imports", confidence: "EXTRACTED" });
+
+  it("repoints a relative import to the resolved file's module node", () => {
+    const out = repointImportEdges([imp("src/a.ts::module", "external:./b")], known);
+    expect(out[0]!.target).toBe("src/b.ts::module");
+    expect(out[0]!.relation).toBe("imports");
+  });
+
+  it("repoints a directory import to the index module node", () => {
+    const out = repointImportEdges([imp("src/a.ts::module", "external:./util")], known);
+    expect(out[0]!.target).toBe("src/util/index.ts::module");
+  });
+
+  it("keeps external: for a bare (npm) specifier", () => {
+    const out = repointImportEdges([imp("src/a.ts::module", "external:lodash")], known);
+    expect(out[0]!.target).toBe("external:lodash");
+  });
+
+  it("keeps external: for an unresolvable relative specifier", () => {
+    const out = repointImportEdges([imp("src/a.ts::module", "external:./missing")], known);
+    expect(out[0]!.target).toBe("external:./missing");
+  });
+
+  it("leaves non-import edges untouched", () => {
+    const calls: GraphEdge = { source: "src/a.ts:x:function", target: "src/b.ts:y:function", relation: "calls", confidence: "EXTRACTED" };
+    const out = repointImportEdges([calls], known);
+    expect(out[0]).toEqual(calls);
+  });
+
+  it("does not mutate the input array", () => {
+    const input = [imp("src/a.ts::module", "external:./b")];
+    const snapshot = input[0]!.target;
+    repointImportEdges(input, known);
+    expect(input[0]!.target).toBe(snapshot);
   });
 });

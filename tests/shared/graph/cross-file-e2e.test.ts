@@ -117,6 +117,22 @@ describe("cross-file calls — extractor → snapshot", () => {
     expect(callsEdges(snap).some((e) => e.target.includes("greet"))).toBe(false);
   });
 
+  it("B2: a relative import edge points at the target file's module node", () => {
+    const a = extractTypeScript(`import { greet } from "./b";\nexport function run() { return greet(); }\n`, "src/a.ts");
+    const b = extractTypeScript(`export function greet() { return 1; }\n`, "src/b.ts");
+    const snap = buildSnapshot([a, b], meta(), obs());
+    const importEdges = snap.links.filter((e) => e.relation === "imports");
+    expect(importEdges.some((e) => e.source === "src/a.ts::module" && e.target === "src/b.ts::module")).toBe(true);
+    // and no leftover external: placeholder for the resolved relative import
+    expect(importEdges.some((e) => e.source === "src/a.ts::module" && e.target === "external:./b")).toBe(false);
+  });
+
+  it("B2: a bare (npm) import keeps its external: target", () => {
+    const a = extractTypeScript(`import { debounce } from "lodash";\nexport function run() { return debounce(); }\n`, "src/a.ts");
+    const snap = buildSnapshot([a], meta(), obs());
+    expect(snap.links.some((e) => e.relation === "imports" && e.target === "external:lodash")).toBe(true);
+  });
+
   it("still emits intra-file calls (no regression)", () => {
     const a = extractTypeScript(
       `function helper() { return 1; }\nexport function run() { return helper(); }\n`,

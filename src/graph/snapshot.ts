@@ -22,7 +22,7 @@ import { dirname, join } from "node:path";
 
 import { appendHistoryEntry, entryFromSnapshot, type SnapshotTrigger } from "./history.js";
 import { writeLastBuild } from "./last-build.js";
-import { resolveCrossFileCalls } from "./resolve/cross-file.js";
+import { repointImportEdges, resolveCrossFileCalls } from "./resolve/cross-file.js";
 import type {
   FileExtraction,
   GraphEdge,
@@ -66,8 +66,14 @@ export function buildSnapshot(
   // index. Deterministic + additive — files without raw_calls add nothing.
   for (const e of resolveCrossFileCalls(extractions, nodes)) links.push(e);
 
+  // B2: repoint relative `imports` edges from `external:<specifier>` to the
+  // real module node of the resolved file (bare/unresolved keep external:).
+  const knownFiles = new Set<string>();
+  for (const ex of extractions) knownFiles.add(ex.source_file);
+  const resolvedLinks = repointImportEdges(links, knownFiles);
+
   nodes.sort(compareNodes);
-  links.sort(compareEdges);
+  resolvedLinks.sort(compareEdges);
 
   return {
     directed: true,
@@ -75,7 +81,7 @@ export function buildSnapshot(
     graph: metadata,
     observation,
     nodes,
-    links,
+    links: resolvedLinks,
   };
 }
 
