@@ -486,30 +486,37 @@ export class DeeplakeFs implements IFileSystem {
     if (!this.goalsTable) throw new Error("goalsTable not configured");
     const parts = decomposeGoalPath(r.path);
     const safe = this.goalsTable;
-    const ts = r.lastUpdateDate ?? r.creationDate ?? new Date().toISOString();
+    const now = new Date().toISOString();
+    const createdAt = r.creationDate ?? now;
+    const updatedAt = r.lastUpdateDate ?? createdAt;
     const existing = await this.client.query(
       `SELECT id FROM "${safe}" WHERE goal_id = '${esc(parts.goal_id)}' LIMIT 1`
     );
     if (existing.length > 0) {
+      // Preserve created_at — a status transition or content edit must
+      // not reset the goal's creation timestamp (it drives created_at
+      // DESC ordering in the listing and bootstrap). Record the edit
+      // time in updated_at instead.
       await this.client.query(
         `UPDATE "${safe}" SET ` +
         `owner = '${esc(parts.owner)}', ` +
         `status = '${esc(parts.status)}', ` +
         `content = E'${esc(r.contentText)}', ` +
-        `created_at = '${esc(ts)}' ` +
+        `updated_at = '${esc(updatedAt)}' ` +
         `WHERE goal_id = '${esc(parts.goal_id)}'`
       );
     } else {
       const id = randomUUID();
       await this.client.query(
-        `INSERT INTO "${safe}" (id, goal_id, owner, status, content, version, created_at, agent, plugin_version) VALUES (` +
+        `INSERT INTO "${safe}" (id, goal_id, owner, status, content, version, created_at, updated_at, agent, plugin_version) VALUES (` +
         `'${id}', ` +
         `'${esc(parts.goal_id)}', ` +
         `'${esc(parts.owner)}', ` +
         `'${esc(parts.status)}', ` +
         `E'${esc(r.contentText)}', ` +
         `1, ` +
-        `'${esc(ts)}', ` +
+        `'${esc(createdAt)}', ` +
+        `'${esc(updatedAt)}', ` +
         `'manual', ` +
         `''` +
         `)`
@@ -528,28 +535,34 @@ export class DeeplakeFs implements IFileSystem {
     if (!this.kpisTable) throw new Error("kpisTable not configured");
     const parts = decomposeKpiPath(r.path);
     const safe = this.kpisTable;
-    const ts = r.lastUpdateDate ?? r.creationDate ?? new Date().toISOString();
+    const now = new Date().toISOString();
+    const createdAt = r.creationDate ?? now;
+    const updatedAt = r.lastUpdateDate ?? createdAt;
     const existing = await this.client.query(
       `SELECT id FROM "${safe}" ` +
       `WHERE goal_id = '${esc(parts.goal_id)}' AND kpi_id = '${esc(parts.kpi_id)}' LIMIT 1`
     );
     if (existing.length > 0) {
+      // Preserve created_at — KPI progress edits keep their original
+      // creation time so the KPI list stays in stable creation order
+      // (created_at ASC). Edit time goes to updated_at.
       await this.client.query(
         `UPDATE "${safe}" SET ` +
         `content = E'${esc(r.contentText)}', ` +
-        `created_at = '${esc(ts)}' ` +
+        `updated_at = '${esc(updatedAt)}' ` +
         `WHERE goal_id = '${esc(parts.goal_id)}' AND kpi_id = '${esc(parts.kpi_id)}'`
       );
     } else {
       const id = randomUUID();
       await this.client.query(
-        `INSERT INTO "${safe}" (id, goal_id, kpi_id, content, version, created_at, agent, plugin_version) VALUES (` +
+        `INSERT INTO "${safe}" (id, goal_id, kpi_id, content, version, created_at, updated_at, agent, plugin_version) VALUES (` +
         `'${id}', ` +
         `'${esc(parts.goal_id)}', ` +
         `'${esc(parts.kpi_id)}', ` +
         `E'${esc(r.contentText)}', ` +
         `1, ` +
-        `'${esc(ts)}', ` +
+        `'${esc(createdAt)}', ` +
+        `'${esc(updatedAt)}', ` +
         `'manual', ` +
         `''` +
         `)`

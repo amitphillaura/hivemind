@@ -278,6 +278,69 @@ describe("DeeplakeFs goal/kpi namespace isolation", () => {
     // No dedicated table → the memory-table copy is the only one, keep it.
     expect(await fs.readdir("/goal/alice/opened")).toContain("legacy.md");
   });
+
+  it("preserves created_at on a status transition, recording the move in updated_at", async () => {
+    const sql: string[] = [];
+    const client = {
+      applyStorageCreds: vi.fn().mockResolvedValue(undefined),
+      ensureTable: vi.fn().mockResolvedValue(undefined),
+      ensureGoalsTable: vi.fn().mockResolvedValue(undefined),
+      ensureKpisTable: vi.fn().mockResolvedValue(undefined),
+      listTables: vi.fn().mockResolvedValue(["memory", "goals", "kpis"]),
+      query: vi.fn().mockImplementation(async (q: string) => {
+        sql.push(q);
+        if (q.includes("SELECT path, size_bytes, mime_type")) return [];
+        if (q.includes("SELECT goal_id, owner, status, content")) {
+          return [{ goal_id: "g1", owner: "alice", status: "opened", content: "do it", created_at: "2026-01-01" }];
+        }
+        // upsertGoalRow existence check → row exists, take the UPDATE branch.
+        if (q.startsWith("SELECT id FROM")) return [{ id: "row-1" }];
+        return [];
+      }),
+    };
+    const fs = await DeeplakeFs.create(client as never, "memory", "/", "sessions", {
+      goalsTable: "goals",
+      kpisTable: "kpis",
+    });
+
+    await fs.mv("/goal/alice/opened/g1.md", "/goal/alice/closed/g1.md");
+
+    const update = sql.find(q => q.includes("UPDATE") && q.includes("status = 'closed'"));
+    expect(update).toBeDefined();
+    expect(update).toContain("updated_at =");   // edit time recorded here
+    expect(update).not.toContain("created_at ="); // creation time left untouched
+  });
+
+  it("keeps created_at and updated_at independent on a fresh goal INSERT", async () => {
+    const sql: string[] = [];
+    const client = {
+      applyStorageCreds: vi.fn().mockResolvedValue(undefined),
+      ensureTable: vi.fn().mockResolvedValue(undefined),
+      ensureGoalsTable: vi.fn().mockResolvedValue(undefined),
+      ensureKpisTable: vi.fn().mockResolvedValue(undefined),
+      listTables: vi.fn().mockResolvedValue(["memory", "goals", "kpis"]),
+      query: vi.fn().mockImplementation(async (q: string) => {
+        sql.push(q);
+        // upsertGoalRow existence check → no row, take the INSERT branch.
+        return [];
+      }),
+    };
+    const fs = await DeeplakeFs.create(client as never, "memory", "/", "sessions", {
+      goalsTable: "goals",
+      kpisTable: "kpis",
+    });
+
+    await fs.writeFileWithMeta("/goal/alice/opened/g2.md", "do it later", {
+      creationDate: "2026-01-01T00:00:00.000Z",
+      lastUpdateDate: "2026-02-02T00:00:00.000Z",
+    });
+    await fs.flush();
+
+    const insert = sql.find(q => q.startsWith("INSERT") && q.includes('"goals"'));
+    expect(insert).toBeDefined();
+    expect(insert).toContain("'2026-01-01T00:00:00.000Z'"); // created_at
+    expect(insert).toContain("'2026-02-02T00:00:00.000Z'"); // updated_at — distinct, not clobbered
+  });
 });
 
 describe("guessMime", () => {

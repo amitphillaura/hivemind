@@ -1146,13 +1146,14 @@ export default definePluginEntry({
             const ts = new Date().toISOString();
             const safe = goalsTable.replace(/[^A-Za-z0-9_]/g, "");
             await dl.query(
-              `INSERT INTO "${safe}" (id, goal_id, owner, status, content, version, created_at, agent, plugin_version) VALUES (` +
+              `INSERT INTO "${safe}" (id, goal_id, owner, status, content, version, created_at, updated_at, agent, plugin_version) VALUES (` +
               `'${crypto.randomUUID()}', ` +
               `'${sqlStr(goalId)}', ` +
               `'${sqlStr(owner)}', ` +
               `'opened', ` +
               `E'${sqlStr(params.text)}', ` +
               `1, ` +
+              `'${sqlStr(ts)}', ` +
               `'${sqlStr(ts)}', ` +
               `'openclaw', ` +
               `''` +
@@ -1198,12 +1199,13 @@ export default definePluginEntry({
             const ts = new Date().toISOString();
             const safe = kpisTable.replace(/[^A-Za-z0-9_]/g, "");
             await dl.query(
-              `INSERT INTO "${safe}" (id, goal_id, kpi_id, content, version, created_at, agent, plugin_version) VALUES (` +
+              `INSERT INTO "${safe}" (id, goal_id, kpi_id, content, version, created_at, updated_at, agent, plugin_version) VALUES (` +
               `'${crypto.randomUUID()}', ` +
               `'${sqlStr(params.goal_id)}', ` +
               `'${sqlStr(params.kpi_id)}', ` +
               `E'${sqlStr(content)}', ` +
               `1, ` +
+              `'${sqlStr(ts)}', ` +
               `'${sqlStr(ts)}', ` +
               `'openclaw', ` +
               `''` +
