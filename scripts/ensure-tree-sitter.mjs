@@ -17,7 +17,7 @@ import { createRequire } from 'node:module';
 
 const ROOT = process.cwd();
 const require = createRequire(`${ROOT}/`);
-const PKGS = ['tree-sitter', 'tree-sitter-typescript'];
+const PKGS = ['tree-sitter', 'tree-sitter-typescript', 'tree-sitter-python'];
 
 function bindingsLoad() {
   try {
@@ -26,6 +26,11 @@ function bindingsLoad() {
     const parser = new Parser();
     parser.setLanguage(TS);
     parser.parse('const x = 1;');
+    // B6: also verify the Python grammar loads on this platform / Node ABI.
+    const Py = require('tree-sitter-python');
+    const pyParser = new Parser();
+    pyParser.setLanguage(Py);
+    pyParser.parse('x = 1\n');
     return true;
   } catch {
     return false;

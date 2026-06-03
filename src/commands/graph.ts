@@ -27,7 +27,7 @@ import {
   loadSnapshotByCommit,
   printDiffHuman,
 } from "../graph/diff.js";
-import { extractTypeScript } from "../graph/extract/typescript.js";
+import { extractFile } from "../graph/extract/index.js";
 import {
   installPostCommitHook,
   uninstallPostCommitHook,
@@ -457,7 +457,7 @@ export async function runBuildCommand(args: string[]): Promise<void> {
       const contentSha = fileContentHash(content);
       let extraction = readCache(baseDir, contentSha, rel);
       if (extraction === null) {
-        extraction = extractTypeScript(content, rel);
+        extraction = extractFile(content, rel);
         writeCache(baseDir, contentSha, extraction);
       } else {
         cacheHits += 1;
@@ -654,9 +654,10 @@ function walk(dir: string, out: string[]): void {
 
 function isSourceFile(name: string): boolean {
   if (name.endsWith(".d.ts")) return false; // declarations only, no implementation
-  // B7: JS/JSX/ESM/CJS too — the TS grammar is a superset so they parse with
-  // the same extractor (the language label is set per-file in extractTypeScript).
-  return /\.(tsx?|jsx?|mjs|cjs)$/.test(name);
+  // B7: JS/JSX/ESM/CJS via the TS grammar (superset). B6: Python via the
+  // tree-sitter Python grammar. extractFile() routes by extension; the
+  // per-file language label is set inside each extractor.
+  return /\.(tsx?|jsx?|mjs|cjs|pyi?)$/.test(name);
 }
 
 function toForwardSlash(p: string): string {

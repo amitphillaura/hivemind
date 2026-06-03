@@ -63,6 +63,7 @@ await build({
     // can't be bundled by esbuild; resolved from node_modules at runtime.
     "tree-sitter",
     "tree-sitter-typescript",
+    "tree-sitter-python",
   ],
   define: {
     __HIVEMIND_VERSION__: JSON.stringify(hivemindVersion),
@@ -119,6 +120,7 @@ await build({
     // graph-on-stop transitively imports the tree-sitter native parser (G3).
     "tree-sitter",
     "tree-sitter-typescript",
+    "tree-sitter-python",
   ],
   define: {
     __HIVEMIND_VERSION__: JSON.stringify(hivemindVersion),
@@ -193,6 +195,7 @@ await build({
     // node_modules at runtime.
     "tree-sitter",
     "tree-sitter-typescript",
+    "tree-sitter-python",
   ],
   define: {
     __HIVEMIND_VERSION__: JSON.stringify(hivemindVersion),
@@ -234,6 +237,7 @@ await build({
     // graph-on-stop transitively imports the tree-sitter native parser (G3).
     "tree-sitter",
     "tree-sitter-typescript",
+    "tree-sitter-python",
   ],
   define: {
     __HIVEMIND_VERSION__: JSON.stringify(hivemindVersion),
@@ -493,6 +497,7 @@ await build({
     // Phase 1).
     "tree-sitter",
     "tree-sitter-typescript",
+    "tree-sitter-python",
   ],
   banner: { js: "#!/usr/bin/env node" },
 });
