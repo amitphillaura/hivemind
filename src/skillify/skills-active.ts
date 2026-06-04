@@ -72,6 +72,23 @@ export function sessionBucket(sessionId: string, buckets = 2): number {
   return Math.abs(h | 0) % buckets;
 }
 
+/**
+ * Path namespace for attribution rows. Deliberately NOT under `/sessions/` (cf.
+ * buildSessionPath) so the summary / raw-transcript readers — which filter
+ * `path LIKE '/sessions/%'` (see virtual-table-query.ts, deeplake-fs.ts) — never treat
+ * an attribution row as transcript content. For an otherwise-empty session that would
+ * make SessionEnd run the summarizer on only this JSON; for a normal session it would
+ * pollute the transcript with the active-skill list. Measurement queries select by
+ * message content (`type = "skills_active"`), not by path, so a distinct prefix is free.
+ */
+export function buildSkillsActivePath(
+  config: { userName: string; orgName: string; workspaceId: string },
+  sessionId: string,
+): string {
+  const workspace = config.workspaceId ?? "default";
+  return `/skills_active/${config.userName}/${config.userName}_${config.orgName}_${workspace}_${sessionId}.json`;
+}
+
 export interface SkillsActiveInsertArgs {
   sessionsTable: string;
   sessionPath: string;

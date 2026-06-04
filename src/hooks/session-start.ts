@@ -14,8 +14,7 @@ import { loadConfig } from "../config.js";
 import { DeeplakeApi } from "../deeplake-api.js";
 import { sqlStr } from "../utils/sql.js";
 import { projectNameFromCwd } from "../utils/project-name.js";
-import { buildSessionPath } from "../utils/session-path.js";
-import { listActiveOrgSkills, sessionBucket, buildSkillsActiveInsert } from "../skillify/skills-active.js";
+import { listActiveOrgSkills, sessionBucket, buildSkillsActiveInsert, buildSkillsActivePath } from "../skillify/skills-active.js";
 import { readStdin } from "../utils/stdin.js";
 import { log as _log } from "../utils/debug.js";
 import { getInstalledVersion } from "../utils/version-check.js";
@@ -237,7 +236,9 @@ async function main(): Promise<void> {
           if (process.env.HIVEMIND_SKILL_ATTRIBUTION !== "0") {
             try {
               const skills = listActiveOrgSkills();
-              const attrSessionPath = buildSessionPath(config, input.session_id);
+              // Distinct `/skills_active/` namespace (NOT `/sessions/`) so the summary /
+              // raw-transcript readers never mistake this attribution row for a transcript.
+              const attrSessionPath = buildSkillsActivePath(config, input.session_id);
               const sql = buildSkillsActiveInsert({
                 sessionsTable,
                 sessionPath: attrSessionPath,

@@ -6,6 +6,7 @@ import {
   listActiveOrgSkills,
   sessionBucket,
   buildSkillsActiveInsert,
+  buildSkillsActivePath,
 } from "../../src/skillify/skills-active.js";
 
 describe("listActiveOrgSkills", () => {
@@ -66,6 +67,24 @@ describe("sessionBucket", () => {
     const seen = new Set<number>();
     for (let i = 0; i < 200; i++) seen.add(sessionBucket(`session-${i}`));
     expect(seen).toEqual(new Set([0, 1])); // both arms populated → real randomization
+  });
+});
+
+describe("buildSkillsActivePath", () => {
+  const config = { userName: "kamo", orgName: "activeloop", workspaceId: "default" };
+
+  it("namespaces under /skills_active/, NOT /sessions/ (so summary readers exclude it)", () => {
+    const p = buildSkillsActivePath(config, "S1");
+    expect(p.startsWith("/skills_active/")).toBe(true);
+    expect(p.startsWith("/sessions/")).toBe(false);
+    // The exact filter the summary / raw-transcript readers use must NOT match this path.
+    expect(p.includes("/sessions/")).toBe(false);
+  });
+
+  it("embeds the full {user, org, workspace, session} tuple", () => {
+    expect(buildSkillsActivePath(config, "S1")).toBe(
+      "/skills_active/kamo/kamo_activeloop_default_S1.json",
+    );
   });
 });
 
