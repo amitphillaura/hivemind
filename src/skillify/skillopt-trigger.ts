@@ -78,8 +78,9 @@ export interface FireDeps {
   save?: (s: SkillOptState) => void;
   spawnWorker?: () => void;
   env?: NodeJS.ProcessEnv;
-  tryLock?: () => boolean;   // cross-process arbiter; default: real worker lock
-  releaseLock?: () => void;  // default: release the real worker lock
+  tryLock?: () => boolean;            // cross-process arbiter; default: real worker lock
+  releaseLock?: () => void;          // default: release the real worker lock
+  reload?: () => SkillOptState;      // fresh state re-read INSIDE the lock; default: loadState
 }
 
 export interface FireResult {
@@ -98,6 +99,7 @@ export function maybeFireSkillOpt(deps: FireDeps = {}): FireResult {
   if (env.HIVEMIND_SKILLOPT_WORKER === "1") return { fired: false, reason: "in-worker" }; // recursion guard
   const now = deps.now ?? Date.now();
   const state = deps.state ?? loadState();
+  // Cheap pre-lock check: skip the lock entirely when clearly throttled.
   if (!shouldFire(state.lastRun, now)) return { fired: false, reason: "throttled" };
 
   // Cross-process arbiter: two SessionStart hooks racing at the weekly boundary
@@ -109,7 +111,13 @@ export function maybeFireSkillOpt(deps: FireDeps = {}): FireResult {
   const acquired = (deps.tryLock ?? (() => tryAcquireWorkerLock(LOCK_KEY)))();
   if (!acquired) return { fired: false, reason: "locked" };
   try {
-    (deps.save ?? saveState)({ ...state, lastRun: new Date(now).toISOString() });
+    // Re-check INSIDE the lock with freshly-read state: a racing process may have
+    // stamped lastRun and released the lock between our pre-lock check and our
+    // acquire. Without this the loser would still act on its stale snapshot and
+    // spawn a second worker, defeating the lock. This makes the throttle atomic.
+    const fresh = (deps.reload ?? loadState)();
+    if (!shouldFire(fresh.lastRun, now)) return { fired: false, reason: "throttled" };
+    (deps.save ?? saveState)({ ...fresh, lastRun: new Date(now).toISOString() });
     (deps.spawnWorker ?? spawnWorker)();
   } finally {
     (deps.releaseLock ?? (() => releaseWorkerLock(LOCK_KEY)))();

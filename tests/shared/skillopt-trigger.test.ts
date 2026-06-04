@@ -33,6 +33,7 @@ describe("maybeFireSkillOpt (auto-fire decision)", () => {
       env: {} as NodeJS.ProcessEnv, // default ON
       tryLock: () => true,          // injected so the unit test touches no real lock file
       releaseLock: release,
+      reload: () => over.state ?? {}, // in-lock re-read mirrors the pre-lock state by default
       ...over,
     });
     return { res, saved, spawn, release };
@@ -51,6 +52,20 @@ describe("maybeFireSkillOpt (auto-fire decision)", () => {
     expect(res).toEqual({ fired: false, reason: "locked" });
     expect(spawn).not.toHaveBeenCalled();
     expect(saved).toEqual([]); // the loser never stamps — only the lock winner does
+  });
+
+  it("re-checks lastRun INSIDE the lock and bails if another process just fired (TOCTOU)", () => {
+    // Pre-lock snapshot is fire-eligible, but by the time we own the lock the
+    // freshly-read state shows a just-stamped lastRun (a racing process fired +
+    // released between our pre-check and acquire) → must NOT spawn a 2nd worker.
+    const { res, saved, spawn, release } = harness({
+      state: {},
+      reload: () => ({ lastRun: new Date(NOW).toISOString() }),
+    });
+    expect(res).toEqual({ fired: false, reason: "throttled" });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(saved).toEqual([]);                // the loser doesn't stamp
+    expect(release).toHaveBeenCalledTimes(1); // but DOES release the lock it acquired
   });
 
   it("fires when last run was 8 days ago", () => {

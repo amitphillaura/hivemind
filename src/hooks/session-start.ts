@@ -14,7 +14,7 @@ import { loadConfig } from "../config.js";
 import { DeeplakeApi } from "../deeplake-api.js";
 import { sqlStr } from "../utils/sql.js";
 import { projectNameFromCwd } from "../utils/project-name.js";
-import { listActiveOrgSkills, sessionBucket, buildSkillsActiveInsert, buildSkillsActivePath } from "../skillify/skills-active.js";
+import { listActiveOrgSkills, sessionBucket, buildSkillsActiveInsert, buildSkillsActivePath, skillRootsForCwd } from "../skillify/skills-active.js";
 import { readStdin } from "../utils/stdin.js";
 import { log as _log } from "../utils/debug.js";
 import { getInstalledVersion } from "../utils/version-check.js";
@@ -254,7 +254,9 @@ async function main(): Promise<void> {
           // Swallowed — must never fail SessionStart.
           if (process.env.HIVEMIND_SKILL_ATTRIBUTION !== "0") {
             try {
-              const skills = listActiveOrgSkills();
+              // Scan global + project-scoped (<cwd>/.claude/skills) roots so
+              // skills pulled with `--to project` are attributed too.
+              const skills = listActiveOrgSkills(skillRootsForCwd(input.cwd));
               // Distinct `/skills_active/` namespace (NOT `/sessions/`) so the summary /
               // raw-transcript readers never mistake this attribution row for a transcript.
               const attrSessionPath = buildSkillsActivePath(config, input.session_id);

@@ -7,6 +7,8 @@ import {
   sessionBucket,
   buildSkillsActiveInsert,
   buildSkillsActivePath,
+  skillRootsForCwd,
+  defaultSkillsRoot,
 } from "../../src/skillify/skills-active.js";
 import type { PulledManifest } from "../../src/skillify/manifest.js";
 
@@ -48,7 +50,7 @@ describe("listActiveOrgSkills", () => {
       { dirName: "pg-deeplake-test-crash-debugging--sasun", name: "pg-deeplake-test-crash-debugging", author: "sasun" },
     );
 
-    const got = listActiveOrgSkills(root, manifest);
+    const got = listActiveOrgSkills([root], manifest);
     expect(got).toEqual([
       { name: "pg-deeplake-test-crash-debugging", author: "sasun", version: 1 },
       { name: "posthog-event-smoke-testing", author: "kamo.aghbalyan", version: 1 },
@@ -58,17 +60,39 @@ describe("listActiveOrgSkills", () => {
 
   it("excludes a local-only dir whose name contains `--` when the manifest is empty (no false positive)", () => {
     fs.mkdirSync(path.join(root, "deploy--blue-green")); // org-shaped name, but never pulled
-    expect(listActiveOrgSkills(root, manifestOf())).toEqual([]);
+    expect(listActiveOrgSkills([root], manifestOf())).toEqual([]);
   });
 
   it("takes name/author from the manifest, not a dirname split (multi-`--` dir stays correct)", () => {
     fs.mkdirSync(path.join(root, "some--weird--dirname"));
     const manifest = manifestOf({ dirName: "some--weird--dirname", name: "some-skill", author: "first-last" });
-    expect(listActiveOrgSkills(root, manifest)).toEqual([{ name: "some-skill", author: "first-last", version: 1 }]);
+    expect(listActiveOrgSkills([root], manifest)).toEqual([{ name: "some-skill", author: "first-last", version: 1 }]);
   });
 
   it("returns [] for a missing skills root (never throws)", () => {
-    expect(listActiveOrgSkills(path.join(root, "does-not-exist"), manifestOf())).toEqual([]);
+    expect(listActiveOrgSkills([path.join(root, "does-not-exist")], manifestOf())).toEqual([]);
+  });
+
+  it("scans project + global roots and dedups a skill present in both (P2: --to project)", () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "skills-active-proj-"));
+    try {
+      fs.mkdirSync(path.join(root, "a-skill--alice"));         // global-pulled
+      fs.mkdirSync(path.join(projectRoot, "a-skill--alice"));  // also project-pulled (dup)
+      fs.mkdirSync(path.join(projectRoot, "b-skill--bob"));    // project-only org skill
+      fs.mkdirSync(path.join(projectRoot, "local-only--x"));   // not in manifest → excluded
+      const manifest = manifestOf(
+        { dirName: "a-skill--alice", name: "a-skill", author: "alice" },
+        { dirName: "b-skill--bob", name: "b-skill", author: "bob" },
+      );
+      const got = listActiveOrgSkills([root, projectRoot], manifest);
+      expect(got).toEqual([
+        { name: "a-skill", author: "alice", version: 1 }, // counted once despite two roots
+        { name: "b-skill", author: "bob", version: 1 },   // picked up from the project root
+      ]);
+      expect(got).toHaveLength(2);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it("reads the skill version from the installed SKILL.md frontmatter (enables v1-vs-v2)", () => {
@@ -78,7 +102,19 @@ describe("listActiveOrgSkills", () => {
       "---\nname: evolving-skill\nversion: 5\n---\nbody",
     );
     const manifest = manifestOf({ dirName: "evolving-skill--sasun", name: "evolving-skill", author: "sasun" });
-    expect(listActiveOrgSkills(root, manifest)).toEqual([{ name: "evolving-skill", author: "sasun", version: 5 }]);
+    expect(listActiveOrgSkills([root], manifest)).toEqual([{ name: "evolving-skill", author: "sasun", version: 5 }]);
+  });
+});
+
+describe("skillRootsForCwd", () => {
+  it("returns only the global root when no cwd is given", () => {
+    expect(skillRootsForCwd()).toEqual([defaultSkillsRoot()]);
+  });
+  it("adds the project-scoped <cwd>/.claude/skills root when cwd is given", () => {
+    expect(skillRootsForCwd("/home/u/proj")).toEqual([
+      defaultSkillsRoot(),
+      path.join("/home/u/proj", ".claude", "skills"),
+    ]);
   });
 });
 
