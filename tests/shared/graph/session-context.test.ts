@@ -83,7 +83,7 @@ describe("graphContextLine", () => {
     expect(line).toContain("built 2m ago");   // truncated formatAge
     // Snapshot path is keyed by commit_sha when present
     expect(line).toContain(join(snapshotsDir, "abc1234deadbeef.json"));
-    expect(line).toContain("TypeScript only, AST-based");
+    expect(line).toContain("TypeScript / JavaScript / Python, AST-based");
     // v1.1 inject restructured to point at the VFS subdir instead of
     // raw-snapshot-only guidance. New assertions:
     expect(line).toContain("~/.deeplake/memory/graph/find/<pattern>");

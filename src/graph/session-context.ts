@@ -25,8 +25,8 @@
  * truncate when rendering.
  *
  * Honest scope hints in the inject text:
- *   - "TypeScript only" — Phase 1 limitation, makes Claude not waste a Read
- *     on Python/Rust expecting to find them in the graph.
+ *   - language scope (TypeScript / JavaScript / Python) — makes Claude not
+ *     waste a Read on e.g. Rust/Go expecting to find them in the graph.
  *   - "AST-based" — call/import/reference edges; NOT semantic similarity.
  *     The semantic layer is a deliberate v1.2 follow-up.
  *   - "may be stale" — the graph is rebuilt at most once per
@@ -138,7 +138,7 @@ export function graphContextLine(cwd: string, deps: GraphContextDeps = {}): stri
 
   return [
     "",
-    "LOCAL CODE GRAPH (TypeScript only, AST-based):",
+    "LOCAL CODE GRAPH (TypeScript / JavaScript / Python, AST-based):",
     `  ${nodesStr} nodes, ${edgesStr} edges (commit ${commitStr}, built ${ageStr} ago)`,
     "",
     "  Query via the Deeplake mount (intercepted — no real files on disk):",
@@ -154,9 +154,10 @@ export function graphContextLine(cwd: string, deps: GraphContextDeps = {}): stri
     "    Also: neighborhood/<file> · layers · tour · path/<from>/<to>",
     "",
     `  Raw snapshot (fallback): ${snapshotPath}`,
-    "  Limitations: TypeScript only, AST only (no semantic edges yet).",
+    "  Limitations: TypeScript / JavaScript / Python, AST only (no semantic edges yet).",
     "    Cross-file calls/imports/extends resolved for relative named imports;",
-    "    bare (npm)/aliased/barrel/dynamic imports stay unresolved.",
+    "    bare (npm)/aliased/barrel/dynamic imports stay unresolved. Python is",
+    "    intra-file + structure only (cross-file resolution is a follow-up).",
     staleness,
   ].join("\n");
 }
