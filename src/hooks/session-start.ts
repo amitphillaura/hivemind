@@ -214,6 +214,23 @@ async function main(): Promise<void> {
   // regardless; the rules table it queries is lazy-created by the
   // CLI write path (`hivemind rules add`).
   const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false" && entrypointPassesOnlyCliGate();
+
+  // Auto-pull skills from all org users into ~/.claude/skills/ on every
+  // SessionStart. File writes inside runPull are idempotent (skipped
+  // when local version is at-or-newer than remote), so re-running each
+  // session is cheap on disk; the only per-call cost is the SQL
+  // round-trip. Bounded by a 5s timeout so a slow Deeplake never
+  // freezes SessionStart. Hard opt-out via HIVEMIND_AUTOPULL_DISABLED=1.
+  // All failures swallowed inside autoPullSkills (documented as
+  // never-rejecting), so no try/catch needed here.
+  //
+  // Runs BEFORE the skill-attribution snapshot below so that a skill pulled
+  // (or upgraded) during THIS SessionStart is reflected in the recorded
+  // skills_active set — otherwise the row would capture a stale/empty set
+  // while the session can already use the freshly-pulled skill.
+  const pullResult = await autoPullSkills();
+  log(`autopull: pulled=${pullResult.pulled} skipped=${pullResult.skipped}`);
+
   let rulesBlock = "";
   if (input.session_id && creds?.token) {
     try {
@@ -231,7 +248,9 @@ async function main(): Promise<void> {
           // Skill attribution (measurement): record which org-shared skills were in
           // context this session + a deterministic A/B bucket. This is the label that
           // makes skill value measurable (sessions with vs without skill X / v1 vs v2).
-          // Org skills only (`<name>--<author>` dirs). Opt-out: HIVEMIND_SKILL_ATTRIBUTION=0.
+          // Org skills are identified via the pull manifest (authoritative), not the
+          // `--` dirname pattern. Snapshot runs after auto-pull (above) so it reflects
+          // freshly-pulled skills. Opt-out: HIVEMIND_SKILL_ATTRIBUTION=0.
           // Swallowed — must never fail SessionStart.
           if (process.env.HIVEMIND_SKILL_ATTRIBUTION !== "0") {
             try {
@@ -289,17 +308,6 @@ async function main(): Promise<void> {
       wikiLog(`SessionStart: placeholder failed for ${input.session_id}: ${e.message}`);
     }
   }
-
-  // Auto-pull skills from all org users into ~/.claude/skills/ on every
-  // SessionStart. File writes inside runPull are idempotent (skipped
-  // when local version is at-or-newer than remote), so re-running each
-  // session is cheap on disk; the only per-call cost is the SQL
-  // round-trip. Bounded by a 5s timeout so a slow Deeplake never
-  // freezes SessionStart. Hard opt-out via HIVEMIND_AUTOPULL_DISABLED=1.
-  // All failures swallowed inside autoPullSkills (documented as
-  // never-rejecting), so no try/catch needed here.
-  const pullResult = await autoPullSkills();
-  log(`autopull: pulled=${pullResult.pulled} skipped=${pullResult.skipped}`);
 
   // Weekly, user-side SkillOpt auto-fire. Non-blocking: checks a once-a-week throttle and, if due,
   // spawns a DETACHED worker that runs the optimize loop with the user's own agent. Never awaits;

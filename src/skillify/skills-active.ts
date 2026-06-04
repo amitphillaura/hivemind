@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { sqlStr } from "../utils/sql.js";
+import { loadManifest, type PulledManifest } from "./manifest.js";
 
 export interface ActiveSkill {
   name: string;
@@ -40,23 +41,44 @@ export function defaultSkillsRoot(): string {
   return path.join(homedir(), ".claude", "skills");
 }
 
-/** List org-shared skills present on disk: `<name>--<author>` dirs. Bare (local) dirs skipped. */
-export function listActiveOrgSkills(skillsRoot: string = defaultSkillsRoot()): ActiveSkill[] {
+/**
+ * List org-shared skills currently installed on disk under `skillsRoot`.
+ *
+ * Identity (name + author) comes from the pull manifest — the authoritative
+ * record of what `skillify pull` installed from the org — NOT from splitting
+ * the `<name>--<author>` directory name. That `--` pattern is a legitimate
+ * naming style for local-only variant skills (e.g. `deploy--blue-green`), so
+ * inferring "org skill" + a fabricated author from the dirname alone produces
+ * false positives that would pollute every attribution row (the same reason
+ * `unpull` consults the manifest instead of the dirname — see manifest.ts).
+ *
+ * Only directories present on disk AND recorded in the manifest are returned;
+ * local-only dirs (manifest-absent) are excluded. The version is read from the
+ * installed SKILL.md so v1-vs-v2 reflects what's actually in context.
+ */
+export function listActiveOrgSkills(
+  skillsRoot: string = defaultSkillsRoot(),
+  manifest: PulledManifest = loadManifest(),
+): ActiveSkill[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(skillsRoot, { withFileTypes: true });
   } catch {
     return [];
   }
+  // dirName → authoritative {name, author} for every pull-managed entry.
+  const pulled = new Map<string, { name: string; author: string }>();
+  for (const e of manifest.entries) pulled.set(e.dirName, { name: e.name, author: e.author });
+
   const out: ActiveSkill[] = [];
   for (const e of entries) {
     if (!e.isDirectory()) continue;
-    const idx = e.name.lastIndexOf("--");
-    if (idx <= 0 || idx + 2 >= e.name.length) continue; // bare local skill, or malformed → skip
+    const meta = pulled.get(e.name);
+    if (!meta) continue; // not pull-managed (local-only / unrelated) → excluded
     out.push({
-      name: e.name.slice(0, idx),
-      author: e.name.slice(idx + 2),
-      version: readSkillVersion(skillsRoot, e.name), // enables v1-vs-v2 comparison
+      name: meta.name,
+      author: meta.author,
+      version: readSkillVersion(skillsRoot, e.name), // installed version → enables v1-vs-v2
     });
   }
   // Sort by name, then author, so two org skills sharing a name (different

@@ -8,6 +8,25 @@ import {
   buildSkillsActiveInsert,
   buildSkillsActivePath,
 } from "../../src/skillify/skills-active.js";
+import type { PulledManifest } from "../../src/skillify/manifest.js";
+
+/** Build a pull manifest from `(dirName, name, author)` triples (fills the rest with defaults). */
+function manifestOf(...rows: Array<{ dirName: string; name: string; author: string }>): PulledManifest {
+  return {
+    version: 1,
+    entries: rows.map(r => ({
+      dirName: r.dirName,
+      name: r.name,
+      author: r.author,
+      projectKey: "pk",
+      remoteVersion: 1,
+      install: "global" as const,
+      installRoot: "/install/root",
+      pulledAt: "2026-01-01T00:00:00.000Z",
+      symlinks: [],
+    })),
+  };
+}
 
 describe("listActiveOrgSkills", () => {
   let root: string;
@@ -18,37 +37,48 @@ describe("listActiveOrgSkills", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("returns only `<name>--<author>` org dirs; excludes bare/local + malformed + files", () => {
+  it("returns only manifest-recorded (pull-managed) dirs; excludes local-only + files", () => {
     fs.mkdirSync(path.join(root, "posthog-event-smoke-testing--kamo.aghbalyan"));
     fs.mkdirSync(path.join(root, "pg-deeplake-test-crash-debugging--sasun"));
+    fs.mkdirSync(path.join(root, "deploy--blue-green"));        // local-only `--` dir, NOT pulled — excluded
     fs.mkdirSync(path.join(root, "plan-confirm-then-execute")); // bare local — excluded
-    fs.mkdirSync(path.join(root, "baz--")); // malformed (empty author) — excluded
-    fs.writeFileSync(path.join(root, "notes--x.txt"), "x"); // file, not dir — excluded
+    fs.writeFileSync(path.join(root, "notes--x.txt"), "x");     // file, not dir — excluded
+    const manifest = manifestOf(
+      { dirName: "posthog-event-smoke-testing--kamo.aghbalyan", name: "posthog-event-smoke-testing", author: "kamo.aghbalyan" },
+      { dirName: "pg-deeplake-test-crash-debugging--sasun", name: "pg-deeplake-test-crash-debugging", author: "sasun" },
+    );
 
-    const got = listActiveOrgSkills(root);
+    const got = listActiveOrgSkills(root, manifest);
     expect(got).toEqual([
       { name: "pg-deeplake-test-crash-debugging", author: "sasun", version: 1 },
       { name: "posthog-event-smoke-testing", author: "kamo.aghbalyan", version: 1 },
-    ]); // sorted by name; exactly the 2 valid org skills; version defaults to 1 (no SKILL.md)
-    expect(got).toHaveLength(2); // count: bare/malformed/file all dropped
+    ]); // sorted by name; exactly the 2 manifest-recorded skills; version defaults to 1 (no SKILL.md)
+    expect(got).toHaveLength(2); // local `deploy--blue-green` + bare + file all dropped
+  });
+
+  it("excludes a local-only dir whose name contains `--` when the manifest is empty (no false positive)", () => {
+    fs.mkdirSync(path.join(root, "deploy--blue-green")); // org-shaped name, but never pulled
+    expect(listActiveOrgSkills(root, manifestOf())).toEqual([]);
+  });
+
+  it("takes name/author from the manifest, not a dirname split (multi-`--` dir stays correct)", () => {
+    fs.mkdirSync(path.join(root, "some--weird--dirname"));
+    const manifest = manifestOf({ dirName: "some--weird--dirname", name: "some-skill", author: "first-last" });
+    expect(listActiveOrgSkills(root, manifest)).toEqual([{ name: "some-skill", author: "first-last", version: 1 }]);
   });
 
   it("returns [] for a missing skills root (never throws)", () => {
-    expect(listActiveOrgSkills(path.join(root, "does-not-exist"))).toEqual([]);
+    expect(listActiveOrgSkills(path.join(root, "does-not-exist"), manifestOf())).toEqual([]);
   });
 
-  it("splits on the LAST `--` so authors with hyphens survive", () => {
-    fs.mkdirSync(path.join(root, "some-skill--first-last"));
-    expect(listActiveOrgSkills(root)).toEqual([{ name: "some-skill", author: "first-last", version: 1 }]);
-  });
-
-  it("reads the skill version from SKILL.md frontmatter (enables v1-vs-v2)", () => {
+  it("reads the skill version from the installed SKILL.md frontmatter (enables v1-vs-v2)", () => {
     fs.mkdirSync(path.join(root, "evolving-skill--sasun"));
     fs.writeFileSync(
       path.join(root, "evolving-skill--sasun", "SKILL.md"),
       "---\nname: evolving-skill\nversion: 5\n---\nbody",
     );
-    expect(listActiveOrgSkills(root)).toEqual([{ name: "evolving-skill", author: "sasun", version: 5 }]);
+    const manifest = manifestOf({ dirName: "evolving-skill--sasun", name: "evolving-skill", author: "sasun" });
+    expect(listActiveOrgSkills(root, manifest)).toEqual([{ name: "evolving-skill", author: "sasun", version: 5 }]);
   });
 });
 

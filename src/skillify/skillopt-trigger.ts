@@ -29,9 +29,15 @@ const LOCK_KEY = "skillopt-weekly";
  * affects the path; a const would capture the real home at import time and
  * bypass isolation. Routes through the shared getStateDir() resolver so the
  * skillopt throttle honours the same override every other skillify sibling does.
+ *
+ * Nested under a `skillopt/` subdir (not a top-level `*.json` in getStateDir())
+ * because `hivemind skillify status` enumerates every top-level `.json` there as
+ * a tracked project; a bare `skillopt-state.json` would surface as a bogus
+ * project with `undefined` fields. A subdirectory is skipped by that `.json`
+ * filter while still living under the HIVEMIND_STATE_DIR-aware root.
  */
 function stateFile(): string {
-  return path.join(getStateDir(), "skillopt-state.json");
+  return path.join(getStateDir(), "skillopt", "state.json");
 }
 
 export interface SkillOptState {
