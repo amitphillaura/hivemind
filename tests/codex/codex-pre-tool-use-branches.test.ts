@@ -109,6 +109,8 @@ describe("processCodexPreToolUse: pass-through + unsafe", () => {
     );
     expect(d.action).toBe("block");
     expect(d.output).toContain("No such file or directory");
+    // Path-specific, not a generic error (a regression to generic text must fail).
+    expect(d.output).toContain("nonexistent.md");
     expect(d.output).not.toContain("not supported");
   });
 });

@@ -615,6 +615,7 @@ describe("processPreToolUse: find / grep / fallback", () => {
       },
     );
     expect(d?.command).toContain("No such file or directory");
+    expect(d?.command).toContain("missing.md");
     expect(d?.command).not.toContain("RETRY REQUIRED");
   });
 
