@@ -17,6 +17,11 @@ const ccHooks = [
   { entry: "dist/src/hooks/plugin-cache-gc.js", out: "plugin-cache-gc" },
   { entry: "dist/src/hooks/wiki-worker.js", out: "wiki-worker" },
   { entry: "dist/src/skillify/skillify-worker.js", out: "skillify-worker" },
+  // SkillOpt weekly worker: spawned detached by the SessionStart trigger
+  // (src/skillify/skillopt-trigger.ts), which resolves it relative to its
+  // own bundle dir via import.meta.url. Only the Claude Code session-start
+  // hook fires the trigger, so only this bundle ships the worker.
+  { entry: "dist/src/skillify/skillopt-worker.js", out: "skillopt-worker" },
   // codebase-graph Phase 1.5: auto-build the graph at SessionEnd, gated
   // on (a) 10-min rate limit, (b) HEAD changed since last build, (c) ≥1
   // source file diff. See src/hooks/graph-on-stop.ts.
