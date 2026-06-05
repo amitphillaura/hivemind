@@ -152,17 +152,20 @@ export async function windowedTurns(
   return turns.slice(Math.max(0, invIndex - before), invIndex + after);
 }
 
+/** Head+tail elide a string to maxChars (so a pasted log/diff can't blow a prompt). */
+export function elide(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const head = text.slice(0, Math.floor(maxChars * 0.55));
+  const tail = text.slice(text.length - Math.floor(maxChars * 0.45));
+  return `${head}\n\n…[${text.length - maxChars} chars elided]…\n\n${tail}`;
+}
+
 export async function windowAroundInvocation(
   query: QueryFn,
   sessionsTable: string,
   inv: SkillInvocation,
   opts: { before?: number; after?: number; maxChars?: number } = {},
 ): Promise<string> {
-  const maxChars = opts.maxChars ?? 4000;
   const slice = await windowedTurns(query, sessionsTable, inv, opts);
-  const joined = slice.map((t) => `${t.role}: ${t.text}`).join("\n\n");
-  if (joined.length <= maxChars) return joined;
-  const head = joined.slice(0, Math.floor(maxChars * 0.55));
-  const tail = joined.slice(joined.length - Math.floor(maxChars * 0.45));
-  return `${head}\n\n…[${joined.length - maxChars} chars elided]…\n\n${tail}`;
+  return elide(slice.map((t) => `${t.role}: ${t.text}`).join("\n\n"), opts.maxChars ?? 4000);
 }

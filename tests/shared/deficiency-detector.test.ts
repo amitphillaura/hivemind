@@ -52,6 +52,27 @@ describe("detectDeficientSkills", () => {
     expect(judge).toHaveBeenCalledTimes(8);
   });
 
+  it("caps the judged window at maxChars (a pasted log can't blow the judge call)", async () => {
+    const huge = "L".repeat(5000);
+    const skill = "bigskill--x", sid = "S1";
+    const transcripts = new Map<string, Array<Record<string, unknown>>>([[sid, [
+      { message: { type: "user_message", content: "do it" } },
+      { message: { type: "assistant_message", content: huge } },                                  // pasted log
+      { message: { type: "tool_call", tool_name: "Skill", tool_input: JSON.stringify({ skill }), timestamp: sid } },
+      { message: { type: "user_message", content: "no that's wrong" } },
+    ]]]);
+    let judgedLen = 0;
+    const judge = vi.fn(async (_s: string, user: string) => { judgedLen = user.length; return '{"success":0,"confidence":0.9,"reason":"x"}'; });
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('"Skill"') && sql.includes("ORDER BY last_update_date")) return [invRow(skill, sid)];
+      const m = sql.match(/\/sessions\/%([^%]+)%/);
+      return m ? (transcripts.get(m[1]) ?? []) : [];
+    });
+    await detectDeficientSkills(query, TABLE, { judge, minInvocations: 1, window: { maxChars: 300 } });
+    expect(judgedLen).toBeGreaterThan(0);  // judge was called (anchored)
+    expect(judgedLen).toBeLessThan(800);   // capped — not the ~5000-char paste
+  });
+
   it("respects a custom threshold + min-n", async () => {
     const { invs, transcripts } = world();
     const judge = vi.fn(async (_s: string, _u: string) => '{"success":0,"confidence":0.9,"reason":"x"}');

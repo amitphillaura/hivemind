@@ -14,7 +14,7 @@
  * The ≥5 fire gate lives with the caller (worker): we just return deficientCount.
  */
 import {
-  listSkillInvocations, windowedTurns, type QueryFn, type SkillInvocation,
+  listSkillInvocations, windowedTurns, elide, type QueryFn, type SkillInvocation,
 } from "./skill-invocations.js";
 import { detectAnchor } from "./session-anchor.js";
 import { judgeSuccess, type ModelCall } from "./success-judge.js";
@@ -65,7 +65,7 @@ export async function scoreInvocations(
     const anchor = detectAnchor(turns);
     if (!anchor.anchored) continue; // free filter — no judge call
     anchored++;
-    const window = turns.map((t) => `${t.role}: ${t.text}`).join("\n\n");
+    const window = elide(turns.map((t) => `${t.role}: ${t.text}`).join("\n\n"), cfg.window?.maxChars ?? 4000);
     const verdict = await judgeSuccess(window, { model: cfg.judge });
     if (verdict.success === 0) {
       confirmed++;
