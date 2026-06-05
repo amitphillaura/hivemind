@@ -15,16 +15,15 @@
  * success=1 (do NOT count as a failure), so a flaky judge can never manufacture
  * deficiency — it can only fail to detect (which the next run catches).
  */
-import { spawn } from "node:child_process";
+import { claudeModel, type ModelCall } from "./claude-model.js";
+
+export type { ModelCall };
 
 export interface SuccessVerdict {
   success: 0 | 1;
   confidence: number; // 0..1
   reason: string;
 }
-
-/** (systemPrompt, userPrompt) -> raw model text. Injected for tests. */
-export type ModelCall = (systemPrompt: string, userPrompt: string) => Promise<string>;
 
 const SYSTEM =
   "You are a strict engineering reviewer. Judge ONLY whether the user's task was " +
@@ -58,33 +57,9 @@ export function parseVerdict(raw: string): SuccessVerdict {
   return { success: fail ? 0 : 1, confidence, reason };
 }
 
-/** Default backend: claude -p, cheap model, all tools denied (pure-text judgment). */
-function claudeJudge(model = "haiku"): ModelCall {
-  return (system, user) => new Promise<string>((resolve, reject) => {
-    const args = [
-      "-p", user, "--model", model, "--no-session-persistence",
-      "--output-format", "json", "--system-prompt", system,
-      "--disallowed-tools", "Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch", "WebSearch", "Task",
-    ];
-    const child = spawn("claude", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
-    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("judge timed out")); }, 120_000);
-    child.stdout.on("data", (d) => { out += String(d); });
-    child.stderr.on("data", (d) => { err += String(d); });
-    child.on("error", (e) => { clearTimeout(timer); reject(e); });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`claude exit ${code}: ${err.slice(0, 200)}`));
-      try { resolve(String((JSON.parse(out) as { result?: unknown }).result ?? "")); }
-      catch { resolve(out); }
-    });
-  });
-}
-
 export async function judgeSuccess(window: string, opts: { model?: ModelCall } = {}): Promise<SuccessVerdict> {
   if (!window.trim()) return { success: 1, confidence: 0, reason: "empty window" };
-  const model = opts.model ?? claudeJudge();
+  const model = opts.model ?? claudeModel("haiku"); // cheap default; judge only runs on anchored windows
   try {
     return parseVerdict(await model(SYSTEM, buildUserPrompt(window)));
   } catch (e: unknown) {
