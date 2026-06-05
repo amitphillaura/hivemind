@@ -108,18 +108,26 @@ export interface Turn { role: "USER" | "ASSISTANT"; text: string }
  * Reconstruct the transcript turns of a session, and mark where (between which two
  * turns) the given invocation happened — so callers can window around it.
  */
+/** Escape SQL LIKE wildcards (% _ \) so a session id with those chars matches literally. */
+function likeEscape(s: string): string {
+  return s.replace(/([\\%_])/g, "\\$1");
+}
+
 async function sessionTurns(
   query: QueryFn, sessionsTable: string, inv: SkillInvocation,
 ): Promise<{ turns: Turn[]; invIndex: number }> {
-  const sid = sqlStr(inv.sessionId);
+  const sid = sqlStr(likeEscape(inv.sessionId));
   const rows = await query(
-    `SELECT message FROM "${sessionsTable}" WHERE path LIKE '/sessions/%${sid}%' ORDER BY creation_date ASC`,
+    `SELECT message FROM "${sessionsTable}" WHERE path LIKE '/sessions/%${sid}%' ESCAPE '\\' ORDER BY creation_date ASC`,
   );
   const turns: Turn[] = [];
   let invIndex = -1;
   for (const r of rows) {
     const j = parseMessage(r.message);
     if (!j) continue;
+    // Exact session match: `path LIKE %sid%` can match a substring/wildcard collision,
+    // so drop any row whose recorded session_id isn't this exact session.
+    if (typeof j.session_id === "string" && j.session_id !== inv.sessionId) continue;
     // The invocation itself is a tool_call (not a turn): mark its position then skip.
     const ref = invokedSkillRef(j);
     if (ref) {

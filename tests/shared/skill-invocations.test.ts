@@ -106,4 +106,17 @@ describe("windowAroundInvocation", () => {
     expect(out).toContain("chars elided");
     expect(out.length).toBeLessThan(300);
   });
+
+  it("drops rows from a different session + escapes LIKE wildcards (exact match)", async () => {
+    const { fn, calls } = mockQuery([
+      { message: { type: "user_message", content: "first", session_id: "S1" } },
+      { message: { type: "tool_call", tool_name: "Skill", tool_input: JSON.stringify({ skill: "posthog-smoke--kamo" }), session_id: "S1", timestamp: "t5" } },
+      { message: { type: "assistant_message", content: "did X", session_id: "S1" } },
+      { message: { type: "user_message", content: "LEAK from other session", session_id: "S2" } }, // collision → dropped
+    ]);
+    const out = await windowAroundInvocation(fn, TABLE, inv, { before: 5, after: 5 });
+    expect(calls[0]).toContain("ESCAPE '\\'");
+    expect(out).toContain("did X");
+    expect(out).not.toContain("LEAK from other session");
+  });
 });
