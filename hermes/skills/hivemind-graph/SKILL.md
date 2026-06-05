@@ -15,6 +15,9 @@ no network call in the read path.
 The graph **builds and refreshes automatically** (on Stop / SessionEnd, gated by
 a rate limit + git diff). You never run a build command — just read it.
 
+Use it as a fast **INDEX** to locate the few files/symbols that matter, then open
+them with `Read` to answer. It is not a substitute for the source.
+
 ## When to use this skill
 
 Activate when the user asks a *structural / relational* question about the code:
@@ -23,7 +26,7 @@ Activate when the user asks a *structural / relational* question about the code:
 - "What does `deeplake-pull.ts` import?" / "What depends on X?"
 - "Where is `GraphSnapshot` defined?" / "Find the function that handles Y."
 - "What are the main subsystems / the architecture here?"
-- "If I change this signature, what's affected?" (1-hop blast radius)
+- "If I change this signature, what's affected?" → use `impact/<symbol>` (transitive blast radius)
 
 ## When NOT to use this skill
 
@@ -31,8 +34,9 @@ Activate when the user asks a *structural / relational* question about the code:
   source file. The graph gives location + relationships, not full source.
 - Code that isn't **committed/built** yet — the graph can lag uncommitted edits.
   If a file's mtime is newer than the build timestamp, read the live source.
-- Non-TypeScript code (Python, Go, …) — the graph is **TypeScript/TSX only**
-  today. For other languages, fall back to grep/read.
+- Languages outside **TypeScript, JavaScript, and Python** (Go, Rust, …) — the
+  extractor covers those three, with cross-file `calls`/`imports` resolved for
+  named imports. For anything else, fall back to grep/read.
 
 ## Path cheat sheet
 
@@ -52,20 +56,34 @@ cat ~/.deeplake/memory/graph/show/<handle-or-pattern>
 #   <handle>: a digit from a prior find/ (e.g. 3).
 #   <pattern>: a substring → unique node detail, or a candidate list.
 #   Output: the node + its 1-hop neighbors grouped by edge relation.
+
+cat ~/.deeplake/memory/graph/neighborhood/<file>
+#   Every symbol in a file + its cross-file neighbors (callers/callees/imports).
+
+cat ~/.deeplake/memory/graph/impact/<pattern>
+#   Transitive dependents — the blast radius of changing a symbol.
+
+cat ~/.deeplake/memory/graph/path/<from>/<to>
+#   Shortest dependency path between two symbol patterns (trace a flow across files).
+
+cat ~/.deeplake/memory/graph/layers      # architectural layers / subsystems
+cat ~/.deeplake/memory/graph/tour        # deterministic guided walkthrough
 ```
 
 ## Workflow
 
 1. Broad? Start at `index.md` to see subsystems and the biggest files.
-2. Looking for a symbol? `find/<name>` → pick the handle you want.
-3. Want relationships? `show/<handle>` → see callers/callees, imports, members.
-4. Need the actual code? Take the `source_file:line` from `show/` and `Read` it.
+2. Looking for a symbol? `find/<name>` (or `query/<name>`) → pick the handle.
+3. Want relationships? `show/<handle>` / `neighborhood/<file>` → callers/callees, imports.
+4. Tracing a flow? `path/<from>/<to>`. Change impact? `impact/<symbol>`.
+5. Need the actual code? Take the `source_file:line` and `Read` it — don't answer from the graph alone.
 
 ## Anti-patterns (read these)
 
-- **"Incoming (0)" does NOT mean dead code.** Today `calls` edges are resolved
-  *intra-file only* — a node with zero incoming edges may still be called from
-  other files. Treat it as "no caller in the same file", not "unused".
+- **"Incoming (0)" does NOT mean dead code.** Cross-file `calls` are resolved for
+  *named imports* (TS/JS/Python), but **instance-method dispatch** (`obj.method()`),
+  dynamic calls, and nested/inner functions are NOT — a zero-incoming symbol may
+  still be reached via one of those. Confirm in the source before calling it unused.
 - **The graph can be stale.** It rebuilds at most once per rate-limit window. The
   SessionStart inject prints the build age; if it's old or you've just edited a
   file, prefer the live source for that file.

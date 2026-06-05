@@ -1,0 +1,224 @@
+{
+  "repo": "https://github.com/getzep/graphiti.git",
+  "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+  "questions": [
+    {
+      "id": "98f24b30-8637-4a5c-bfed-3c6e2a80000f",
+      "question": "Which key holds the episode's content in the context passed to the attribute extraction prompt?",
+      "answer": "In `resolve_extracted_edge` (graphiti_core/utils/maintenance/edge_operations.py), the attribute\u2010extraction context uses the key `\"episode_content\"` to hold the episode\u2019s content.",
+      "facts": [
+        "resolve_extracted_edge is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+        "The attribute-extraction context in resolve_extracted_edge uses the key \"episode_content\".",
+        "The key \"episode_content\" holds the episode\u2019s content."
+      ],
+      "difficulty": "easy",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 531
+    },
+    {
+      "id": "1f5a3dac-b5cc-48dd-938d-2ad87d352b52",
+      "question": "Which two modules' Cypher queries were updated to include the name_embedding field in their return statements?",
+      "answer": "The Cypher queries in\n\n\u2022 graphiti_core/nodes.py (EntityNode.get_by_uuid)  \n\u2022 graphiti_core/search/search_utils.py (get_mentioned_nodes)  \n\nwere both updated to add `n.name_embedding` to their RETURN clauses.",
+      "facts": [
+        "The file graphiti_core/nodes.py contains a Cypher query in the function EntityNode.get_by_uuid.",
+        "The Cypher query in graphiti_core/nodes.py (EntityNode.get_by_uuid) was updated to add n.name_embedding to its RETURN clause.",
+        "The file graphiti_core/search/search_utils.py contains a Cypher query in the function get_mentioned_nodes.",
+        "The Cypher query in graphiti_core/search/search_utils.py (get_mentioned_nodes) was updated to add n.name_embedding to its RETURN clause."
+      ],
+      "difficulty": "easy",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 2,
+      "pr": 87
+    },
+    {
+      "id": "e8976fe4-d06c-4137-b382-f925404f13f7",
+      "question": "In the search handler, how is the query\u2019s max_facts value applied to limit the number of graph search results?",
+      "answer": "In server/graph_service/routers/retrieve.py\u2019s search handler, `query.max_facts` is passed straight into the `num_results` parameter of `graphiti.search(...)`. That tells the graph search implementation (in ZepGraphitiDep) to return at most that many edges, effectively capping your results to `max_facts`.",
+      "facts": [
+        "In server/graph_service/routers/retrieve.py\u2019s search handler, query.max_facts is passed directly into the num_results parameter of graphiti.search(...).",
+        "graphiti.search(...) uses a graph search implementation in ZepGraphitiDep.",
+        "The graph search implementation in ZepGraphitiDep returns at most the number of edges specified by its num_results parameter.",
+        "Passing query.max_facts into the num_results parameter effectively caps the search results to query.max_facts edges."
+      ],
+      "difficulty": "easy",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 153
+    },
+    {
+      "id": "584a8682-d493-4276-abeb-79b509015189",
+      "question": "What does the search function return when given an empty or whitespace-only query?",
+      "answer": "In graphiti_core/search/search.py\u2019s search(), if query.strip() == \"\" it immediately returns a SearchResults with all empty lists:\n\n\u2022 edges = []  \n\u2022 nodes = []  \n\u2022 episodes = []  \n\u2022 communities = []",
+      "facts": [
+        "graphiti_core/search/search.py defines a function named search().",
+        "search() checks if query.strip() == \"\".",
+        "If query.strip() == \"\", search() immediately returns a SearchResults object.",
+        "The returned SearchResults object has an attribute edges equal to an empty list.",
+        "The returned SearchResults object has an attribute nodes equal to an empty list.",
+        "The returned SearchResults object has an attribute episodes equal to an empty list.",
+        "The returned SearchResults object has an attribute communities equal to an empty list."
+      ],
+      "difficulty": "easy",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 206
+    },
+    {
+      "id": "6f4f4766-d16e-44b6-8f6d-324df3756744",
+      "question": "What field names are used to specify the model in the LLM client config versus the embedder client config?",
+      "answer": "In GraphitiLLMConfig.create_client you pass your model in LLMConfig.model (and optionally small_model), e.g.:\n\n\u2022 LLMConfig(api_key=\u2026, model=self.model, small_model=self.small_model, \u2026)\n\nIn GraphitiEmbedderConfig.create_client you use:\n\n\u2022 AzureOpenAIEmbedderClient(\u2026, model=self.model)  \n\u2022 OpenAIEmbedderConfig(api_key=\u2026, embedding_model=self.model)\n\nSo the OpenAIEmbedderConfig field is named embedding_model, whereas LLMConfig uses model.",
+      "facts": [
+        "In GraphitiLLMConfig.create_client, the model is passed via the LLMConfig field model.",
+        "In GraphitiLLMConfig.create_client, a small model can be passed via the LLMConfig field small_model.",
+        "In GraphitiEmbedderConfig.create_client, AzureOpenAIEmbedderClient is used with model=self.model.",
+        "In GraphitiEmbedderConfig.create_client, OpenAIEmbedderConfig is used with embedding_model=self.model.",
+        "The OpenAIEmbedderConfig field for the embedding model is named embedding_model.",
+        "The LLMConfig field for the model is named model."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 493
+    },
+    {
+      "id": "591e0b08-b66a-4917-92f1-9d54e2276802",
+      "question": "How does the code ensure additional edge attributes are included when saving and retrieving EntityEdge objects?",
+      "answer": "When saving, EntityEdge.save (graphiti_core/edges.py) builds its payload dict and then does\n\n\u2022\u2003edge_data.update(self.attributes or {})\n\nso any custom key/\u200bvalue in the edge\u2019s .attributes gets written as relationship properties.  \n\nWhen loading (in all \u201cget\u2026\u201d methods and the full-text/similarity/search utils) each Cypher query returns\n\n\u2022\u2003properties(r) AS attributes\n\nand get_entity_edge_from_record(record) feeds record['attributes'] into the EntityEdge.attributes field (then pops out the reserved keys). This round-trips any extra attributes you added.",
+      "facts": [
+        "EntityEdge.save is defined in graphiti_core/edges.py",
+        "EntityEdge.save builds its payload dictionary",
+        "EntityEdge.save calls edge_data.update(self.attributes or {})",
+        "Any custom key/value in an edge\u2019s attributes is written as relationship properties when saving",
+        "In the get methods and the full-text, similarity, and search utilities, each Cypher query returns properties(r) AS attributes",
+        "get_entity_edge_from_record(record) assigns record['attributes'] to EntityEdge.attributes",
+        "get_entity_edge_from_record(record) removes reserved keys from the attributes",
+        "Extra attributes added to an edge are preserved through save and load operations"
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3,
+      "pr": 501
+    },
+    {
+      "id": "07b6fbb4-2c74-40a8-855d-dca62bb1fec9",
+      "question": "How is the effective group_id determined for add_memory when no group_id argument is provided?",
+      "answer": "In add_memory (mcp_server/graphiti_mcp_server.py), you\u2019ll see:\n\n\u2022  \neffective_group_id = group_id if group_id is not None else config.group_id  \n\u2022  \ngroup_id_str = str(effective_group_id) if effective_group_id is not None else ''  \n\nSo when you don\u2019t pass a group_id, it falls back to the global config.group_id (as set by GraphitiConfig.from_cli_and_env, defaulting to \u201cdefault\u201d if no CLI/env override), then casts it to a string.",
+      "facts": [
+        "In the add_memory function in mcp_server/graphiti_mcp_server.py, effective_group_id is assigned to group_id if group_id is not None, otherwise to config.group_id.",
+        "In the add_memory function in mcp_server/graphiti_mcp_server.py, group_id_str is assigned to the string conversion of effective_group_id if effective_group_id is not None, otherwise to an empty string.",
+        "If no group_id is passed to add_memory, effective_group_id falls back to config.group_id.",
+        "config.group_id is set by GraphitiConfig.from_cli_and_env.",
+        "config.group_id defaults to \u201cdefault\u201d if there is no CLI or environment variable override."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 512
+    },
+    {
+      "id": "9dc3ae9c-e2a8-48bd-bc88-7e3b22ddaa13",
+      "question": "How is the small model name selected and applied to the LLM client configuration?",
+      "answer": "In mcp_server/graphiti_mcp_server.py the small\u2010model name is chosen in GraphitiLLMConfig:\n\n\u2022 from_env() reads os.environ['SMALL_MODEL_NAME'], defaults to SMALL_LLM_MODEL if unset or blank.  \n\u2022 from_cli_and_env() will override config.small_model with args.small_model when you pass --small-model.  \n\u2022 create_client() then passes self.small_model into the LLMConfig that gets handed off to OpenAIClient or AzureOpenAILLMClient.",
+      "facts": [
+        "In mcp_server/graphiti_mcp_server.py, GraphitiLLMConfig chooses the small-model name.",
+        "The from_env() method reads the SMALL_MODEL_NAME environment variable.",
+        "If SMALL_MODEL_NAME is unset or blank, from_env() defaults to SMALL_LLM_MODEL.",
+        "The from_cli_and_env() method overrides config.small_model with args.small_model when --small-model is passed.",
+        "The create_client() method passes self.small_model into the LLMConfig.",
+        "The LLMConfig is handed off to OpenAIClient or AzureOpenAILLMClient."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 516
+    },
+    {
+      "id": "26b8f70d-8cae-4af8-abe4-1b908e03ec52",
+      "question": "In the triplet insertion flow, how are deduplication tasks for entities and facts orchestrated before persisting the data?",
+      "answer": "Entity and fact de-duplication in the triplet flow is entirely handled before the bulk write in Graphiti.add_triplet (graphiti_core/graphiti.py):\n\n1. resolve_extracted_nodes (graphiti_core/utils/maintenance/node_operations.py)  \n   \u2013 runs hybrid search + the dedupe_nodes.nodes LLM prompt to map each extracted EntityNode to an existing or new node  \n   \u2013 returns resolved_nodes and a uuid_map for edge pointer resolution  \n\n2. resolve_edge_pointers uses that uuid_map to rewire the new edge to the deduped nodes  \n\n3. Fetch relevant/invalidation candidates via get_relevant_edges and get_edge_invalidation_candidates  \n\n4. resolve_extracted_edge (graphiti_core/utils/maintenance/edge_operations.py)  \n   \u2013 calls the dedupe_edges.resolve_edge LLM prompt to identify duplicate facts, contradictions and fact types  \n   \u2013 returns a single resolved_edge plus lists of invalidated and duplicate edges  \n\n5. add_nodes_and_edges_bulk persists the deduped resolved_nodes and [resolved_edge + invalidated_edges]  \n\nBoth node and edge resolves use semaphore_gather to parallelize searches and LLM calls.",
+      "facts": [
+        "Entity and fact de-duplication in the triplet flow takes place before the bulk write in Graphiti.add_triplet.",
+        "Graphiti.add_triplet is defined in graphiti_core/graphiti.py.",
+        "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py.",
+        "resolve_extracted_nodes runs hybrid search and the dedupe_nodes.nodes LLM prompt to map each extracted EntityNode to an existing or new node.",
+        "resolve_extracted_nodes returns resolved_nodes and a uuid_map for edge pointer resolution.",
+        "resolve_edge_pointers uses a uuid_map to rewire the new edge to the deduped nodes.",
+        "get_relevant_edges fetches relevant edge candidates.",
+        "get_edge_invalidation_candidates fetches invalidation edge candidates.",
+        "resolve_extracted_edge is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+        "resolve_extracted_edge calls the dedupe_edges.resolve_edge LLM prompt to identify duplicate facts, contradictions, and fact types.",
+        "resolve_extracted_edge returns a single resolved_edge plus lists of invalidated and duplicate edges.",
+        "add_nodes_and_edges_bulk persists the deduped resolved_nodes and the resolved_edge plus invalidated edges.",
+        "Both node and edge resolves use semaphore_gather to parallelize searches and LLM calls."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3,
+      "pr": 490
+    },
+    {
+      "id": "54d9e6e0-f96e-45cf-aade-7578249ec51e",
+      "question": "Which error is raised when an embedding in the batch response contains no values?",
+      "answer": "In `GeminiEmbedder.create_batch` (graphiti_core/embedder/gemini.py), if `embedding.values` is empty in the batch response it raises a  \nValueError(\"Empty embedding values returned\").",
+      "facts": [
+        "GeminiEmbedder.create_batch is defined in the file graphiti_core/embedder/gemini.py.",
+        "In GeminiEmbedder.create_batch, if embedding.values is empty in the batch response, the method raises a ValueError.",
+        "The ValueError raised by GeminiEmbedder.create_batch has the message \"Empty embedding values returned\"."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 515
+    },
+    {
+      "id": "48abe7ec-42fc-42c3-bdec-46c99726197f",
+      "question": "What is the sequence of operations from parsing a podcast message to generating deduplicated nodes and extracted edges?",
+      "answer": "Here\u2019s the end-to-end flow:\n\n1. In examples/podcast/podcast_runner.py:main  \n   \u2013 call parse_podcast_messages() \u2192 list of Message objects  \n   \u2013 wrap each Message in a RawEpisode and invoke Graphiti.add_episode(\u2026) or add_episode_bulk(\u2026)\n\n2. Inside Graphiti.add_episode / add_episode_bulk  \n   a. create an EpisodicNode from your RawEpisode  \n   b. **Extract raw EntityNode objects** (not shown in context)  \n   c. call graphiti_core/utils/maintenance/node_operations.py::resolve_extracted_nodes()  \n      \u2013 runs hybrid search over each extracted node  \n      \u2013 builds LLM prompt via graphiti_core/prompts/dedupe_nodes.py::nodes()  \n      \u2013 LLM returns entity_resolutions \u2192 you get resolved_nodes (and a uuid_map)  \n   d. call graphiti_core/utils/maintenance/edge_operations.py::extract_edges()  \n      \u2013 prepares context (episode.content, resolved_nodes, previous episodes, edge_type_map)  \n      \u2013 prompts via graphiti_core/prompts/extract_edges.py::edge() (with reflexion loop)  \n      \u2013 converts LLM output into EntityEdge objects with valid_at/invalid_at, source/target UUIDs  \n\n3. finally, Graphiti persists the deduplicated nodes and extracted edges into Neo4j.",
+      "facts": [
+        "The main function in examples/podcast/podcast_runner.py calls parse_podcast_messages().",
+        "parse_podcast_messages() returns a list of Message objects.",
+        "The main function wraps each Message object in a RawEpisode.",
+        "The main function invokes Graphiti.add_episode or Graphiti.add_episode_bulk with each RawEpisode.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk create an EpisodicNode from a RawEpisode.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk extract raw EntityNode objects.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk call resolve_extracted_nodes() from graphiti_core/utils/maintenance/node_operations.py.",
+        "resolve_extracted_nodes() runs a hybrid search over each extracted EntityNode.",
+        "resolve_extracted_nodes() builds an LLM prompt via graphiti_core/prompts/dedupe_nodes.py by calling nodes().",
+        "The LLM returns entity_resolutions, which yields resolved_nodes and a uuid_map.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk call extract_edges() from graphiti_core/utils/maintenance/edge_operations.py.",
+        "extract_edges() prepares a context consisting of episode.content, resolved_nodes, previous episodes, and edge_type_map.",
+        "extract_edges() prompts via graphiti_core/prompts/extract_edges.py by calling edge(), using a reflection loop.",
+        "extract_edges() converts LLM output into EntityEdge objects with valid_at and invalid_at timestamps and source and target UUIDs.",
+        "Graphiti persists the deduplicated nodes into Neo4j.",
+        "Graphiti persists the extracted edges into Neo4j."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3,
+      "pr": 564
+    },
+    {
+      "id": "752f7fe8-8979-4274-9b61-3f34477c7189",
+      "question": "How does the server initialization select and configure LLM and embedding clients when Azure settings are provided versus default OpenAI?",
+      "answer": "During startup (`initialize_graphiti` in mcp_server/graphiti_mcp_server.py) we call:\n\n\u2013 config.llm.create_client()  \n  \u2022 If azure_openai_endpoint is set:  \n    \u2013 If azure_openai_use_managed_identity \u2192 use AsyncAzureOpenAI + managed identity token provider \u2192 AzureOpenAILLMClient  \n    \u2013 Elif api_key \u2192 use AsyncAzureOpenAI + API key \u2192 AzureOpenAILLMClient  \n    \u2013 Else \u2192 error  \n  \u2022 Else (no Azure) \u2192 require OPENAI_API_KEY \u2192 return OpenAIClient  \n\n\u2013 config.embedder.create_client()  \n  \u2022 If azure_openai_endpoint is set: same managed-identity vs API-key logic \u2192 AzureOpenAIEmbedderClient  \n  \u2022 Else if OPENAI_API_KEY \u2192 return OpenAIEmbedder  \n  \u2022 Else \u2192 returns None  \n\nThose clients are then passed into the Graphiti constructor.",
+      "facts": [
+        "During startup, the initialize_graphiti function in mcp_server/graphiti_mcp_server.py is invoked.",
+        "initialize_graphiti calls config.llm.create_client.",
+        "If azure_openai_endpoint is set when calling config.llm.create_client and azure_openai_use_managed_identity is true, AsyncAzureOpenAI with managed identity token provider is used to create AzureOpenAILLMClient.",
+        "If azure_openai_endpoint is set when calling config.llm.create_client and api_key is provided, AsyncAzureOpenAI with API key is used to create AzureOpenAILLMClient.",
+        "If azure_openai_endpoint is set when calling config.llm.create_client and neither azure_openai_use_managed_identity nor api_key is provided, an error is triggered.",
+        "If azure_openai_endpoint is not set when calling config.llm.create_client, OPENAI_API_KEY is required and OpenAIClient is returned.",
+        "initialize_graphiti calls config.embedder.create_client.",
+        "If azure_openai_endpoint is set when calling config.embedder.create_client, managed-identity versus API-key logic is applied to create AzureOpenAIEmbedderClient.",
+        "If azure_openai_endpoint is not set when calling config.embedder.create_client and OPENAI_API_KEY is provided, OpenAIEmbedder is returned.",
+        "If azure_openai_endpoint is not set when calling config.embedder.create_client and OPENAI_API_KEY is not provided, None is returned.",
+        "The clients returned by config.llm.create_client and config.embedder.create_client are passed into the Graphiti constructor."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1,
+      "pr": 581
+    }
+  ]
+}

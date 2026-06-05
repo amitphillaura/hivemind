@@ -1,0 +1,165 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 71717,
+    "duration_api_ms": 72608,
+    "ttft_ms": 2437,
+    "num_turns": 10,
+    "result": "I have the complete picture. Here's how it works.\n\n## Two different servers \u2014 only one does Azure selection\n\nThere are two server components, and the Azure-vs-OpenAI logic lives in only one of them.\n\n### The FastAPI server (`server/`) \u2014 no Azure handling at all\n\nIn `server/graph_service/zep_graphiti.py:74-90`, `get_graphiti()` constructs `ZepGraphiti` **without** passing an `llm_client`, so `graphiti_core` falls back to its default OpenAI client. It then only mutates that default client's config:\n\n```python\nclient = ZepGraphiti(uri=..., user=..., password=...)   # no llm_client \u2192 default OpenAI\nif settings.openai_base_url is not None:\n    client.llm_client.config.base_url = settings.openai_base_url\nif settings.openai_api_key is not None:\n    client.llm_client.config.api_key = settings.openai_api_key\nif settings.model_name is not None:\n    client.llm_client.model = settings.model_name\n```\n\nIts `Settings` (`config.py:9-18`) only knows `openai_api_key`, `openai_base_url`, `model_name`, `embedding_model_name`. There is **no Azure branch** \u2014 the only way to reach an Azure endpoint here is the generic `openai_base_url` override (which uses the plain OpenAI client, not the Azure SDK).\n\n### The MCP server (`mcp_server/graphiti_mcp_server.py`) \u2014 this is where Azure-vs-OpenAI is selected\n\nSelection happens in two factory methods, `GraphitiLLMConfig.create_client()` and `GraphitiEmbedderConfig.create_client()`, both driven by **whether an Azure endpoint env var is set**.\n\n**The discriminator is the endpoint.** For the LLM, `from_env()` reads `AZURE_OPENAI_ENDPOINT` (`:215`); for the embedder, `from_env()` reads `AZURE_OPENAI_EMBEDDING_ENDPOINT` (`:370`). If that variable is `None`, it builds the OpenAI path; otherwise the Azure path.\n\n**LLM client** (`create_client`, `:291-346`):\n- **Azure path** (`azure_openai_endpoint is not None`):\n  - `from_env` requires `AZURE_OPENAI_DEPLOYMENT_NAME` or it raises (`:243-246`).\n  - If `azure_openai_use_managed_identity` (env `AZURE_OPENAI_USE_MANAGED_IDENTITY=true`): builds `AsyncAzureOpenAI` with `azure_ad_token_provider` from `create_azure_credential_token_provider()` (a `DefaultAzureCredential` bearer-token provider, `:170-175`), wrapped in `AzureOpenAILLMClient` (`:303-316`).\n  - Else if `api_key` present (from `OPENAI_API_KEY`): builds `AsyncAzureOpenAI` with `api_key`, wrapped in `AzureOpenAILLMClient` (`:319-332`).\n  - Else: raises `ValueError` (`:334`).\n- **Default OpenAI path**: requires `api_key` (else raises `:337`), builds an `LLMConfig` and returns `OpenAIClient` (`:339-346`).\n\n**Embedder client** (`create_client`, `:413-449`) \u2014 same shape:\n- **Azure path**: requires `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME` (`:384-389`). Managed identity \u2192 token provider; else API key (notably falling back `AZURE_OPENAI_EMBEDDING_API_KEY` \u2192 `OPENAI_API_KEY`, `:393-395`); both return `AzureOpenAIEmbedderClient`. Missing key logs an error and returns `None` (`:439-441`) rather than raising.\n- **Default OpenAI path**: returns `OpenAIEmbedder` if `api_key` is set, else `None` (`:442-449`).\n\n**Wiring into Graphiti** (`initialize_graphiti`, `:575-600`): both factories are invoked and the resulting clients are passed into `Graphiti(..., llm_client=llm_client, embedder=embedder_client)`. If the LLM client is `None` and `use_custom_entities` is on, it raises (`:582-584`).\n\n### Key differences in the two paths\n\n| Aspect | Azure | Default OpenAI |\n|---|---|---|\n| Trigger | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_EMBEDDING_ENDPOINT` set | endpoint unset |\n| Auth | managed identity (token provider) **or** API key | API key only |\n| Underlying SDK | `AsyncAzureOpenAI` passed explicitly | client built internally from `LLMConfig`/`OpenAIEmbedderConfig` |\n| Wrapper class | `AzureOpenAILLMClient` / `AzureOpenAIEmbedderClient` | `OpenAIClient` / `OpenAIEmbedder` |\n| Requires deployment name | yes (raises if missing) | n/a |\n\nOne asymmetry worth noting: a missing key on the **LLM** path raises, but on the **embedder** path it only logs and returns `None`.\n\nWhich server did you mean \u2014 the FastAPI `server/` or the MCP server? The Azure logic only exists in the latter.",
+    "stop_reason": "end_turn",
+    "session_id": "f6d587c2-6c35-4998-85b5-1bdd3cce686f",
+    "total_cost_usd": 0.40921599999999997,
+    "usage": {
+      "input_tokens": 5015,
+      "cache_creation_input_tokens": 26378,
+      "cache_read_input_tokens": 263695,
+      "output_tokens": 3475,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 26378,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1944,
+          "cache_read_input_tokens": 42990,
+          "cache_creation_input_tokens": 872,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 872
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 461,
+        "outputTokens": 19,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000556,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 5015,
+        "outputTokens": 3475,
+        "cacheReadInputTokens": 263695,
+        "cacheCreationInputTokens": 26378,
+        "webSearchRequests": 0,
+        "costUSD": 0.40865999999999997,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "a226c849-7dba-40ff-841c-7f441450e9c5"
+  },
+  "answer": "I have the complete picture. Here's how it works.\n\n## Two different servers \u2014 only one does Azure selection\n\nThere are two server components, and the Azure-vs-OpenAI logic lives in only one of them.\n\n### The FastAPI server (`server/`) \u2014 no Azure handling at all\n\nIn `server/graph_service/zep_graphiti.py:74-90`, `get_graphiti()` constructs `ZepGraphiti` **without** passing an `llm_client`, so `graphiti_core` falls back to its default OpenAI client. It then only mutates that default client's config:\n\n```python\nclient = ZepGraphiti(uri=..., user=..., password=...)   # no llm_client \u2192 default OpenAI\nif settings.openai_base_url is not None:\n    client.llm_client.config.base_url = settings.openai_base_url\nif settings.openai_api_key is not None:\n    client.llm_client.config.api_key = settings.openai_api_key\nif settings.model_name is not None:\n    client.llm_client.model = settings.model_name\n```\n\nIts `Settings` (`config.py:9-18`) only knows `openai_api_key`, `openai_base_url`, `model_name`, `embedding_model_name`. There is **no Azure branch** \u2014 the only way to reach an Azure endpoint here is the generic `openai_base_url` override (which uses the plain OpenAI client, not the Azure SDK).\n\n### The MCP server (`mcp_server/graphiti_mcp_server.py`) \u2014 this is where Azure-vs-OpenAI is selected\n\nSelection happens in two factory methods, `GraphitiLLMConfig.create_client()` and `GraphitiEmbedderConfig.create_client()`, both driven by **whether an Azure endpoint env var is set**.\n\n**The discriminator is the endpoint.** For the LLM, `from_env()` reads `AZURE_OPENAI_ENDPOINT` (`:215`); for the embedder, `from_env()` reads `AZURE_OPENAI_EMBEDDING_ENDPOINT` (`:370`). If that variable is `None`, it builds the OpenAI path; otherwise the Azure path.\n\n**LLM client** (`create_client`, `:291-346`):\n- **Azure path** (`azure_openai_endpoint is not None`):\n  - `from_env` requires `AZURE_OPENAI_DEPLOYMENT_NAME` or it raises (`:243-246`).\n  - If `azure_openai_use_managed_identity` (env `AZURE_OPENAI_USE_MANAGED_IDENTITY=true`): builds `AsyncAzureOpenAI` with `azure_ad_token_provider` from `create_azure_credential_token_provider()` (a `DefaultAzureCredential` bearer-token provider, `:170-175`), wrapped in `AzureOpenAILLMClient` (`:303-316`).\n  - Else if `api_key` present (from `OPENAI_API_KEY`): builds `AsyncAzureOpenAI` with `api_key`, wrapped in `AzureOpenAILLMClient` (`:319-332`).\n  - Else: raises `ValueError` (`:334`).\n- **Default OpenAI path**: requires `api_key` (else raises `:337`), builds an `LLMConfig` and returns `OpenAIClient` (`:339-346`).\n\n**Embedder client** (`create_client`, `:413-449`) \u2014 same shape:\n- **Azure path**: requires `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME` (`:384-389`). Managed identity \u2192 token provider; else API key (notably falling back `AZURE_OPENAI_EMBEDDING_API_KEY` \u2192 `OPENAI_API_KEY`, `:393-395`); both return `AzureOpenAIEmbedderClient`. Missing key logs an error and returns `None` (`:439-441`) rather than raising.\n- **Default OpenAI path**: returns `OpenAIEmbedder` if `api_key` is set, else `None` (`:442-449`).\n\n**Wiring into Graphiti** (`initialize_graphiti`, `:575-600`): both factories are invoked and the resulting clients are passed into `Graphiti(..., llm_client=llm_client, embedder=embedder_client)`. If the LLM client is `None` and `use_custom_entities` is on, it raises (`:582-584`).\n\n### Key differences in the two paths\n\n| Aspect | Azure | Default OpenAI |\n|---|---|---|\n| Trigger | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_EMBEDDING_ENDPOINT` set | endpoint unset |\n| Auth | managed identity (token provider) **or** API key | API key only |\n| Underlying SDK | `AsyncAzureOpenAI` passed explicitly | client built internally from `LLMConfig`/`OpenAIEmbedderConfig` |\n| Wrapper class | `AzureOpenAILLMClient` / `AzureOpenAIEmbedderClient` | `OpenAIClient` / `OpenAIEmbedder` |\n| Requires deployment name | yes (raises if missing) | n/a |\n\nOne asymmetry worth noting: a missing key on the **LLM** path raises, but on the **embedder** path it only logs and returns `None`.\n\nWhich server did you mean \u2014 the FastAPI `server/` or the MCP server? The Azure logic only exists in the latter.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "During startup, the initialize_graphiti function in mcp_server/graphiti_mcp_server.py is invoked.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Wiring into Graphiti** (`initialize_graphiti`, `:575-600`)"
+      },
+      {
+        "fact": "initialize_graphiti calls config.llm.create_client.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Selection happens in two factory methods, `GraphitiLLMConfig.create_client()` and `GraphitiEmbedderConfig.create_client()` ... both factories are invoked"
+      },
+      {
+        "fact": "If azure_openai_endpoint is set when calling config.llm.create_client and azure_openai_use_managed_identity is true, AsyncAzureOpenAI with managed identity token provider is used to create AzureOpenAILLMClient.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "If `azure_openai_use_managed_identity` ... builds `AsyncAzureOpenAI` with `azure_ad_token_provider` from `create_azure_credential_token_provider()` ... wrapped in `AzureOpenAILLMClient`"
+      },
+      {
+        "fact": "If azure_openai_endpoint is set when calling config.llm.create_client and api_key is provided, AsyncAzureOpenAI with API key is used to create AzureOpenAILLMClient.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Else if `api_key` present (from `OPENAI_API_KEY`): builds `AsyncAzureOpenAI` with `api_key`, wrapped in `AzureOpenAILLMClient`"
+      },
+      {
+        "fact": "If azure_openai_endpoint is set when calling config.llm.create_client and neither azure_openai_use_managed_identity nor api_key is provided, an error is triggered.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Else: raises `ValueError` (`:334`)"
+      },
+      {
+        "fact": "If azure_openai_endpoint is not set when calling config.llm.create_client, OPENAI_API_KEY is required and OpenAIClient is returned.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Default OpenAI path**: requires `api_key` (else raises `:337`), builds an `LLMConfig` and returns `OpenAIClient`"
+      },
+      {
+        "fact": "initialize_graphiti calls config.embedder.create_client.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "both factories ... `GraphitiEmbedderConfig.create_client()` ... both factories are invoked"
+      },
+      {
+        "fact": "If azure_openai_endpoint is set when calling config.embedder.create_client, managed-identity versus API-key logic is applied to create AzureOpenAIEmbedderClient.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Azure path**: ... Managed identity \u2192 token provider; else API key ...; both return `AzureOpenAIEmbedderClient`"
+      },
+      {
+        "fact": "If azure_openai_endpoint is not set when calling config.embedder.create_client and OPENAI_API_KEY is provided, OpenAIEmbedder is returned.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Default OpenAI path**: returns `OpenAIEmbedder` if `api_key` is set, else `None`"
+      },
+      {
+        "fact": "If azure_openai_endpoint is not set when calling config.embedder.create_client and OPENAI_API_KEY is not provided, None is returned.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "returns `OpenAIEmbedder` if `api_key` is set, else `None` (`:442-449`)"
+      },
+      {
+        "fact": "The clients returned by config.llm.create_client and config.embedder.create_client are passed into the Graphiti constructor.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "the resulting clients are passed into `Graphiti(..., llm_client=llm_client, embedder=embedder_client)`"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 3,
+    "read": 5,
+    "glob": 1,
+    "bash": 0
+  },
+  "gold_facts": [
+    "During startup, the initialize_graphiti function in mcp_server/graphiti_mcp_server.py is invoked.",
+    "initialize_graphiti calls config.llm.create_client.",
+    "If azure_openai_endpoint is set when calling config.llm.create_client and azure_openai_use_managed_identity is true, AsyncAzureOpenAI with managed identity token provider is used to create AzureOpenAILLMClient.",
+    "If azure_openai_endpoint is set when calling config.llm.create_client and api_key is provided, AsyncAzureOpenAI with API key is used to create AzureOpenAILLMClient.",
+    "If azure_openai_endpoint is set when calling config.llm.create_client and neither azure_openai_use_managed_identity nor api_key is provided, an error is triggered.",
+    "If azure_openai_endpoint is not set when calling config.llm.create_client, OPENAI_API_KEY is required and OpenAIClient is returned.",
+    "initialize_graphiti calls config.embedder.create_client.",
+    "If azure_openai_endpoint is set when calling config.embedder.create_client, managed-identity versus API-key logic is applied to create AzureOpenAIEmbedderClient.",
+    "If azure_openai_endpoint is not set when calling config.embedder.create_client and OPENAI_API_KEY is provided, OpenAIEmbedder is returned.",
+    "If azure_openai_endpoint is not set when calling config.embedder.create_client and OPENAI_API_KEY is not provided, None is returned.",
+    "The clients returned by config.llm.create_client and config.embedder.create_client are passed into the Graphiti constructor."
+  ]
+}

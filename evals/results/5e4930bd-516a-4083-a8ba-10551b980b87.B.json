@@ -1,0 +1,113 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 73761,
+    "duration_api_ms": 73671,
+    "ttft_ms": 11075,
+    "num_turns": 9,
+    "result": "I now have the complete picture, confirmed against source. Here's how edge type restrictions work across edge search operations.\n\n## The mechanism\n\nEdge type restrictions enter through `SearchFilters.edge_types: list[str] | None` (`search_filters.py:44-46`). They're compiled to Cypher by `edge_search_filter_query_constructor` (`search_filters.py:67-184`), which for edge types emits exactly one fragment:\n\n```python\nif filters.edge_types is not None:\n    edge_types_filter = '\\nAND r.name in $edge_types'   # search_filters.py:73-77\n    filter_query += edge_types_filter\n    filter_params['edge_types'] = edge_types\n```\n\nSo the restriction filters on the relationship's `name` property (`r.name IN $edge_types`). Two structural assumptions are baked into that string: the relationship must be bound to the variable **`r`**, and there must already be a **`WHERE`** clause to graft the leading `AND` onto.\n\n## Where it's applied\n\nThe constructor is called from **five** edge functions in `search_utils.py`, which split into two groups:\n\n**1. The three user-facing search operations** \u2014 all satisfy both assumptions, so the filter works correctly:\n\n| Function | Relationship var | Preceding WHERE |\n|---|---|---|\n| `edge_fulltext_search` (`search_utils.py:164`) | `r:RELATES_TO` (line 170) | `WHERE r.group_id IN $group_ids` (line 171) |\n| `edge_similarity_search` (`search_utils.py:219`) | `r:RELATES_TO` (line 238) | `WHERE r.group_id IS NOT NULL` (line 222) |\n| `edge_bfs_search` (`search_utils.py:292`) | `r:RELATES_TO` (line 299) | `WHERE r.uuid = rel.uuid` (line 300) |\n\nThese are dispatched from `search.py:179-200` with the real user-supplied `search_filter` threaded through, so edge-type restrictions are honored in actual hybrid search.\n\n**2. The two maintenance/dedup helpers** \u2014 `get_relevant_edges` (`search_utils.py:782`) and `get_edge_invalidation_candidates` (`search_utils.py:851`). These *also* call the constructor and splice `filter_query` in, but both bind the relationship as **`e`**, not `r` (`search_utils.py:789`, `:858`). Additionally, `get_relevant_edges` has **no `WHERE`** before the splice \u2014 the `MATCH` is followed directly by `filter_query` (`search_utils.py:789-791`).\n\nThat means if either were given a populated `SearchFilters`, the generated Cypher would be invalid (unknown variable `r`, and for `get_relevant_edges` a dangling `AND` with no `WHERE`).\n\n## Why that latent breakage never fires\n\nEvery caller of those two helpers passes an **empty `SearchFilters()`**:\n\n- `edge_operations.py:261-262` (dedup + invalidation during ingestion)\n- `graphiti.py:878-880` (edge update path)\n\nWith all fields `None`, `edge_search_filter_query_constructor` returns an empty `filter_query`, so nothing is spliced and the mismatch stays dormant.\n\n## Summary\n\nEdge type restrictions are a single `AND r.name IN $edge_types` clause produced centrally by `edge_search_filter_query_constructor`. They are genuinely applied only in the three read-path search operations (fulltext, similarity, BFS), which bind the edge as `r` and provide a preceding `WHERE`. The two ingestion-side helpers wire up the same constructor but are structurally incompatible with a non-empty filter (relationship bound as `e`, and a missing `WHERE` in `get_relevant_edges`) \u2014 harmless today only because they're always invoked with an empty filter, but a latent inconsistency if anyone ever tries to pass edge-type restrictions through the dedup/invalidation path.",
+    "stop_reason": "end_turn",
+    "session_id": "8a1b1646-c8c6-412c-bfcc-7a7001db42d5",
+    "total_cost_usd": 0.48076149999999995,
+    "usage": {
+      "input_tokens": 8615,
+      "cache_creation_input_tokens": 31078,
+      "cache_read_input_tokens": 246348,
+      "output_tokens": 4811,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 31078,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2124,
+          "cache_read_input_tokens": 46586,
+          "cache_creation_input_tokens": 1976,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1976
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8615,
+        "outputTokens": 4811,
+        "cacheReadInputTokens": 246348,
+        "cacheCreationInputTokens": 31078,
+        "webSearchRequests": 0,
+        "costUSD": 0.48076149999999995,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "ca656490-299e-4eaf-9d87-ec35845534c8"
+  },
+  "answer": "I now have the complete picture, confirmed against source. Here's how edge type restrictions work across edge search operations.\n\n## The mechanism\n\nEdge type restrictions enter through `SearchFilters.edge_types: list[str] | None` (`search_filters.py:44-46`). They're compiled to Cypher by `edge_search_filter_query_constructor` (`search_filters.py:67-184`), which for edge types emits exactly one fragment:\n\n```python\nif filters.edge_types is not None:\n    edge_types_filter = '\\nAND r.name in $edge_types'   # search_filters.py:73-77\n    filter_query += edge_types_filter\n    filter_params['edge_types'] = edge_types\n```\n\nSo the restriction filters on the relationship's `name` property (`r.name IN $edge_types`). Two structural assumptions are baked into that string: the relationship must be bound to the variable **`r`**, and there must already be a **`WHERE`** clause to graft the leading `AND` onto.\n\n## Where it's applied\n\nThe constructor is called from **five** edge functions in `search_utils.py`, which split into two groups:\n\n**1. The three user-facing search operations** \u2014 all satisfy both assumptions, so the filter works correctly:\n\n| Function | Relationship var | Preceding WHERE |\n|---|---|---|\n| `edge_fulltext_search` (`search_utils.py:164`) | `r:RELATES_TO` (line 170) | `WHERE r.group_id IN $group_ids` (line 171) |\n| `edge_similarity_search` (`search_utils.py:219`) | `r:RELATES_TO` (line 238) | `WHERE r.group_id IS NOT NULL` (line 222) |\n| `edge_bfs_search` (`search_utils.py:292`) | `r:RELATES_TO` (line 299) | `WHERE r.uuid = rel.uuid` (line 300) |\n\nThese are dispatched from `search.py:179-200` with the real user-supplied `search_filter` threaded through, so edge-type restrictions are honored in actual hybrid search.\n\n**2. The two maintenance/dedup helpers** \u2014 `get_relevant_edges` (`search_utils.py:782`) and `get_edge_invalidation_candidates` (`search_utils.py:851`). These *also* call the constructor and splice `filter_query` in, but both bind the relationship as **`e`**, not `r` (`search_utils.py:789`, `:858`). Additionally, `get_relevant_edges` has **no `WHERE`** before the splice \u2014 the `MATCH` is followed directly by `filter_query` (`search_utils.py:789-791`).\n\nThat means if either were given a populated `SearchFilters`, the generated Cypher would be invalid (unknown variable `r`, and for `get_relevant_edges` a dangling `AND` with no `WHERE`).\n\n## Why that latent breakage never fires\n\nEvery caller of those two helpers passes an **empty `SearchFilters()`**:\n\n- `edge_operations.py:261-262` (dedup + invalidation during ingestion)\n- `graphiti.py:878-880` (edge update path)\n\nWith all fields `None`, `edge_search_filter_query_constructor` returns an empty `filter_query`, so nothing is spliced and the mismatch stays dormant.\n\n## Summary\n\nEdge type restrictions are a single `AND r.name IN $edge_types` clause produced centrally by `edge_search_filter_query_constructor`. They are genuinely applied only in the three read-path search operations (fulltext, similarity, BFS), which bind the edge as `r` and provide a preceding `WHERE`. The two ingestion-side helpers wire up the same constructor but are structurally incompatible with a non-empty filter (relationship bound as `e`, and a missing `WHERE` in `get_relevant_edges`) \u2014 harmless today only because they're always invoked with an empty filter, but a latent inconsistency if anyone ever tries to pass edge-type restrictions through the dedup/invalidation path.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The helper function edge_search_filter_query_constructor is located in graphiti_core/search/search_filters.py.",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "compiled to Cypher by `edge_search_filter_query_constructor` (`search_filters.py:67-184`)"
+      },
+      {
+        "fact": "The functions edge_fulltext_search, edge_similarity_search, and edge_bfs_search call edge_search_filter_query_constructor.",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "The three user-facing search operations ... `edge_fulltext_search` (`search_utils.py:164`) ... `edge_similarity_search` (`search_utils.py:219`) ... `edge_bfs_search` (`search_utils.py:292`)\" ... \"all satisfy both assumptions\" combined with \"The constructor is called from **five** edge functions"
+      },
+      {
+        "fact": "Setting SearchFilters.edge_types causes the injection of the clause \"AND r.name IN $edge_types\" into the Cypher WHERE clause.",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "edge_types_filter = '\\nAND r.name in $edge_types'   # search_filters.py:73-77"
+      },
+      {
+        "fact": "The helper function binds the parameter $edge_types when SearchFilters.edge_types is set.",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "filter_params['edge_types'] = edge_types"
+      },
+      {
+        "fact": "The clause \"AND r.name IN $edge_types\" is prepended to edge_fulltext_search, edge_similarity_search, and edge_bfs_search before any date or node-label filters.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.8,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 4,
+    "read": 3,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "The helper function edge_search_filter_query_constructor is located in graphiti_core/search/search_filters.py.",
+    "The functions edge_fulltext_search, edge_similarity_search, and edge_bfs_search call edge_search_filter_query_constructor.",
+    "Setting SearchFilters.edge_types causes the injection of the clause \"AND r.name IN $edge_types\" into the Cypher WHERE clause.",
+    "The helper function binds the parameter $edge_types when SearchFilters.edge_types is set.",
+    "The clause \"AND r.name IN $edge_types\" is prepended to edge_fulltext_search, edge_similarity_search, and edge_bfs_search before any date or node-label filters."
+  ]
+}

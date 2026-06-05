@@ -1,0 +1,141 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 24984,
+    "duration_api_ms": 24771,
+    "ttft_ms": 2382,
+    "num_turns": 4,
+    "result": "`node_distance_reranker` lives at `graphiti_core/search/search_utils.py:923-965`. Here are its main steps:\n\n**Signature:** takes the `driver`, a `node_uuids` list, a `center_node_uuid` (the proximity anchor), and a `min_score` threshold (default `0`).\n\n1. **Drop the center node from the candidates** (`search_utils.py:930`). It filters `center_node_uuid` out of `node_uuids` into `filtered_uuids`, and seeds a `scores` dict with the center mapped to `0.0`.\n\n2. **Query graph proximity** (`search_utils.py:934-944`). It runs a Cypher query that `UNWIND`s the candidate UUIDs and matches each one that is directly connected to the center via a `RELATES_TO` edge, returning a score of `1` per matched node. (Note: despite the \"shortest path\" comment, it only checks for a single-hop `RELATES_TO` connection \u2014 matched nodes get `score = 1`.)\n\n3. **Normalize FalkorDB results** (`search_utils.py:945-946`). If the backend is FalkorDB, raw rows are zipped with the header into dicts (Neo4j already returns dict-like records).\n\n4. **Record scores for connected nodes** (`search_utils.py:948-951`). Each returned UUID gets its score (`1`) stored in `scores`.\n\n5. **Assign infinity to unconnected nodes** (`search_utils.py:953-955`). Any candidate that wasn't returned by the query (i.e., not adjacent to the center) gets `scores[uuid] = float('inf')`.\n\n6. **Sort by distance** (`search_utils.py:958`). `filtered_uuids` is sorted ascending by score, so closer nodes (score `1`) come before distant ones (score `inf`).\n\n7. **Re-insert the center node** (`search_utils.py:961-963`). If the center was originally in `node_uuids`, it's given a score of `0.1` and prepended to the front of the list.\n\n8. **Apply the min_score filter and return** (`search_utils.py:965`). It returns only UUIDs where `1 / scores[uuid] >= min_score`. Since unconnected nodes have score `inf`, `1/inf = 0` filters them out whenever `min_score > 0`; the center's `1/0.1 = 10` and connected nodes' `1/1 = 1` keep them.\n\n**Net effect:** a list of node UUIDs ordered by proximity to the center (center first, then directly-connected nodes, then the rest), with low-proximity nodes pruned according to `min_score`.",
+    "stop_reason": "end_turn",
+    "session_id": "ab7d4031-d235-401c-ac09-1022b1183763",
+    "total_cost_usd": 0.24480450000000004,
+    "usage": {
+      "input_tokens": 8030,
+      "cache_creation_input_tokens": 18526,
+      "cache_read_input_tokens": 112284,
+      "output_tokens": 1309,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 18526,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 886,
+          "cache_read_input_tokens": 34310,
+          "cache_creation_input_tokens": 1700,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1700
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8030,
+        "outputTokens": 1309,
+        "cacheReadInputTokens": 112284,
+        "cacheCreationInputTokens": 18526,
+        "webSearchRequests": 0,
+        "costUSD": 0.24480450000000004,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "5d3cb451-3098-44a5-9b47-681da139f8b5"
+  },
+  "answer": "`node_distance_reranker` lives at `graphiti_core/search/search_utils.py:923-965`. Here are its main steps:\n\n**Signature:** takes the `driver`, a `node_uuids` list, a `center_node_uuid` (the proximity anchor), and a `min_score` threshold (default `0`).\n\n1. **Drop the center node from the candidates** (`search_utils.py:930`). It filters `center_node_uuid` out of `node_uuids` into `filtered_uuids`, and seeds a `scores` dict with the center mapped to `0.0`.\n\n2. **Query graph proximity** (`search_utils.py:934-944`). It runs a Cypher query that `UNWIND`s the candidate UUIDs and matches each one that is directly connected to the center via a `RELATES_TO` edge, returning a score of `1` per matched node. (Note: despite the \"shortest path\" comment, it only checks for a single-hop `RELATES_TO` connection \u2014 matched nodes get `score = 1`.)\n\n3. **Normalize FalkorDB results** (`search_utils.py:945-946`). If the backend is FalkorDB, raw rows are zipped with the header into dicts (Neo4j already returns dict-like records).\n\n4. **Record scores for connected nodes** (`search_utils.py:948-951`). Each returned UUID gets its score (`1`) stored in `scores`.\n\n5. **Assign infinity to unconnected nodes** (`search_utils.py:953-955`). Any candidate that wasn't returned by the query (i.e., not adjacent to the center) gets `scores[uuid] = float('inf')`.\n\n6. **Sort by distance** (`search_utils.py:958`). `filtered_uuids` is sorted ascending by score, so closer nodes (score `1`) come before distant ones (score `inf`).\n\n7. **Re-insert the center node** (`search_utils.py:961-963`). If the center was originally in `node_uuids`, it's given a score of `0.1` and prepended to the front of the list.\n\n8. **Apply the min_score filter and return** (`search_utils.py:965`). It returns only UUIDs where `1 / scores[uuid] >= min_score`. Since unconnected nodes have score `inf`, `1/inf = 0` filters them out whenever `min_score > 0`; the center's `1/0.1 = 10` and connected nodes' `1/1 = 1` keep them.\n\n**Net effect:** a list of node UUIDs ordered by proximity to the center (center first, then directly-connected nodes, then the rest), with low-proximity nodes pruned according to `min_score`.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The file graphiti_core/search/search_utils.py contains an asynchronous function named node_distance_reranker.",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "`node_distance_reranker` lives at `graphiti_core/search/search_utils.py:923-965`."
+      },
+      {
+        "fact": "node_distance_reranker removes the center UUID from the candidate list.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "It filters `center_node_uuid` out of `node_uuids` into `filtered_uuids`"
+      },
+      {
+        "fact": "node_distance_reranker initializes a score map with the center UUID mapped to 0.0.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "seeds a `scores` dict with the center mapped to `0.0`"
+      },
+      {
+        "fact": "node_distance_reranker runs a Cypher query with MATCH \u2026\u2013[:RELATES_TO]\u2013\u2026 to assign a distance score of 1 to directly connected nodes.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "matches each one that is directly connected to the center via a `RELATES_TO` edge, returning a score of `1` per matched node"
+      },
+      {
+        "fact": "node_distance_reranker assigns infinity to nodes not returned by the Cypher query.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Any candidate that wasn't returned by the query (i.e., not adjacent to the center) gets `scores[uuid] = float('inf')`"
+      },
+      {
+        "fact": "node_distance_reranker sorts the remaining UUIDs by ascending score.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`filtered_uuids` is sorted ascending by score, so closer nodes (score `1`) come before distant ones (score `inf`)"
+      },
+      {
+        "fact": "If the center UUID was originally in the input, node_distance_reranker prepends it with a score of 0.1.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "If the center was originally in `node_uuids`, it's given a score of `0.1` and prepended to the front of the list."
+      },
+      {
+        "fact": "node_distance_reranker applies the min_score filter by keeping only UUIDs where 1/score is greater than or equal to min_score.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "It returns only UUIDs where `1 / scores[uuid] >= min_score`"
+      },
+      {
+        "fact": "node_distance_reranker yields a proximity-sorted, score-filtered list of node UUIDs.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "a list of node UUIDs ordered by proximity to the center (center first, then directly-connected nodes, then the rest), with low-proximity nodes pruned according to `min_score`"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 1,
+    "read": 1,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "The file graphiti_core/search/search_utils.py contains an asynchronous function named node_distance_reranker.",
+    "node_distance_reranker removes the center UUID from the candidate list.",
+    "node_distance_reranker initializes a score map with the center UUID mapped to 0.0.",
+    "node_distance_reranker runs a Cypher query with MATCH \u2026\u2013[:RELATES_TO]\u2013\u2026 to assign a distance score of 1 to directly connected nodes.",
+    "node_distance_reranker assigns infinity to nodes not returned by the Cypher query.",
+    "node_distance_reranker sorts the remaining UUIDs by ascending score.",
+    "If the center UUID was originally in the input, node_distance_reranker prepends it with a score of 0.1.",
+    "node_distance_reranker applies the min_score filter by keeping only UUIDs where 1/score is greater than or equal to min_score.",
+    "node_distance_reranker yields a proximity-sorted, score-filtered list of node UUIDs."
+  ]
+}

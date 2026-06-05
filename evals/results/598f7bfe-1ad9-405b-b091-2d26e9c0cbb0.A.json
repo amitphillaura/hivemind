@@ -1,0 +1,127 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 30751,
+    "duration_api_ms": 30697,
+    "ttft_ms": 2532,
+    "num_turns": 5,
+    "result": "`save_entity_node` lives on the `ZepGraphiti` class in `server/graph_service/zep_graphiti.py:21-30`. Here's exactly what it does, step by step.\n\n## 1. Construct the in-memory node\n`zep_graphiti.py:22-27` builds an `EntityNode` Pydantic model from the passed args (`name`, `uuid`, `group_id`, `summary`). At this point `name_embedding` defaults to `None` (`graphiti_core/nodes.py:285`).\n\n## 2. Embed the name \u2014 `generate_name_embedding`\n`zep_graphiti.py:28` calls `new_node.generate_name_embedding(self.embedder)` (`graphiti_core/nodes.py:291-298`):\n- Normalizes the text by replacing newlines with spaces: `text = self.name.replace('\\n', ' ')` (only the **name** is embedded, not the summary).\n- Calls the embedder client: `self.name_embedding = await embedder.create(input_data=[text])`, which stores the resulting vector on the node.\n- Logs timing and returns the embedding.\n\n## 3. Persist to the graph \u2014 `save`\n`zep_graphiti.py:29` calls `new_node.save(self.driver)` (`graphiti_core/nodes.py:312-332`):\n- Assembles `entity_data` dict with `uuid`, `name`, `name_embedding`, `group_id`, `summary`, `created_at` (`nodes.py:313-320`).\n- Merges in any custom `attributes` via `entity_data.update(self.attributes or {})` (`nodes.py:322`).\n- Runs the `ENTITY_NODE_SAVE` Cypher query through the driver, passing `labels=self.labels + ['Entity']` and `entity_data` (`nodes.py:324-328`).\n\nThe `ENTITY_NODE_SAVE` query (`graphiti_core/models/nodes/node_db_queries.py:32-37`) does the actual DB write:\n```cypher\nMERGE (n:Entity {uuid: $entity_data.uuid})\nSET n:$($labels)\nSET n = $entity_data\nWITH n CALL db.create.setNodeVectorProperty(n, \"name_embedding\", $entity_data.name_embedding)\nRETURN n.uuid AS uuid\n```\n- `MERGE` upserts by `uuid` (idempotent \u2014 won't duplicate).\n- `SET n:$($labels)` applies the dynamic labels.\n- `SET n = $entity_data` writes all scalar properties.\n- `db.create.setNodeVectorProperty` stores the name embedding as a native vector property (so it's indexed for vector search rather than stored as a plain list).\n\n## 4. Return\n`zep_graphiti.py:30` returns the populated `new_node` (now carrying its embedding) to the caller.\n\n**Summary of the flow:** build `EntityNode` \u2192 embed the name into `name_embedding` via the embedder \u2192 upsert node + dynamic labels + properties, then write the embedding as a vector property via the driver \u2192 return the node.\n\nOne note worth flagging: the embedding step has no error handling here \u2014 if `embedder.create` fails, the node is never saved, and there's no fallback path (consistent with the node simply not persisting on failure).",
+    "stop_reason": "end_turn",
+    "session_id": "bac44f60-b3da-4b0e-bf1f-bb1ad7a82c75",
+    "total_cost_usd": 0.30969625,
+    "usage": {
+      "input_tokens": 7739,
+      "cache_creation_input_tokens": 23743,
+      "cache_read_input_tokens": 148515,
+      "output_tokens": 1934,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 23743,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1163,
+          "cache_read_input_tokens": 37130,
+          "cache_creation_input_tokens": 4097,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4097
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 7739,
+        "outputTokens": 1934,
+        "cacheReadInputTokens": 148515,
+        "cacheCreationInputTokens": 23743,
+        "webSearchRequests": 0,
+        "costUSD": 0.30969625,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "a14994f2-41ae-4198-b03e-5e3c10c19502"
+  },
+  "answer": "`save_entity_node` lives on the `ZepGraphiti` class in `server/graph_service/zep_graphiti.py:21-30`. Here's exactly what it does, step by step.\n\n## 1. Construct the in-memory node\n`zep_graphiti.py:22-27` builds an `EntityNode` Pydantic model from the passed args (`name`, `uuid`, `group_id`, `summary`). At this point `name_embedding` defaults to `None` (`graphiti_core/nodes.py:285`).\n\n## 2. Embed the name \u2014 `generate_name_embedding`\n`zep_graphiti.py:28` calls `new_node.generate_name_embedding(self.embedder)` (`graphiti_core/nodes.py:291-298`):\n- Normalizes the text by replacing newlines with spaces: `text = self.name.replace('\\n', ' ')` (only the **name** is embedded, not the summary).\n- Calls the embedder client: `self.name_embedding = await embedder.create(input_data=[text])`, which stores the resulting vector on the node.\n- Logs timing and returns the embedding.\n\n## 3. Persist to the graph \u2014 `save`\n`zep_graphiti.py:29` calls `new_node.save(self.driver)` (`graphiti_core/nodes.py:312-332`):\n- Assembles `entity_data` dict with `uuid`, `name`, `name_embedding`, `group_id`, `summary`, `created_at` (`nodes.py:313-320`).\n- Merges in any custom `attributes` via `entity_data.update(self.attributes or {})` (`nodes.py:322`).\n- Runs the `ENTITY_NODE_SAVE` Cypher query through the driver, passing `labels=self.labels + ['Entity']` and `entity_data` (`nodes.py:324-328`).\n\nThe `ENTITY_NODE_SAVE` query (`graphiti_core/models/nodes/node_db_queries.py:32-37`) does the actual DB write:\n```cypher\nMERGE (n:Entity {uuid: $entity_data.uuid})\nSET n:$($labels)\nSET n = $entity_data\nWITH n CALL db.create.setNodeVectorProperty(n, \"name_embedding\", $entity_data.name_embedding)\nRETURN n.uuid AS uuid\n```\n- `MERGE` upserts by `uuid` (idempotent \u2014 won't duplicate).\n- `SET n:$($labels)` applies the dynamic labels.\n- `SET n = $entity_data` writes all scalar properties.\n- `db.create.setNodeVectorProperty` stores the name embedding as a native vector property (so it's indexed for vector search rather than stored as a plain list).\n\n## 4. Return\n`zep_graphiti.py:30` returns the populated `new_node` (now carrying its embedding) to the caller.\n\n**Summary of the flow:** build `EntityNode` \u2192 embed the name into `name_embedding` via the embedder \u2192 upsert node + dynamic labels + properties, then write the embedding as a vector property via the driver \u2192 return the node.\n\nOne note worth flagging: the embedding step has no error handling here \u2014 if `embedder.create` fails, the node is never saved, and there's no fallback path (consistent with the node simply not persisting on failure).",
+  "grade": {
+    "facts": [
+      {
+        "fact": "ZepGraphiti.save_entity_node is defined in server/graph_service/zep_graphiti.py",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`save_entity_node` lives on the `ZepGraphiti` class in `server/graph_service/zep_graphiti.py:21-30`"
+      },
+      {
+        "fact": "ZepGraphiti.save_entity_node instantiates an EntityNode with name, uuid, group_id, and summary",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "builds an `EntityNode` Pydantic model from the passed args (`name`, `uuid`, `group_id`, `summary`)"
+      },
+      {
+        "fact": "ZepGraphiti.save_entity_node calls new_node.generate_name_embedding(self.embedder)",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`zep_graphiti.py:28` calls `new_node.generate_name_embedding(self.embedder)`"
+      },
+      {
+        "fact": "new_node.generate_name_embedding(self.embedder) computes the EntityNode\u2019s name embedding",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Embed the name \u2014 `generate_name_embedding` ... only the **name** is embedded, not the summary ... which stores the resulting vector on the node"
+      },
+      {
+        "fact": "ZepGraphiti.save_entity_node calls new_node.save(self.driver)",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`zep_graphiti.py:29` calls `new_node.save(self.driver)`"
+      },
+      {
+        "fact": "new_node.save(self.driver) persists the EntityNode in Neo4j",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Runs the `ENTITY_NODE_SAVE` Cypher query through the driver ... does the actual DB write"
+      },
+      {
+        "fact": "ZepGraphiti.save_entity_node returns the saved EntityNode instance",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`zep_graphiti.py:30` returns the populated `new_node` (now carrying its embedding) to the caller"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 4,
+    "read": 0,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "ZepGraphiti.save_entity_node is defined in server/graph_service/zep_graphiti.py",
+    "ZepGraphiti.save_entity_node instantiates an EntityNode with name, uuid, group_id, and summary",
+    "ZepGraphiti.save_entity_node calls new_node.generate_name_embedding(self.embedder)",
+    "new_node.generate_name_embedding(self.embedder) computes the EntityNode\u2019s name embedding",
+    "ZepGraphiti.save_entity_node calls new_node.save(self.driver)",
+    "new_node.save(self.driver) persists the EntityNode in Neo4j",
+    "ZepGraphiti.save_entity_node returns the saved EntityNode instance"
+  ]
+}

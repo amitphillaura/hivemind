@@ -1,0 +1,113 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 20044,
+    "duration_api_ms": 20005,
+    "ttft_ms": 2791,
+    "num_turns": 4,
+    "result": "Both constructors live in `graphiti_core/search/search_filters.py`. Here's how the `node_labels` filter differs between them:\n\n## Node-level (`node_search_filter_query_constructor`, lines 59\u201362)\n\n```python\nif filters.node_labels is not None:\n    node_labels = '|'.join(filters.node_labels)\n    node_label_filter = ' AND n:' + node_labels\n    filter_query += node_label_filter\n```\n\nApplies the label constraint to **a single node variable `n`**:\n\n```cypher\nAND n:Label1|Label2\n```\n\n## Edge-level (`edge_search_filter_query_constructor`, lines 79\u201382)\n\n```python\nif filters.node_labels is not None:\n    node_labels = '|'.join(filters.node_labels)\n    node_label_filter = '\\nAND n:' + node_labels + ' AND m:' + node_labels\n    filter_query += node_label_filter\n```\n\nApplies the **same label set to both endpoints of the edge \u2014 `n` and `m`**:\n\n```cypher\nAND n:Label1|Label2 AND m:Label1|Label2\n```\n\n## The differences\n\n| | Node-level | Edge-level |\n|---|---|---|\n| **Variables constrained** | `n` only | `n` **and** `m` (both endpoints) |\n| **Leading whitespace** | `' AND ...'` (leading space) | `'\\nAND ...'` (leading newline) |\n| **Semantics** | The matched node must carry one of the labels | **Both** the source and target node of the edge must each carry one of the labels |\n\nThe core distinction: at the node level only one variable exists to filter, so the label disjunction (`Label1|Label2`, a Cypher label expression meaning \"any of these\") is applied once to `n`. At the edge level the query matches a relationship, so the constructor constrains **both** the start node `n` and end node `m` to the same label set, joined with `AND`. An edge only passes if *both* of its endpoints match one of the requested labels.\n\nOne thing worth flagging: the edge-level version requires the **same** `node_labels` list for both endpoints \u2014 there's no way to require, say, a `Person` source and a `Company` target. Both `n` and `m` get the identical disjunction.",
+    "stop_reason": "end_turn",
+    "session_id": "0bd773c0-8f02-440a-abef-363f9ad3359f",
+    "total_cost_usd": 0.22473300000000002,
+    "usage": {
+      "input_tokens": 7735,
+      "cache_creation_input_tokens": 19116,
+      "cache_read_input_tokens": 77516,
+      "output_tokens": 1113,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 19116,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 568,
+          "output_tokens": 755,
+          "cache_read_input_tokens": 33785,
+          "cache_creation_input_tokens": 2815,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2815
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 7735,
+        "outputTokens": 1113,
+        "cacheReadInputTokens": 77516,
+        "cacheCreationInputTokens": 19116,
+        "webSearchRequests": 0,
+        "costUSD": 0.22473300000000002,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "a094fd56-7e3c-41d0-b989-aa782cd0c273"
+  },
+  "answer": "Both constructors live in `graphiti_core/search/search_filters.py`. Here's how the `node_labels` filter differs between them:\n\n## Node-level (`node_search_filter_query_constructor`, lines 59\u201362)\n\n```python\nif filters.node_labels is not None:\n    node_labels = '|'.join(filters.node_labels)\n    node_label_filter = ' AND n:' + node_labels\n    filter_query += node_label_filter\n```\n\nApplies the label constraint to **a single node variable `n`**:\n\n```cypher\nAND n:Label1|Label2\n```\n\n## Edge-level (`edge_search_filter_query_constructor`, lines 79\u201382)\n\n```python\nif filters.node_labels is not None:\n    node_labels = '|'.join(filters.node_labels)\n    node_label_filter = '\\nAND n:' + node_labels + ' AND m:' + node_labels\n    filter_query += node_label_filter\n```\n\nApplies the **same label set to both endpoints of the edge \u2014 `n` and `m`**:\n\n```cypher\nAND n:Label1|Label2 AND m:Label1|Label2\n```\n\n## The differences\n\n| | Node-level | Edge-level |\n|---|---|---|\n| **Variables constrained** | `n` only | `n` **and** `m` (both endpoints) |\n| **Leading whitespace** | `' AND ...'` (leading space) | `'\\nAND ...'` (leading newline) |\n| **Semantics** | The matched node must carry one of the labels | **Both** the source and target node of the edge must each carry one of the labels |\n\nThe core distinction: at the node level only one variable exists to filter, so the label disjunction (`Label1|Label2`, a Cypher label expression meaning \"any of these\") is applied once to `n`. At the edge level the query matches a relationship, so the constructor constrains **both** the start node `n` and end node `m` to the same label set, joined with `AND`. An edge only passes if *both* of its endpoints match one of the requested labels.\n\nOne thing worth flagging: the edge-level version requires the **same** `node_labels` list for both endpoints \u2014 there's no way to require, say, a `Person` source and a `Company` target. Both `n` and `m` get the identical disjunction.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "node_search_filter_query_constructor is defined in graphiti_core/search/search_filters.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Both constructors live in `graphiti_core/search/search_filters.py`."
+      },
+      {
+        "fact": "A node\u2010label filter in node_search_filter_query_constructor appends \" AND n:Label1|Label2\" to the Cypher query.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "node_label_filter = ' AND n:' + node_labels"
+      },
+      {
+        "fact": "edge_search_filter_query_constructor applies the same labels to both ends of the relationship.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Applies the **same label set to both endpoints of the edge \u2014 `n` and `m`**"
+      },
+      {
+        "fact": "edge_search_filter_query_constructor appends \" AND n:Label1|Label2 AND m:Label1|Label2\" to the Cypher query.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "AND n:Label1|Label2 AND m:Label1|Label2"
+      },
+      {
+        "fact": "edge_search_filter_query_constructor filters on both the start node n and the end node m.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "the constructor constrains **both** the start node `n` and end node `m` to the same label set"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 1,
+    "read": 1,
+    "glob": 1,
+    "bash": 0
+  },
+  "gold_facts": [
+    "node_search_filter_query_constructor is defined in graphiti_core/search/search_filters.py.",
+    "A node\u2010label filter in node_search_filter_query_constructor appends \" AND n:Label1|Label2\" to the Cypher query.",
+    "edge_search_filter_query_constructor applies the same labels to both ends of the relationship.",
+    "edge_search_filter_query_constructor appends \" AND n:Label1|Label2 AND m:Label1|Label2\" to the Cypher query.",
+    "edge_search_filter_query_constructor filters on both the start node n and the end node m."
+  ]
+}

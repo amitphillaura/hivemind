@@ -1,0 +1,106 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 28148,
+    "duration_api_ms": 28073,
+    "ttft_ms": 1916,
+    "num_turns": 7,
+    "result": "The selection happens in a single ternary at `graphiti_core/graphiti.py:791-794`:\n\n```python\nsearch_config = (\n    EDGE_HYBRID_SEARCH_RRF if center_node_uuid is None else EDGE_HYBRID_SEARCH_NODE_DISTANCE\n)\nsearch_config.limit = num_results\n```\n\n## How the choice is made\n\nIt's a binary switch driven solely by whether `center_node_uuid` is `None`:\n\n| `center_node_uuid` | Config selected | Edge reranker |\n|---|---|---|\n| `None` (omitted) | `EDGE_HYBRID_SEARCH_RRF` | `EdgeReranker.rrf` (Reciprocal Rank Fusion) |\n| a node UUID is passed | `EDGE_HYBRID_SEARCH_NODE_DISTANCE` | `EdgeReranker.node_distance` |\n\nBoth recipes use the identical hybrid retrieval methods \u2014 `bm25` + `cosine_similarity` (`search_config_recipes.py:111-132`). The **only** difference is the reranker: passing a center node swaps RRF reranking for **node-distance reranking**, which reorders results by graph proximity to that node. This matches the docstring at line 771-772: *\"Facts will be reranked based on proximity to this node.\"*\n\nAfter selecting, the config's `limit` is set to `num_results`, and the chosen config plus the `center_node_uuid` are passed through to the underlying `search()` function in `search/search.py` (lines 796-805).\n\nOne thing worth flagging: `EDGE_HYBRID_SEARCH_RRF` / `EDGE_HYBRID_SEARCH_NODE_DISTANCE` are **module-level singletons**, and line 794 mutates `search_config.limit` in place on the shared object. So concurrent `search()` calls with different `num_results` can race on that shared `.limit` field \u2014 a latent bug, though not what you asked about.",
+    "stop_reason": "end_turn",
+    "session_id": "6ebdb4c6-fd64-4a4c-9a69-0b49a20dc033",
+    "total_cost_usd": 0.28981825000000005,
+    "usage": {
+      "input_tokens": 8032,
+      "cache_creation_input_tokens": 21279,
+      "cache_read_input_tokens": 153479,
+      "output_tokens": 1597,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 21279,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 670,
+          "cache_read_input_tokens": 37932,
+          "cache_creation_input_tokens": 831,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 831
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8032,
+        "outputTokens": 1597,
+        "cacheReadInputTokens": 153479,
+        "cacheCreationInputTokens": 21279,
+        "webSearchRequests": 0,
+        "costUSD": 0.28981825000000005,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "3205fcbc-6175-49df-924d-cf166905184f"
+  },
+  "answer": "The selection happens in a single ternary at `graphiti_core/graphiti.py:791-794`:\n\n```python\nsearch_config = (\n    EDGE_HYBRID_SEARCH_RRF if center_node_uuid is None else EDGE_HYBRID_SEARCH_NODE_DISTANCE\n)\nsearch_config.limit = num_results\n```\n\n## How the choice is made\n\nIt's a binary switch driven solely by whether `center_node_uuid` is `None`:\n\n| `center_node_uuid` | Config selected | Edge reranker |\n|---|---|---|\n| `None` (omitted) | `EDGE_HYBRID_SEARCH_RRF` | `EdgeReranker.rrf` (Reciprocal Rank Fusion) |\n| a node UUID is passed | `EDGE_HYBRID_SEARCH_NODE_DISTANCE` | `EdgeReranker.node_distance` |\n\nBoth recipes use the identical hybrid retrieval methods \u2014 `bm25` + `cosine_similarity` (`search_config_recipes.py:111-132`). The **only** difference is the reranker: passing a center node swaps RRF reranking for **node-distance reranking**, which reorders results by graph proximity to that node. This matches the docstring at line 771-772: *\"Facts will be reranked based on proximity to this node.\"*\n\nAfter selecting, the config's `limit` is set to `num_results`, and the chosen config plus the `center_node_uuid` are passed through to the underlying `search()` function in `search/search.py` (lines 796-805).\n\nOne thing worth flagging: `EDGE_HYBRID_SEARCH_RRF` / `EDGE_HYBRID_SEARCH_NODE_DISTANCE` are **module-level singletons**, and line 794 mutates `search_config.limit` in place on the shared object. So concurrent `search()` calls with different `num_results` can race on that shared `.limit` field \u2014 a latent bug, though not what you asked about.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "Graphiti.search is defined in the file graphiti_core/graphiti.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The selection happens in a single ternary at `graphiti_core/graphiti.py:791-794`"
+      },
+      {
+        "fact": "If center_node_uuid is None then search_config is set to EDGE_HYBRID_SEARCH_RRF.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "EDGE_HYBRID_SEARCH_RRF if center_node_uuid is None"
+      },
+      {
+        "fact": "If center_node_uuid is not None then search_config is set to EDGE_HYBRID_SEARCH_NODE_DISTANCE.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "if center_node_uuid is None else EDGE_HYBRID_SEARCH_NODE_DISTANCE"
+      },
+      {
+        "fact": "The code uses the selected search_config to rerank edges.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "passing a center node swaps RRF reranking for **node-distance reranking**, which reorders results by graph proximity to that node"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 2,
+    "grep": 2,
+    "read": 2,
+    "glob": 0,
+    "bash": 2
+  },
+  "gold_facts": [
+    "Graphiti.search is defined in the file graphiti_core/graphiti.py.",
+    "If center_node_uuid is None then search_config is set to EDGE_HYBRID_SEARCH_RRF.",
+    "If center_node_uuid is not None then search_config is set to EDGE_HYBRID_SEARCH_NODE_DISTANCE.",
+    "The code uses the selected search_config to rerank edges."
+  ]
+}

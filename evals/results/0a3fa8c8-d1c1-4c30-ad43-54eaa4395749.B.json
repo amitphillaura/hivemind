@@ -1,0 +1,113 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 38805,
+    "duration_api_ms": 38696,
+    "ttft_ms": 3758,
+    "num_turns": 10,
+    "result": "I've traced both demo paths end-to-end. Here's how the explicit connection parameters flow into the database client.\n\n## There are two demo scripts, with two different application paths\n\n### 1. Neo4j demo \u2014 positional args through `Graphiti` \u2192 `Neo4jDriver`\n\nIn `examples/quickstart/quickstart_neo4j.py:49-51`, the three params are read from env (with hardcoded fallbacks):\n\n```python\nneo4j_uri      = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')\nneo4j_user     = os.environ.get('NEO4J_USER', 'neo4j')\nneo4j_password = os.environ.get('NEO4J_PASSWORD', 'password')\n```\n\nThey're passed **positionally** to the `Graphiti` constructor (`quickstart_neo4j.py:67`):\n\n```python\ngraphiti = Graphiti(neo4j_uri, neo4j_user, neo4j_password)\n```\n\nInside `Graphiti.__init__` (`graphiti_core/graphiti.py:100-111`), they map to the first three parameters `uri, user, password`. Since no `graph_driver` is passed, the `else` branch builds the driver (`graphiti.py:163-168`):\n\n```python\nif graph_driver:\n    self.driver = graph_driver\nelse:\n    if uri is None:\n        raise ValueError('uri must be provided when graph_driver is None')\n    self.driver = Neo4jDriver(uri, user, password)\n```\n\n`Neo4jDriver.__init__` (`graphiti_core/driver/neo4j_driver.py:32-38`) feeds them into the actual Neo4j async client, packing user/password into an `auth` tuple (with `''` fallbacks for None):\n\n```python\nself.client = AsyncGraphDatabase.driver(\n    uri=uri,\n    auth=(user or '', password or ''),\n)\nself._database = database   # defaults to 'neo4j'\n```\n\nNote: `database` is **not** exposed by this demo path \u2014 it stays at the `'neo4j'` default, as the constructor docstring notes (`graphiti.py:154-156`).\n\n### 2. FalkorDB demo \u2014 explicit driver built first, then injected\n\nThe FalkorDB demo does **not** use the positional shortcut. In `quickstart_falkordb.py:59-62` it reads four params (host/port plus optional user/pass), then constructs the driver itself with **keyword** arguments (`quickstart_falkordb.py:75-78`):\n\n```python\nfalkor_driver = FalkorDriver(\n    host=falkor_host, port=falkor_port, username=falkor_username, password=falkor_password\n)\ngraphiti = Graphiti(graph_driver=falkor_driver)\n```\n\nHere the params land in `FalkorDriver.__init__` (`graphiti_core/driver/falkordb_driver.py:76-98`), which instantiates the FalkorDB client:\n\n```python\nif falkor_db is not None:\n    self.client = falkor_db\nelse:\n    self.client = FalkorDB(host=host, port=port, username=username, password=password)\n    self._database = database   # defaults to 'default_db'\n```\n\nThe pre-built driver is then passed via the `graph_driver` keyword, so `Graphiti.__init__` takes the **first** branch (`graphiti.py:163-164`) and assigns it directly to `self.driver` \u2014 the `uri/user/password` params are never touched.\n\n## Summary of the difference\n\n| | Neo4j demo | FalkorDB demo |\n|---|---|---|\n| Params passed to | `Graphiti(uri, user, password)` positionally | `FalkorDriver(host=, port=, username=, password=)` by keyword |\n| Driver creation | Implicit \u2014 `Graphiti` builds `Neo4jDriver` in its `else` branch | Explicit \u2014 script builds the driver, injects via `graph_driver=` |\n| Final client | `AsyncGraphDatabase.driver(uri=, auth=(user,password))` | `FalkorDB(host=, port=, username=, password=)` |\n\nSo the Neo4j path relies on `Graphiti`'s built-in convenience constructor, while the FalkorDB path bypasses it entirely by constructing the driver explicitly and handing it over \u2014 because `Graphiti`'s positional `uri/user/password` arguments are Neo4j-specific and can't express FalkorDB's host/port model.",
+    "stop_reason": "end_turn",
+    "session_id": "d2727dc2-afb2-42fc-9aff-892e333fece7",
+    "total_cost_usd": 0.403663,
+    "usage": {
+      "input_tokens": 8188,
+      "cache_creation_input_tokens": 30762,
+      "cache_read_input_tokens": 203321,
+      "output_tokens": 2752,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 30762,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1536,
+          "cache_read_input_tokens": 47405,
+          "cache_creation_input_tokens": 841,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 841
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8188,
+        "outputTokens": 2752,
+        "cacheReadInputTokens": 203321,
+        "cacheCreationInputTokens": 30762,
+        "webSearchRequests": 0,
+        "costUSD": 0.403663,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "2dbfa72f-5bb9-4693-87f6-59ca491d0eaa"
+  },
+  "answer": "I've traced both demo paths end-to-end. Here's how the explicit connection parameters flow into the database client.\n\n## There are two demo scripts, with two different application paths\n\n### 1. Neo4j demo \u2014 positional args through `Graphiti` \u2192 `Neo4jDriver`\n\nIn `examples/quickstart/quickstart_neo4j.py:49-51`, the three params are read from env (with hardcoded fallbacks):\n\n```python\nneo4j_uri      = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')\nneo4j_user     = os.environ.get('NEO4J_USER', 'neo4j')\nneo4j_password = os.environ.get('NEO4J_PASSWORD', 'password')\n```\n\nThey're passed **positionally** to the `Graphiti` constructor (`quickstart_neo4j.py:67`):\n\n```python\ngraphiti = Graphiti(neo4j_uri, neo4j_user, neo4j_password)\n```\n\nInside `Graphiti.__init__` (`graphiti_core/graphiti.py:100-111`), they map to the first three parameters `uri, user, password`. Since no `graph_driver` is passed, the `else` branch builds the driver (`graphiti.py:163-168`):\n\n```python\nif graph_driver:\n    self.driver = graph_driver\nelse:\n    if uri is None:\n        raise ValueError('uri must be provided when graph_driver is None')\n    self.driver = Neo4jDriver(uri, user, password)\n```\n\n`Neo4jDriver.__init__` (`graphiti_core/driver/neo4j_driver.py:32-38`) feeds them into the actual Neo4j async client, packing user/password into an `auth` tuple (with `''` fallbacks for None):\n\n```python\nself.client = AsyncGraphDatabase.driver(\n    uri=uri,\n    auth=(user or '', password or ''),\n)\nself._database = database   # defaults to 'neo4j'\n```\n\nNote: `database` is **not** exposed by this demo path \u2014 it stays at the `'neo4j'` default, as the constructor docstring notes (`graphiti.py:154-156`).\n\n### 2. FalkorDB demo \u2014 explicit driver built first, then injected\n\nThe FalkorDB demo does **not** use the positional shortcut. In `quickstart_falkordb.py:59-62` it reads four params (host/port plus optional user/pass), then constructs the driver itself with **keyword** arguments (`quickstart_falkordb.py:75-78`):\n\n```python\nfalkor_driver = FalkorDriver(\n    host=falkor_host, port=falkor_port, username=falkor_username, password=falkor_password\n)\ngraphiti = Graphiti(graph_driver=falkor_driver)\n```\n\nHere the params land in `FalkorDriver.__init__` (`graphiti_core/driver/falkordb_driver.py:76-98`), which instantiates the FalkorDB client:\n\n```python\nif falkor_db is not None:\n    self.client = falkor_db\nelse:\n    self.client = FalkorDB(host=host, port=port, username=username, password=password)\n    self._database = database   # defaults to 'default_db'\n```\n\nThe pre-built driver is then passed via the `graph_driver` keyword, so `Graphiti.__init__` takes the **first** branch (`graphiti.py:163-164`) and assigns it directly to `self.driver` \u2014 the `uri/user/password` params are never touched.\n\n## Summary of the difference\n\n| | Neo4j demo | FalkorDB demo |\n|---|---|---|\n| Params passed to | `Graphiti(uri, user, password)` positionally | `FalkorDriver(host=, port=, username=, password=)` by keyword |\n| Driver creation | Implicit \u2014 `Graphiti` builds `Neo4jDriver` in its `else` branch | Explicit \u2014 script builds the driver, injects via `graph_driver=` |\n| Final client | `AsyncGraphDatabase.driver(uri=, auth=(user,password))` | `FalkorDB(host=, port=, username=, password=)` |\n\nSo the Neo4j path relies on `Graphiti`'s built-in convenience constructor, while the FalkorDB path bypasses it entirely by constructing the driver explicitly and handing it over \u2014 because `Graphiti`'s positional `uri/user/password` arguments are Neo4j-specific and can't express FalkorDB's host/port model.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The demo\u2019s main() function passes falkor_host, falkor_port, falkor_username, and falkor_password directly into the FalkorDriver constructor.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "falkor_driver = FalkorDriver(\n    host=falkor_host, port=falkor_port, username=falkor_username, password=falkor_password\n)"
+      },
+      {
+        "fact": "The demo\u2019s main() function is located in the file examples/quickstart/quickstart_falkordb.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "In `quickstart_falkordb.py:59-62` it reads four params"
+      },
+      {
+        "fact": "In graphiti_core/driver/falkordb_driver.py, the FalkorDriver.__init__ method checks whether a falkor_db instance is supplied.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "if falkor_db is not None:\n    self.client = falkor_db\nelse:"
+      },
+      {
+        "fact": "If no falkor_db instance is supplied, FalkorDriver.__init__ calls FalkorDB(host=host, port=port, username=username, password=password).",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "self.client = FalkorDB(host=host, port=port, username=username, password=password)"
+      },
+      {
+        "fact": "FalkorDriver.__init__ assigns the FalkorDB instance to self.client.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Here the params land in `FalkorDriver.__init__` (`graphiti_core/driver/falkordb_driver.py:76-98`), which instantiates the FalkorDB client:"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 1,
+    "read": 5,
+    "glob": 2,
+    "bash": 1
+  },
+  "gold_facts": [
+    "The demo\u2019s main() function passes falkor_host, falkor_port, falkor_username, and falkor_password directly into the FalkorDriver constructor.",
+    "The demo\u2019s main() function is located in the file examples/quickstart/quickstart_falkordb.py.",
+    "In graphiti_core/driver/falkordb_driver.py, the FalkorDriver.__init__ method checks whether a falkor_db instance is supplied.",
+    "If no falkor_db instance is supplied, FalkorDriver.__init__ calls FalkorDB(host=host, port=port, username=username, password=password).",
+    "FalkorDriver.__init__ assigns the FalkorDB instance to self.client."
+  ]
+}

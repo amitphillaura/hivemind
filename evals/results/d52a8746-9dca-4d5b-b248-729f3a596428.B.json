@@ -1,0 +1,134 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 59475,
+    "duration_api_ms": 59376,
+    "ttft_ms": 2844,
+    "num_turns": 13,
+    "result": "I now have the complete picture across both paths. Here's how `group_id` works.\n\n## How `group_id` is incorporated\n\n`group_id` is Graphiti's **graph-partition / namespace key**. It's a single string per write, a list of strings per read, and it's tagged onto every graph element so reads can be scoped to one or more partitions.\n\n### Validation (shared)\nBoth ingestion and search-related writes validate the string first. `validate_group_id` (`graphiti_core/helpers.py:112`) allows empty string (the default partition) and otherwise enforces `^[a-zA-Z0-9_-]+$`, raising `GroupIdValidationError` on anything else \u2014 because the value is later interpolated into Lucene fulltext queries.\n\n### Message ingestion (`add_episode`, `graphiti.py:355`)\n`add_episode` takes a **single** `group_id: str = ''`. It threads that one value through the entire write so every created element lands in the same partition:\n\n1. **Validated** at `graphiti.py:425`.\n2. **Previous-episode context** is fetched scoped to that partition: `retrieve_episodes(..., group_ids=[group_id], ...)` at `:428\u2013433`. That bottoms out in `graph_data_operations.py:104`, which appends `AND e.group_id IN $group_ids` to the Cypher only when group_ids is non-empty \u2014 so prior-episode context never crosses partitions.\n3. **The episode node** is stamped: `EpisodicNode(name=..., group_id=group_id, ...)` at `:443`.\n4. **Edge extraction** receives it explicitly (`extract_edges(..., group_id, ...)` at `:481`) so extracted entities/edges inherit the same partition.\n5. Nodes and edges are persisted via `add_nodes_and_edges_bulk` (`:515`), each carrying `group_id` as a stored property on the graph.\n\nNet effect: one `add_episode` call writes entirely within one partition, and the partition propagates from the episode to its derived nodes and edges.\n\n### Search / memory retrieval (`search`, `search_()`, `graphiti.py:750` / `:823`)\nReads take a **list** `group_ids: list[str] | None` (a query may span multiple partitions, or `None` = search everywhere). Flow:\n\n1. `search()` / `search_()` \u2192 module-level `search()` (`search/search.py:66`).\n2. Normalization at `search.py:96`: `group_ids = group_ids if group_ids and group_ids != [''] else None` \u2014 empty/`['']` collapses to `None` (unscoped).\n3. `group_ids` is fanned out to all four sub-searches \u2014 `edge_search`, `node_search`, `episode_search`, `community_search` (`:97\u2013`).\n\nIt then reaches the DB two different ways depending on search method:\n\n- **Fulltext (BM25)** \u2014 `fulltext_query` (`search_utils.py:63`) builds a Lucene prefix: for each id, `group_id:\"<sanitized>\"`, OR-joined, then `AND`-ed onto the user query \u2192 `group_id:\"x\" OR group_id:\"y\" AND (query)`. (This is why validation/sanitization matters.)\n- **Vector similarity** \u2014 e.g. `edge_similarity_search` (`search_utils.py:222`): the Cypher filter starts `WHERE r.group_id IS NOT NULL` and, only when `group_ids is not None`, appends `AND r.group_id IN $group_ids` with the list bound as a parameter. Node/community searches mirror this (`n.group_id IN $group_ids`, etc.).\n\n### The symmetry\n- **Write** = singular `group_id` stamped onto every node/edge property.\n- **Read** = plural `group_ids` matched against that stored property \u2014 via Lucene `group_id:\"\u2026\"` clauses for fulltext, and `... .group_id IN $group_ids` Cypher for vector/graph queries.\n- In both directions, **empty/None means \"default / all\"**: an empty write-string is the default partition, and empty/None read-list disables the filter so the query spans the whole graph.\n\nThe same partitioning property also backs `retrieve_episodes`, `clear_data` (`graph_data_operations.py:71`), community building, and the `get_by_group_ids` accessors on `EntityNode`/`EpisodicNode`/`CommunityNode` and the edge classes \u2014 so `group_id` is the consistent multi-tenant boundary across the whole library.",
+    "stop_reason": "end_turn",
+    "session_id": "5da5785b-ec16-4f62-a5b5-527f0d8f6489",
+    "total_cost_usd": 0.46187900000000004,
+    "usage": {
+      "input_tokens": 8622,
+      "cache_creation_input_tokens": 28932,
+      "cache_read_input_tokens": 287238,
+      "output_tokens": 3773,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 28932,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1475,
+          "cache_read_input_tokens": 45235,
+          "cache_creation_input_tokens": 1181,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1181
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8622,
+        "outputTokens": 3773,
+        "cacheReadInputTokens": 287238,
+        "cacheCreationInputTokens": 28932,
+        "webSearchRequests": 0,
+        "costUSD": 0.46187900000000004,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "a255bd3c-7a3c-4fa6-ba0c-f69fe1a9f72f"
+  },
+  "answer": "I now have the complete picture across both paths. Here's how `group_id` works.\n\n## How `group_id` is incorporated\n\n`group_id` is Graphiti's **graph-partition / namespace key**. It's a single string per write, a list of strings per read, and it's tagged onto every graph element so reads can be scoped to one or more partitions.\n\n### Validation (shared)\nBoth ingestion and search-related writes validate the string first. `validate_group_id` (`graphiti_core/helpers.py:112`) allows empty string (the default partition) and otherwise enforces `^[a-zA-Z0-9_-]+$`, raising `GroupIdValidationError` on anything else \u2014 because the value is later interpolated into Lucene fulltext queries.\n\n### Message ingestion (`add_episode`, `graphiti.py:355`)\n`add_episode` takes a **single** `group_id: str = ''`. It threads that one value through the entire write so every created element lands in the same partition:\n\n1. **Validated** at `graphiti.py:425`.\n2. **Previous-episode context** is fetched scoped to that partition: `retrieve_episodes(..., group_ids=[group_id], ...)` at `:428\u2013433`. That bottoms out in `graph_data_operations.py:104`, which appends `AND e.group_id IN $group_ids` to the Cypher only when group_ids is non-empty \u2014 so prior-episode context never crosses partitions.\n3. **The episode node** is stamped: `EpisodicNode(name=..., group_id=group_id, ...)` at `:443`.\n4. **Edge extraction** receives it explicitly (`extract_edges(..., group_id, ...)` at `:481`) so extracted entities/edges inherit the same partition.\n5. Nodes and edges are persisted via `add_nodes_and_edges_bulk` (`:515`), each carrying `group_id` as a stored property on the graph.\n\nNet effect: one `add_episode` call writes entirely within one partition, and the partition propagates from the episode to its derived nodes and edges.\n\n### Search / memory retrieval (`search`, `search_()`, `graphiti.py:750` / `:823`)\nReads take a **list** `group_ids: list[str] | None` (a query may span multiple partitions, or `None` = search everywhere). Flow:\n\n1. `search()` / `search_()` \u2192 module-level `search()` (`search/search.py:66`).\n2. Normalization at `search.py:96`: `group_ids = group_ids if group_ids and group_ids != [''] else None` \u2014 empty/`['']` collapses to `None` (unscoped).\n3. `group_ids` is fanned out to all four sub-searches \u2014 `edge_search`, `node_search`, `episode_search`, `community_search` (`:97\u2013`).\n\nIt then reaches the DB two different ways depending on search method:\n\n- **Fulltext (BM25)** \u2014 `fulltext_query` (`search_utils.py:63`) builds a Lucene prefix: for each id, `group_id:\"<sanitized>\"`, OR-joined, then `AND`-ed onto the user query \u2192 `group_id:\"x\" OR group_id:\"y\" AND (query)`. (This is why validation/sanitization matters.)\n- **Vector similarity** \u2014 e.g. `edge_similarity_search` (`search_utils.py:222`): the Cypher filter starts `WHERE r.group_id IS NOT NULL` and, only when `group_ids is not None`, appends `AND r.group_id IN $group_ids` with the list bound as a parameter. Node/community searches mirror this (`n.group_id IN $group_ids`, etc.).\n\n### The symmetry\n- **Write** = singular `group_id` stamped onto every node/edge property.\n- **Read** = plural `group_ids` matched against that stored property \u2014 via Lucene `group_id:\"\u2026\"` clauses for fulltext, and `... .group_id IN $group_ids` Cypher for vector/graph queries.\n- In both directions, **empty/None means \"default / all\"**: an empty write-string is the default partition, and empty/None read-list disables the filter so the query spans the whole graph.\n\nThe same partitioning property also backs `retrieve_episodes`, `clear_data` (`graph_data_operations.py:71`), community building, and the `get_by_group_ids` accessors on `EntityNode`/`EpisodicNode`/`CommunityNode` and the edge classes \u2014 so `group_id` is the consistent multi-tenant boundary across the whole library.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "ingest.py defines a function named add_messages_task.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "In add_messages_task, request.group_id is passed directly as the group_id argument to graphiti.add_episode.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Every message processed by add_messages_task is tagged with its group_id.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "retrieve.py defines functions named search() and get_memory().",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Both search() and get_memory() call graphiti.search with a group_ids argument.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "search() passes query.group_ids into the group_ids argument of graphiti.search.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "get_memory() passes a list containing request.group_id into the group_ids argument of graphiti.search.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "These calls to graphiti.search ensure only episodes for the specified group are returned.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 5,
+    "read": 6,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "ingest.py defines a function named add_messages_task.",
+    "In add_messages_task, request.group_id is passed directly as the group_id argument to graphiti.add_episode.",
+    "Every message processed by add_messages_task is tagged with its group_id.",
+    "retrieve.py defines functions named search() and get_memory().",
+    "Both search() and get_memory() call graphiti.search with a group_ids argument.",
+    "search() passes query.group_ids into the group_ids argument of graphiti.search.",
+    "get_memory() passes a list containing request.group_id into the group_ids argument of graphiti.search.",
+    "These calls to graphiti.search ensure only episodes for the specified group are returned."
+  ]
+}

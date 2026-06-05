@@ -1,0 +1,127 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 42405,
+    "duration_api_ms": 42345,
+    "ttft_ms": 3779,
+    "num_turns": 7,
+    "result": "I have the complete, verified chain. Note: the user's message contained the keyword \"workflow,\" but here it refers to the `add_episode` *process*, not a request to run the Workflow tool \u2014 so I traced the code directly rather than spawning agents.\n\n## Answer\n\nWhen no custom `edge_type_map` is supplied to `add_episode`, default signatures are synthesized from the edge-type definitions and then inverted inside the extraction step. Two locations:\n\n### 1. Default map construction \u2014 `graphiti.py:454-458`\n\n```python\nedge_type_map_default = (\n    {('Entity', 'Entity'): list(edge_types.keys())}\n    if edge_types is not None\n    else {('Entity', 'Entity'): []}\n)\n```\n\nThe default map assigns **every** defined edge type to the single generic `('Entity', 'Entity')` source\u2192target signature. If no `edge_types` were defined either, it's an empty list on that same key. This is passed to extraction via `edge_type_map or edge_type_map_default` (`graphiti.py:480`) \u2014 the supplied map wins if present, otherwise the default is used.\n\n### 2. Signature lookup inside extraction \u2014 `edge_operations.py:124-141`\n\n`extract_edges` inverts the map (`{signature: [type_names]}`) into a per-type lookup (`{type_name: signature}`):\n\n```python\nedge_type_signature_map: dict[str, tuple[str, str]] = {\n    edge_type: signature\n    for signature, edge_types in edge_type_map.items()\n    for edge_type in edge_types\n}\n```\n\nThen it builds the LLM context, attaching a signature to each edge type, with `('Entity', 'Entity')` as the fallback default if a type isn't found in the inverted map:\n\n```python\n'fact_type_signature': edge_type_signature_map.get(type_name, ('Entity', 'Entity')),\n```\n\nThis `edge_types_context` (name + signature + the model's `__doc__` as description) goes into the prompt context (`edge_operations.py:152`) and is sent to the LLM at `edge_operations.py:160` via `prompt_library.extract_edges.edge(context)`.\n\n### Summary of the flow\n- **No custom map + custom `edge_types`** \u2192 all edge types are registered under `('Entity', 'Entity')`, so each one's `fact_type_signature` in the prompt resolves to `('Entity', 'Entity')`.\n- **No custom map + no `edge_types`** \u2192 empty list, `edge_types_context` is `[]` (the `if edge_types is not None else []` guard at `edge_operations.py:139-141`), so the LLM gets no typed-edge guidance.\n- The `('Entity', 'Entity')` tuple is the universal default signature in **both** the map-construction step and the per-type `.get(..., ('Entity', 'Entity'))` fallback inside extraction.\n\nThe same default pattern is repeated for `add_episode_bulk` at `graphiti.py:589-591`.",
+    "stop_reason": "end_turn",
+    "session_id": "f31fb34c-f8d4-4078-b7e4-22f3f038fd46",
+    "total_cost_usd": 0.29942425,
+    "usage": {
+      "input_tokens": 8064,
+      "cache_creation_input_tokens": 21989,
+      "cache_read_input_tokens": 115846,
+      "output_tokens": 2550,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 21989,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1391,
+          "cache_read_input_tokens": 37227,
+          "cache_creation_input_tokens": 2246,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2246
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8064,
+        "outputTokens": 2550,
+        "cacheReadInputTokens": 115846,
+        "cacheCreationInputTokens": 21989,
+        "webSearchRequests": 0,
+        "costUSD": 0.29942425,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "84082f44-557e-4a37-8cce-6c249b4aab0b"
+  },
+  "answer": "I have the complete, verified chain. Note: the user's message contained the keyword \"workflow,\" but here it refers to the `add_episode` *process*, not a request to run the Workflow tool \u2014 so I traced the code directly rather than spawning agents.\n\n## Answer\n\nWhen no custom `edge_type_map` is supplied to `add_episode`, default signatures are synthesized from the edge-type definitions and then inverted inside the extraction step. Two locations:\n\n### 1. Default map construction \u2014 `graphiti.py:454-458`\n\n```python\nedge_type_map_default = (\n    {('Entity', 'Entity'): list(edge_types.keys())}\n    if edge_types is not None\n    else {('Entity', 'Entity'): []}\n)\n```\n\nThe default map assigns **every** defined edge type to the single generic `('Entity', 'Entity')` source\u2192target signature. If no `edge_types` were defined either, it's an empty list on that same key. This is passed to extraction via `edge_type_map or edge_type_map_default` (`graphiti.py:480`) \u2014 the supplied map wins if present, otherwise the default is used.\n\n### 2. Signature lookup inside extraction \u2014 `edge_operations.py:124-141`\n\n`extract_edges` inverts the map (`{signature: [type_names]}`) into a per-type lookup (`{type_name: signature}`):\n\n```python\nedge_type_signature_map: dict[str, tuple[str, str]] = {\n    edge_type: signature\n    for signature, edge_types in edge_type_map.items()\n    for edge_type in edge_types\n}\n```\n\nThen it builds the LLM context, attaching a signature to each edge type, with `('Entity', 'Entity')` as the fallback default if a type isn't found in the inverted map:\n\n```python\n'fact_type_signature': edge_type_signature_map.get(type_name, ('Entity', 'Entity')),\n```\n\nThis `edge_types_context` (name + signature + the model's `__doc__` as description) goes into the prompt context (`edge_operations.py:152`) and is sent to the LLM at `edge_operations.py:160` via `prompt_library.extract_edges.edge(context)`.\n\n### Summary of the flow\n- **No custom map + custom `edge_types`** \u2192 all edge types are registered under `('Entity', 'Entity')`, so each one's `fact_type_signature` in the prompt resolves to `('Entity', 'Entity')`.\n- **No custom map + no `edge_types`** \u2192 empty list, `edge_types_context` is `[]` (the `if edge_types is not None else []` guard at `edge_operations.py:139-141`), so the LLM gets no typed-edge guidance.\n- The `('Entity', 'Entity')` tuple is the universal default signature in **both** the map-construction step and the per-type `.get(..., ('Entity', 'Entity'))` fallback inside extraction.\n\nThe same default pattern is repeated for `add_episode_bulk` at `graphiti.py:589-591`.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "Graphiti.add_episode is defined in graphiti_core/graphiti.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "### 1. Default map construction \u2014 `graphiti.py:454-458`"
+      },
+      {
+        "fact": "If no edge_type_map is passed to Graphiti.add_episode, it builds edge_type_map_default as {('Entity','Entity'): list(edge_types.keys())}.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "{('Entity', 'Entity'): list(edge_types.keys())}\n    if edge_types is not None"
+      },
+      {
+        "fact": "If no edge_types are supplied to Graphiti.add_episode, it builds edge_type_map_default as {('Entity','Entity'): []}.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "else {('Entity', 'Entity'): []}"
+      },
+      {
+        "fact": "Graphiti.add_episode passes the default edge_type_map_default to extract_edges.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This is passed to extraction via `edge_type_map or edge_type_map_default` (`graphiti.py:480`)"
+      },
+      {
+        "fact": "extract_edges is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "### 2. Signature lookup inside extraction \u2014 `edge_operations.py:124-141`\n\n`extract_edges` inverts the map"
+      },
+      {
+        "fact": "extract_edges inverts the provided edge_type_map into edge_type_signature_map.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`extract_edges` inverts the map (`{signature: [type_names]}`) into a per-type lookup (`{type_name: signature}`)"
+      },
+      {
+        "fact": "When no custom signature map is provided, extract_edges assigns the signature ('Entity','Entity') to every edge type name.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**No custom map + custom `edge_types`** \u2192 all edge types are registered under `('Entity', 'Entity')`, so each one's `fact_type_signature` in the prompt resolves to `('Entity', 'Entity')`."
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 3,
+    "read": 2,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "Graphiti.add_episode is defined in graphiti_core/graphiti.py.",
+    "If no edge_type_map is passed to Graphiti.add_episode, it builds edge_type_map_default as {('Entity','Entity'): list(edge_types.keys())}.",
+    "If no edge_types are supplied to Graphiti.add_episode, it builds edge_type_map_default as {('Entity','Entity'): []}.",
+    "Graphiti.add_episode passes the default edge_type_map_default to extract_edges.",
+    "extract_edges is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+    "extract_edges inverts the provided edge_type_map into edge_type_signature_map.",
+    "When no custom signature map is provided, extract_edges assigns the signature ('Entity','Entity') to every edge type name."
+  ]
+}

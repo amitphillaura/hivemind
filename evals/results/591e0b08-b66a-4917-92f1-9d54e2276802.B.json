@@ -1,0 +1,134 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 47512,
+    "duration_api_ms": 47445,
+    "ttft_ms": 2315,
+    "num_turns": 10,
+    "result": "I now have the complete picture. Here's how custom edge attributes survive a round-trip.\n\n## How additional `EntityEdge` attributes are persisted and retrieved\n\nThe mechanism is a **flatten-on-save / collect-on-read** pattern built around the `attributes` dict field. There's no fixed schema for custom attributes in the database \u2014 they're stored as top-level relationship properties and reconstructed by subtraction.\n\n### The field\n`EntityEdge` declares a catch-all dict for everything beyond the known columns (`graphiti_core/edges.py:209-211`):\n```python\nattributes: dict[str, Any] = Field(\n    default={}, description='Additional attributes of the edge. Dependent on edge name'\n)\n```\n\n### Saving \u2014 flatten `attributes` into the property map\nIn `EntityEdge.save` (`graphiti_core/edges.py:236-257`), the known fields are assembled into `edge_data`, then the custom attributes are **merged up to the top level**:\n```python\nedge_data.update(self.attributes or {})   # edges.py:252\nresult = await driver.execute_query(ENTITY_EDGE_SAVE, edge_data=edge_data)\n```\nThe Cypher query does `SET r = $edge_data` (`graphiti_core/models/edges/edge_db_queries.py:37`), so every key in `edge_data` \u2014 known columns *plus* each custom attribute \u2014 becomes a first-class property on the `RELATES_TO` relationship. The bulk path does the identical `edge_data.update(edge.attributes or {})` (`graphiti_core/utils/bulk_utils.py:157`) feeding `SET r = edge` in `ENTITY_EDGE_SAVE_BULK`.\n\n### Retrieving \u2014 grab all properties, then subtract the known ones\nThe shared return clause `ENTITY_EDGE_RETURN` (`graphiti_core/edges.py:40-54`) returns each known column explicitly, and captures **everything** via:\n```cypher\nproperties(e) AS attributes\n```\nSo `attributes` initially contains the *entire* property map, including the known columns. `get_entity_edge_from_record` (`graphiti_core/edges.py:453-481`) then reconstructs the object and **pops every known field back out of `attributes`** (lines 469-479):\n```python\nattributes=record['attributes'],\n...\nedge.attributes.pop('uuid', None)\nedge.attributes.pop('fact', None)\nedge.attributes.pop('name', None)\n# ... one pop per known column (created_at, valid_at, invalid_at, etc.)\n```\nWhatever remains after the pops is exactly the set of custom attributes, restored into `edge.attributes`.\n\n### Summary of the contract\n- **Save:** known fields + `attributes` spread \u2192 single flat property map \u2192 `SET r = $edge_data`.\n- **Read:** `properties(e)` returns all props \u2192 known keys popped off \u2192 leftover is `attributes`.\n\nThis means custom attributes round-trip without any DB schema change, and the popped-key list in `get_entity_edge_from_record` is what keeps the known columns from leaking into `attributes`. (Note: this list is hand-maintained \u2014 `fact_embedding` is *not* popped, but it's also excluded from `properties(e)` results since vectors are set separately via `db.create.setRelationshipVectorProperty`.)",
+    "stop_reason": "end_turn",
+    "session_id": "a8077312-cf62-46eb-a27f-3bd43f5fe9cb",
+    "total_cost_usd": 0.40933375,
+    "usage": {
+      "input_tokens": 7918,
+      "cache_creation_input_tokens": 28179,
+      "cache_read_input_tokens": 245100,
+      "output_tokens": 2843,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 28179,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1110,
+          "cache_read_input_tokens": 44487,
+          "cache_creation_input_tokens": 1176,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1176
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 7918,
+        "outputTokens": 2843,
+        "cacheReadInputTokens": 245100,
+        "cacheCreationInputTokens": 28179,
+        "webSearchRequests": 0,
+        "costUSD": 0.40933375,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "76468860-e90b-4be6-a5a7-a5b89a38fb58"
+  },
+  "answer": "I now have the complete picture. Here's how custom edge attributes survive a round-trip.\n\n## How additional `EntityEdge` attributes are persisted and retrieved\n\nThe mechanism is a **flatten-on-save / collect-on-read** pattern built around the `attributes` dict field. There's no fixed schema for custom attributes in the database \u2014 they're stored as top-level relationship properties and reconstructed by subtraction.\n\n### The field\n`EntityEdge` declares a catch-all dict for everything beyond the known columns (`graphiti_core/edges.py:209-211`):\n```python\nattributes: dict[str, Any] = Field(\n    default={}, description='Additional attributes of the edge. Dependent on edge name'\n)\n```\n\n### Saving \u2014 flatten `attributes` into the property map\nIn `EntityEdge.save` (`graphiti_core/edges.py:236-257`), the known fields are assembled into `edge_data`, then the custom attributes are **merged up to the top level**:\n```python\nedge_data.update(self.attributes or {})   # edges.py:252\nresult = await driver.execute_query(ENTITY_EDGE_SAVE, edge_data=edge_data)\n```\nThe Cypher query does `SET r = $edge_data` (`graphiti_core/models/edges/edge_db_queries.py:37`), so every key in `edge_data` \u2014 known columns *plus* each custom attribute \u2014 becomes a first-class property on the `RELATES_TO` relationship. The bulk path does the identical `edge_data.update(edge.attributes or {})` (`graphiti_core/utils/bulk_utils.py:157`) feeding `SET r = edge` in `ENTITY_EDGE_SAVE_BULK`.\n\n### Retrieving \u2014 grab all properties, then subtract the known ones\nThe shared return clause `ENTITY_EDGE_RETURN` (`graphiti_core/edges.py:40-54`) returns each known column explicitly, and captures **everything** via:\n```cypher\nproperties(e) AS attributes\n```\nSo `attributes` initially contains the *entire* property map, including the known columns. `get_entity_edge_from_record` (`graphiti_core/edges.py:453-481`) then reconstructs the object and **pops every known field back out of `attributes`** (lines 469-479):\n```python\nattributes=record['attributes'],\n...\nedge.attributes.pop('uuid', None)\nedge.attributes.pop('fact', None)\nedge.attributes.pop('name', None)\n# ... one pop per known column (created_at, valid_at, invalid_at, etc.)\n```\nWhatever remains after the pops is exactly the set of custom attributes, restored into `edge.attributes`.\n\n### Summary of the contract\n- **Save:** known fields + `attributes` spread \u2192 single flat property map \u2192 `SET r = $edge_data`.\n- **Read:** `properties(e)` returns all props \u2192 known keys popped off \u2192 leftover is `attributes`.\n\nThis means custom attributes round-trip without any DB schema change, and the popped-key list in `get_entity_edge_from_record` is what keeps the known columns from leaking into `attributes`. (Note: this list is hand-maintained \u2014 `fact_embedding` is *not* popped, but it's also excluded from `properties(e)` results since vectors are set separately via `db.create.setRelationshipVectorProperty`.)",
+  "grade": {
+    "facts": [
+      {
+        "fact": "EntityEdge.save is defined in graphiti_core/edges.py",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "In `EntityEdge.save` (`graphiti_core/edges.py:236-257`)"
+      },
+      {
+        "fact": "EntityEdge.save builds its payload dictionary",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "the known fields are assembled into `edge_data`"
+      },
+      {
+        "fact": "EntityEdge.save calls edge_data.update(self.attributes or {})",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "edge_data.update(self.attributes or {})   # edges.py:252"
+      },
+      {
+        "fact": "Any custom key/value in an edge\u2019s attributes is written as relationship properties when saving",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "every key in `edge_data` \u2014 known columns *plus* each custom attribute \u2014 becomes a first-class property on the `RELATES_TO` relationship"
+      },
+      {
+        "fact": "In the get methods and the full-text, similarity, and search utilities, each Cypher query returns properties(r) AS attributes",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "captures **everything** via:\n```cypher\nproperties(e) AS attributes\n```"
+      },
+      {
+        "fact": "get_entity_edge_from_record(record) assigns record['attributes'] to EntityEdge.attributes",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "attributes=record['attributes'],"
+      },
+      {
+        "fact": "get_entity_edge_from_record(record) removes reserved keys from the attributes",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "**pops every known field back out of `attributes`** (lines 469-479)"
+      },
+      {
+        "fact": "Extra attributes added to an edge are preserved through save and load operations",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "how custom edge attributes survive a round-trip ... custom attributes round-trip without any DB schema change"
+      }
+    ],
+    "recall": 0.75,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 4,
+    "read": 3,
+    "glob": 0,
+    "bash": 2
+  },
+  "gold_facts": [
+    "EntityEdge.save is defined in graphiti_core/edges.py",
+    "EntityEdge.save builds its payload dictionary",
+    "EntityEdge.save calls edge_data.update(self.attributes or {})",
+    "Any custom key/value in an edge\u2019s attributes is written as relationship properties when saving",
+    "In the get methods and the full-text, similarity, and search utilities, each Cypher query returns properties(r) AS attributes",
+    "get_entity_edge_from_record(record) assigns record['attributes'] to EntityEdge.attributes",
+    "get_entity_edge_from_record(record) removes reserved keys from the attributes",
+    "Extra attributes added to an edge are preserved through save and load operations"
+  ]
+}

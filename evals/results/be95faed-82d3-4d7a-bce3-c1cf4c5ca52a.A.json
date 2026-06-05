@@ -1,0 +1,172 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 45446,
+    "duration_api_ms": 46425,
+    "ttft_ms": 2354,
+    "num_turns": 11,
+    "result": "I now have the complete chain. Here's the full sequence of actions for a fulltext relationship (edge) search.\n\n## Fulltext relationship search: end-to-end sequence\n\n### 1. Orchestration entry \u2014 `edge_search` (`search/search.py:161`)\n`edge_search` launches `edge_fulltext_search` concurrently with similarity and BFS searches via `semaphore_gather`, passing `2 * limit` (`search.py:176-195`). The fulltext results are later combined and reranked with the other methods.\n\n### 2. The fulltext worker \u2014 `edge_fulltext_search` (`search/search_utils.py:152`)\nThis function drives the whole fulltext path:\n\n**a. Query construction \u2014 `fulltext_query`** (`search_utils.py:160` \u2192 `search_utils.py:63`)\n- Builds a Lucene `group_id:\"...\"` filter clause from `group_ids`, sanitizing each via `lucene_sanitize` (`helpers.py:55`).\n- Sanitizes the user query with `lucene_sanitize` and wraps it: `group_ids_filter + '(' + lucene_query + ')'`.\n- Returns `''` if the token count exceeds `MAX_QUERY_LENGTH` \u2014 in which case `edge_fulltext_search` short-circuits and returns `[]` (`search_utils.py:161-162`).\n\n**b. Filter construction \u2014 `edge_search_filter_query_constructor`** (`search_utils.py:164` \u2192 `search_filters.py:67`)\nProduces a Cypher `filter_query` fragment plus `filter_params` from the `SearchFilters` (date ranges, edge types, etc.).\n\n**c. Provider-specific procedure call \u2014 `get_relationships_query`** (`search_utils.py:167` \u2192 `graph_queries.py:105`)\nThis is the provider dispatch point, keyed on `driver.provider`:\n- **FalkorDB**: maps the index name `'edge_name_and_fact'` to a FalkorDB label via `NEO4J_TO_FALKORDB_MAPPING` and emits `CALL db.idx.fulltext.queryRelationships('<label>', $query)` (`graph_queries.py:106-108`).\n- **Neo4j** (else): emits `CALL db.index.fulltext.queryRelationships(\"edge_name_and_fact\", $query, {limit: $limit})` (`graph_queries.py:110`).\n\n**d. Cypher assembly** (`search_utils.py:166-190`)\nThe procedure call is concatenated with:\n- `YIELD relationship AS rel, score`\n- `MATCH (n:Entity)-[r:RELATES_TO]->(m:Entity) WHERE r.group_id IN $group_ids` + the `filter_query` fragment\n- `WITH r, score, startNode(r) AS n, endNode(r) AS m`\n- a `RETURN` projecting `uuid`, `group_id`, source/target node uuids, timestamps, `name`, `fact`, `episodes`, and `properties(r) AS attributes`\n- `ORDER BY score DESC LIMIT $limit`\n\n**e. Execution** (`search_utils.py:192-199`)\n`driver.execute_query` is called with `params=filter_params`, the `fuzzy_query` bound as `query`, plus `group_ids`, `limit`, and `routing_='r'` (read routing).\n\n### 3. Result mapping \u2014 `get_entity_edge_from_record` (`search_utils.py:201` \u2192 `edges.py:453`)\nEach returned record is mapped to an `EntityEdge`:\n- Scalar fields are copied directly; date fields (`created_at`, `expired_at`, `valid_at`, `invalid_at`) go through `parse_db_date` (`edges.py:462-465`).\n- `properties(r)` becomes `attributes`, then every field already mapped to a first-class column (`uuid`, `source_node_uuid`, `fact`, `name`, `episodes`, timestamps, etc.) is `pop`-ed out of `attributes` so it isn't duplicated (`edges.py:469-479`).\n\nThe function returns `list[EntityEdge]`, which flows back up to `edge_search` for combination/reranking.\n\n### Summary chain\n```\nedge_search                              (search.py:161)\n  \u2514\u2500 edge_fulltext_search                (search_utils.py:152)\n       \u251c\u2500 fulltext_query \u2192 lucene_sanitize        (query string, Lucene)\n       \u251c\u2500 edge_search_filter_query_constructor    (Cypher filter fragment)\n       \u251c\u2500 get_relationships_query(provider)        (Neo4j vs FalkorDB CALL)\n       \u251c\u2500 driver.execute_query                     (run, read-routed)\n       \u2514\u2500 get_entity_edge_from_record \u00d7 N          (record \u2192 EntityEdge)\n```\n\nThe provider-specific branching is isolated entirely in `get_relationships_query`; everything downstream (the `YIELD`/`MATCH`/`RETURN` shape and the record mapping) is provider-agnostic.",
+    "stop_reason": "end_turn",
+    "session_id": "e611c5f1-f012-4671-b18e-f5c01def7452",
+    "total_cost_usd": 0.32198075000000004,
+    "usage": {
+      "input_tokens": 4561,
+      "cache_creation_input_tokens": 19793,
+      "cache_read_input_tokens": 177419,
+      "output_tokens": 3449,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 19793,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1779,
+          "cache_read_input_tokens": 36092,
+          "cache_creation_input_tokens": 1185,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1185
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 460,
+        "outputTokens": 15,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000535,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 4561,
+        "outputTokens": 3449,
+        "cacheReadInputTokens": 177419,
+        "cacheCreationInputTokens": 19793,
+        "webSearchRequests": 0,
+        "costUSD": 0.32144575000000003,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "7b743978-9c00-4831-a491-bdb9d1faac8f"
+  },
+  "answer": "I now have the complete chain. Here's the full sequence of actions for a fulltext relationship (edge) search.\n\n## Fulltext relationship search: end-to-end sequence\n\n### 1. Orchestration entry \u2014 `edge_search` (`search/search.py:161`)\n`edge_search` launches `edge_fulltext_search` concurrently with similarity and BFS searches via `semaphore_gather`, passing `2 * limit` (`search.py:176-195`). The fulltext results are later combined and reranked with the other methods.\n\n### 2. The fulltext worker \u2014 `edge_fulltext_search` (`search/search_utils.py:152`)\nThis function drives the whole fulltext path:\n\n**a. Query construction \u2014 `fulltext_query`** (`search_utils.py:160` \u2192 `search_utils.py:63`)\n- Builds a Lucene `group_id:\"...\"` filter clause from `group_ids`, sanitizing each via `lucene_sanitize` (`helpers.py:55`).\n- Sanitizes the user query with `lucene_sanitize` and wraps it: `group_ids_filter + '(' + lucene_query + ')'`.\n- Returns `''` if the token count exceeds `MAX_QUERY_LENGTH` \u2014 in which case `edge_fulltext_search` short-circuits and returns `[]` (`search_utils.py:161-162`).\n\n**b. Filter construction \u2014 `edge_search_filter_query_constructor`** (`search_utils.py:164` \u2192 `search_filters.py:67`)\nProduces a Cypher `filter_query` fragment plus `filter_params` from the `SearchFilters` (date ranges, edge types, etc.).\n\n**c. Provider-specific procedure call \u2014 `get_relationships_query`** (`search_utils.py:167` \u2192 `graph_queries.py:105`)\nThis is the provider dispatch point, keyed on `driver.provider`:\n- **FalkorDB**: maps the index name `'edge_name_and_fact'` to a FalkorDB label via `NEO4J_TO_FALKORDB_MAPPING` and emits `CALL db.idx.fulltext.queryRelationships('<label>', $query)` (`graph_queries.py:106-108`).\n- **Neo4j** (else): emits `CALL db.index.fulltext.queryRelationships(\"edge_name_and_fact\", $query, {limit: $limit})` (`graph_queries.py:110`).\n\n**d. Cypher assembly** (`search_utils.py:166-190`)\nThe procedure call is concatenated with:\n- `YIELD relationship AS rel, score`\n- `MATCH (n:Entity)-[r:RELATES_TO]->(m:Entity) WHERE r.group_id IN $group_ids` + the `filter_query` fragment\n- `WITH r, score, startNode(r) AS n, endNode(r) AS m`\n- a `RETURN` projecting `uuid`, `group_id`, source/target node uuids, timestamps, `name`, `fact`, `episodes`, and `properties(r) AS attributes`\n- `ORDER BY score DESC LIMIT $limit`\n\n**e. Execution** (`search_utils.py:192-199`)\n`driver.execute_query` is called with `params=filter_params`, the `fuzzy_query` bound as `query`, plus `group_ids`, `limit`, and `routing_='r'` (read routing).\n\n### 3. Result mapping \u2014 `get_entity_edge_from_record` (`search_utils.py:201` \u2192 `edges.py:453`)\nEach returned record is mapped to an `EntityEdge`:\n- Scalar fields are copied directly; date fields (`created_at`, `expired_at`, `valid_at`, `invalid_at`) go through `parse_db_date` (`edges.py:462-465`).\n- `properties(r)` becomes `attributes`, then every field already mapped to a first-class column (`uuid`, `source_node_uuid`, `fact`, `name`, `episodes`, timestamps, etc.) is `pop`-ed out of `attributes` so it isn't duplicated (`edges.py:469-479`).\n\nThe function returns `list[EntityEdge]`, which flows back up to `edge_search` for combination/reranking.\n\n### Summary chain\n```\nedge_search                              (search.py:161)\n  \u2514\u2500 edge_fulltext_search                (search_utils.py:152)\n       \u251c\u2500 fulltext_query \u2192 lucene_sanitize        (query string, Lucene)\n       \u251c\u2500 edge_search_filter_query_constructor    (Cypher filter fragment)\n       \u251c\u2500 get_relationships_query(provider)        (Neo4j vs FalkorDB CALL)\n       \u251c\u2500 driver.execute_query                     (run, read-routed)\n       \u2514\u2500 get_entity_edge_from_record \u00d7 N          (record \u2192 EntityEdge)\n```\n\nThe provider-specific branching is isolated entirely in `get_relationships_query`; everything downstream (the `YIELD`/`MATCH`/`RETURN` shape and the record mapping) is provider-agnostic.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The fulltext\u2010relationship search is implemented in graphiti_core/search/search_utils.py in the function edge_fulltext_search.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The fulltext worker \u2014 `edge_fulltext_search` (`search/search_utils.py:152`)"
+      },
+      {
+        "fact": "The function fulltext_query accepts parameters query and group_ids and returns a fuzzy search string.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**a. Query construction \u2014 `fulltext_query`**... Builds a Lucene `group_id:\"...\"` filter clause from `group_ids`... Sanitizes the user query with `lucene_sanitize` and wraps it: `group_ids_filter + '(' + lucene_query + ')'`"
+      },
+      {
+        "fact": "The function edge_search_filter_query_constructor accepts a search_filter parameter and returns a WHERE-clause and params.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**b. Filter construction \u2014 `edge_search_filter_query_constructor`**... Produces a Cypher `filter_query` fragment plus `filter_params` from the `SearchFilters`"
+      },
+      {
+        "fact": "The function get_relationships_query is defined in graphiti_core/graph_queries.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`get_relationships_query`** (`search_utils.py:167` \u2192 `graph_queries.py:105`)"
+      },
+      {
+        "fact": "The function get_relationships_query is called with 'edge_name_and_fact' and db_type equal to driver.provider.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This is the provider dispatch point, keyed on `driver.provider`... maps the index name `'edge_name_and_fact'`"
+      },
+      {
+        "fact": "The function get_relationships_query returns a provider-specific CALL db.index.fulltext.queryRelationships(...) call.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "emits `CALL db.index.fulltext.queryRelationships(\"edge_name_and_fact\", $query, {limit: $limit})`"
+      },
+      {
+        "fact": "The pipeline embeds the filter and the fuzzy query into a single Cypher string.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "The procedure call is concatenated with... the `filter_query` fragment... ORDER BY score DESC LIMIT $limit"
+      },
+      {
+        "fact": "The pipeline awaits driver.execute_query with cypher, params=filter_params, query=fuzzy_query, group_ids, limit, and routing_='r'.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`driver.execute_query` is called with `params=filter_params`, the `fuzzy_query` bound as `query`, plus `group_ids`, `limit`, and `routing_='r'` (read routing)"
+      },
+      {
+        "fact": "The pipeline maps each raw record via get_entity_edge_from_record defined in graphiti_core/edges.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Result mapping \u2014 `get_entity_edge_from_record` (`search_utils.py:201` \u2192 `edges.py:453`)\nEach returned record is mapped to an `EntityEdge`"
+      },
+      {
+        "fact": "The function get_entity_edge_from_record returns EntityEdge instances.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The function returns `list[EntityEdge]`"
+      },
+      {
+        "fact": "The pipeline handles provider differences between Neo4j and FalkorDB in the call generation step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**FalkorDB**... emits `CALL db.idx.fulltext.queryRelationships(...)`... **Neo4j** (else): emits `CALL db.index.fulltext.queryRelationships(...)`... The provider-specific branching is isolated entirely in `get_relationships_query`"
+      },
+      {
+        "fact": "The pipeline normalizes all results into the domain model.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Each returned record is mapped to an `EntityEdge`... The function returns `list[EntityEdge]`"
+      }
+    ],
+    "recall": 0.9166666666666666,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 7,
+    "read": 3,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "The fulltext\u2010relationship search is implemented in graphiti_core/search/search_utils.py in the function edge_fulltext_search.",
+    "The function fulltext_query accepts parameters query and group_ids and returns a fuzzy search string.",
+    "The function edge_search_filter_query_constructor accepts a search_filter parameter and returns a WHERE-clause and params.",
+    "The function get_relationships_query is defined in graphiti_core/graph_queries.py.",
+    "The function get_relationships_query is called with 'edge_name_and_fact' and db_type equal to driver.provider.",
+    "The function get_relationships_query returns a provider-specific CALL db.index.fulltext.queryRelationships(...) call.",
+    "The pipeline embeds the filter and the fuzzy query into a single Cypher string.",
+    "The pipeline awaits driver.execute_query with cypher, params=filter_params, query=fuzzy_query, group_ids, limit, and routing_='r'.",
+    "The pipeline maps each raw record via get_entity_edge_from_record defined in graphiti_core/edges.py.",
+    "The function get_entity_edge_from_record returns EntityEdge instances.",
+    "The pipeline handles provider differences between Neo4j and FalkorDB in the call generation step.",
+    "The pipeline normalizes all results into the domain model."
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "repo": "https://github.com/getzep/graphiti.git",
+  "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+  "selection": "comparison/enumeration intent, 4-9 facts, fresh",
+  "questions": [
+    {
+      "id": "6f80069e-438d-4c31-aa84-ab9780e73914",
+      "question": "How are entity model docstrings propagated from the Person class into the extraction prompt during node creation?",
+      "answer": "Entity docstrings (e.g. from your `Person` model\u2019s `__doc__`) are pulled directly off the Pydantic model and injected into the LLM prompt in two places:\n\n1. In `extract_nodes` (graphiti_core/utils/maintenance/node_operations.py), when building  \n   `entity_types_context`:  \n   ```python\n   for i, (type_name, type_model) in enumerate(entity_types.items()):\n       \u2026 'entity_type_description': type_model.__doc__\n   ```\n2. In `resolve_extracted_nodes` when constructing `extracted_nodes_context`:  \n   ```python\n   'entity_type_description':\n       entity_types_dict.get(<entity_type>).__doc__ or 'Default Entity Type'\n   ```\n\nSo your `Person.__doc__` (\u201cA human person\u2026\u201d) becomes the `entity_type_description` field the LLM sees during node extraction.",
+      "facts": [
+        "Entity docstrings are pulled directly off the Pydantic model.",
+        "Entity docstrings are injected into the LLM prompt in two places.",
+        "The first injection occurs in extract_nodes in the file graphiti_core/utils/maintenance/node_operations.py.",
+        "extract_nodes builds entity_types_context by iterating over entity_types.items().",
+        "extract_nodes assigns type_model.__doc__ to the 'entity_type_description' field in entity_types_context.",
+        "The second injection occurs in resolve_extracted_nodes when constructing extracted_nodes_context.",
+        "In resolve_extracted_nodes, 'entity_type_description' is set to the result of entity_types_dict.get(<entity_type>).__doc__ or the string 'Default Entity Type'.",
+        "The __doc__ attribute of the Person model becomes the entity_type_description field the LLM sees during node extraction."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    },
+    {
+      "id": "d08be44b-a369-412e-8393-a602a8558cc5",
+      "question": "How do both LLM client generate_response methods ensure the multilingual extraction instruction is included in the prompt?",
+      "answer": "In both graphiti_core/llm_client/client.py (LLMClient.generate_response) and graphiti_core/llm_client/openai_generic_client.py (OpenAIGenericClient.generate_response) you\u2019ll see the same line:\n\n```python\n# Add multilingual extraction instructions\nmessages[0].content += MULTILINGUAL_EXTRACTION_RESPONSES\n```\n\nThis ensures the MULTILINGUAL_EXTRACTION_RESPONSES constant is always appended to the first user message before the request is sent.",
+      "facts": [
+        "The file graphiti_core/llm_client/client.py contains a generate_response method in the LLMClient class.",
+        "The file graphiti_core/llm_client/openai_generic_client.py contains a generate_response method in the OpenAIGenericClient class.",
+        "Both generate_response methods include the comment \"# Add multilingual extraction instructions\".",
+        "Both generate_response methods include the line messages[0].content += MULTILINGUAL_EXTRACTION_RESPONSES.",
+        "The line messages[0].content += MULTILINGUAL_EXTRACTION_RESPONSES appends the MULTILINGUAL_EXTRACTION_RESPONSES constant to messages[0].content.",
+        "The MULTILINGUAL_EXTRACTION_RESPONSES constant is appended to the first user message before the request is sent."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 2
+    },
+    {
+      "id": "7e8e4d39-7df9-4855-a79a-e5a7e4a2b200",
+      "question": "What embedding generation steps are applied to entity nodes and edges in the bulk insert path versus the edge resolution path?",
+      "answer": "In the bulk\u2010insert path (in graphiti_core/utils/bulk_utils.py \u2192 add_nodes_and_edges_bulk_tx):\n\n\u2022 For each EntityNode:  \n  \u2013 if node.name_embedding is None \u2192 await node.generate_name_embedding(embedder)  \n\u2022 For each EntityEdge:  \n  \u2013 if edge.fact_embedding is None \u2192 await edge.generate_embedding(embedder)  \n\nIn the edge\u2010resolution path (in graphiti_core/utils/maintenance/edge_operations.py \u2192 resolve_extracted_edges):\n\n\u2022 It never calls per\u2010edge.generate_embedding() directly. Instead it batches all edge embeddings via create_entity_edge_embeddings(embedder, \u2026):  \n  1) once on the newly extracted_edges before matching  \n  2) once more (in parallel) on the finally resolved_edges and invalidated_edges  \n\nNo node embeddings are generated in the resolution path.",
+      "facts": [
+        "The bulk\u2010insert path is implemented in graphiti_core/utils/bulk_utils.py in the add_nodes_and_edges_bulk_tx function.",
+        "In the bulk\u2010insert path, for each EntityNode whose name_embedding is None, node.generate_name_embedding(embedder) is awaited.",
+        "In the bulk\u2010insert path, for each EntityEdge whose fact_embedding is None, edge.generate_embedding(embedder) is awaited.",
+        "The edge\u2010resolution path is implemented in graphiti_core/utils/maintenance/edge_operations.py in the resolve_extracted_edges function.",
+        "In the edge\u2010resolution path, per\u2010edge.generate_embedding() is never called directly.",
+        "In the edge\u2010resolution path, edge embeddings are batched via create_entity_edge_embeddings(embedder, \u2026).",
+        "In the edge\u2010resolution path, create_entity_edge_embeddings(embedder, \u2026) is called once on the newly extracted_edges before matching.",
+        "In the edge\u2010resolution path, create_entity_edge_embeddings(embedder, \u2026) is called again in parallel on the resolved_edges and invalidated_edges.",
+        "No node embeddings are generated in the edge\u2010resolution path."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 2
+    },
+    {
+      "id": "6f4f4766-d16e-44b6-8f6d-324df3756744",
+      "question": "What field names are used to specify the model in the LLM client config versus the embedder client config?",
+      "answer": "In GraphitiLLMConfig.create_client you pass your model in LLMConfig.model (and optionally small_model), e.g.:\n\n\u2022 LLMConfig(api_key=\u2026, model=self.model, small_model=self.small_model, \u2026)\n\nIn GraphitiEmbedderConfig.create_client you use:\n\n\u2022 AzureOpenAIEmbedderClient(\u2026, model=self.model)  \n\u2022 OpenAIEmbedderConfig(api_key=\u2026, embedding_model=self.model)\n\nSo the OpenAIEmbedderConfig field is named embedding_model, whereas LLMConfig uses model.",
+      "facts": [
+        "In GraphitiLLMConfig.create_client, the model is passed via the LLMConfig field model.",
+        "In GraphitiLLMConfig.create_client, a small model can be passed via the LLMConfig field small_model.",
+        "In GraphitiEmbedderConfig.create_client, AzureOpenAIEmbedderClient is used with model=self.model.",
+        "In GraphitiEmbedderConfig.create_client, OpenAIEmbedderConfig is used with embedding_model=self.model.",
+        "The OpenAIEmbedderConfig field for the embedding model is named embedding_model.",
+        "The LLMConfig field for the model is named model."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1
+    },
+    {
+      "id": "5e4930bd-516a-4083-a8ba-10551b980b87",
+      "question": "How are edge type restrictions applied across the different edge search operations?",
+      "answer": "All of the edge searches (full\u2010text, vector similarity and BFS) call the same helper:\n\n\u2022 graphiti_core/search/search_filters.py \u2192 edge_search_filter_query_constructor()\n\nIf you set SearchFilters.edge_types, it injects\n\n  AND r.name IN $edge_types\n\ninto the Cypher WHERE clause and binds $edge_types. That clause is prepended to every edge search (in edge_fulltext_search, edge_similarity_search and edge_bfs_search) before any date or node\u2010label filters.",
+      "facts": [
+        "The helper function edge_search_filter_query_constructor is located in graphiti_core/search/search_filters.py.",
+        "The functions edge_fulltext_search, edge_similarity_search, and edge_bfs_search call edge_search_filter_query_constructor.",
+        "Setting SearchFilters.edge_types causes the injection of the clause \"AND r.name IN $edge_types\" into the Cypher WHERE clause.",
+        "The helper function binds the parameter $edge_types when SearchFilters.edge_types is set.",
+        "The clause \"AND r.name IN $edge_types\" is prepended to edge_fulltext_search, edge_similarity_search, and edge_bfs_search before any date or node-label filters."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 2
+    },
+    {
+      "id": "db0c7614-345e-40e4-88d9-e98876200c89",
+      "question": "How do node label filters differ between the node-level and edge-level search filter query constructors?",
+      "answer": "In node_search_filter_query_constructor (graphiti_core/search/search_filters.py) a node\u2010label filter simply appends:\n\n  \u201c AND n:Label1|Label2\u201d\n\nto the Cypher.\n\nIn edge_search_filter_query_constructor, by contrast, the same labels are applied to both ends of the relationship:\n\n  \u201c AND n:Label1|Label2 AND m:Label1|Label2\u201d\n\n(i.e. it filters on both the start node `n` and end node `m`).",
+      "facts": [
+        "node_search_filter_query_constructor is defined in graphiti_core/search/search_filters.py.",
+        "A node\u2010label filter in node_search_filter_query_constructor appends \" AND n:Label1|Label2\" to the Cypher query.",
+        "edge_search_filter_query_constructor applies the same labels to both ends of the relationship.",
+        "edge_search_filter_query_constructor appends \" AND n:Label1|Label2 AND m:Label1|Label2\" to the Cypher query.",
+        "edge_search_filter_query_constructor filters on both the start node n and the end node m."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1
+    },
+    {
+      "id": "0a3fa8c8-d1c1-4c30-ad43-54eaa4395749",
+      "question": "How are the explicit connection parameters from the demo script applied when instantiating the database client?",
+      "answer": "The demo\u2019s main() passes its falkor_host, falkor_port, falkor_username and falkor_password directly into the FalkorDriver constructor in examples/quickstart/quickstart_falkordb.py. In graphiti_core/driver/falkordb_driver.py FalkorDriver.__init__ simply does:\n\n\u2022 if no falkor_db instance is supplied, it calls  \n\u2003\u2003self.client = FalkorDB(host=host, port=port, username=username, password=password)  \n\nthus forwarding your explicit parameters into the FalkorDB client.",
+      "facts": [
+        "The demo\u2019s main() function passes falkor_host, falkor_port, falkor_username, and falkor_password directly into the FalkorDriver constructor.",
+        "The demo\u2019s main() function is located in the file examples/quickstart/quickstart_falkordb.py.",
+        "In graphiti_core/driver/falkordb_driver.py, the FalkorDriver.__init__ method checks whether a falkor_db instance is supplied.",
+        "If no falkor_db instance is supplied, FalkorDriver.__init__ calls FalkorDB(host=host, port=port, username=username, password=password).",
+        "FalkorDriver.__init__ assigns the FalkorDB instance to self.client."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 2
+    },
+    {
+      "id": "86df2dc3-1f15-448f-8fb5-036a7df04337",
+      "question": "In the add_episode workflow, how are default edge type signatures determined and passed to the edge extraction step when no custom map is supplied?",
+      "answer": "In Graphiti.add_episode (graphiti_core/graphiti.py) you\u2019ll see:\n\n\u2022 If you don\u2019t pass in an edge_type_map, it builds  \n  edge_type_map_default = {('Entity','Entity'): list(edge_types.keys())}  \n  (or `{('Entity','Entity'): []}` if you didn\u2019t supply any edge_types).\n\n\u2022 That default map is handed straight into extract_edges.\n\nThen in extract_edges (graphiti_core/utils/maintenance/edge_operations.py) it inverts that map into edge_type_signature_map so every edge type name you defined ends up with the signature `('Entity','Entity')` when no custom signature map was provided.",
+      "facts": [
+        "Graphiti.add_episode is defined in graphiti_core/graphiti.py.",
+        "If no edge_type_map is passed to Graphiti.add_episode, it builds edge_type_map_default as {('Entity','Entity'): list(edge_types.keys())}.",
+        "If no edge_types are supplied to Graphiti.add_episode, it builds edge_type_map_default as {('Entity','Entity'): []}.",
+        "Graphiti.add_episode passes the default edge_type_map_default to extract_edges.",
+        "extract_edges is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+        "extract_edges inverts the provided edge_type_map into edge_type_signature_map.",
+        "When no custom signature map is provided, extract_edges assigns the signature ('Entity','Entity') to every edge type name."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    }
+  ]
+}

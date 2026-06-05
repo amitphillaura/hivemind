@@ -1,0 +1,113 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 22961,
+    "duration_api_ms": 22753,
+    "ttft_ms": 2667,
+    "num_turns": 4,
+    "result": "Both constructors live in `graphiti_core/search/search_filters.py` and handle `node_labels` the same way at the core (`'|'.join(filters.node_labels)`, which is Cypher's \"any of these labels\" OR-syntax), but they apply it to a different number of graph variables.\n\n**Node-level** \u2014 `node_search_filter_query_constructor` (lines 59-62):\n```python\nnode_labels = '|'.join(filters.node_labels)\nnode_label_filter = ' AND n:' + node_labels\nfilter_query += node_label_filter\n```\nIt constrains a **single** node variable `n`, producing e.g. ` AND n:Person|Org`.\n\n**Edge-level** \u2014 `edge_search_filter_query_constructor` (lines 79-82):\n```python\nnode_labels = '|'.join(filters.node_labels)\nnode_label_filter = '\\nAND n:' + node_labels + ' AND m:' + node_labels\nfilter_query += node_label_filter\n```\nBecause an edge connects two endpoints, it constrains **both** endpoint variables `n` **and** `m`, producing e.g. `\\nAND n:Person|Org AND m:Person|Org`. So an edge is only kept if **both** of its endpoints match one of the allowed labels.\n\nThe differences:\n\n1. **Number of variables filtered** \u2014 node-level filters one variable (`n`); edge-level filters both endpoints (`n` and `m`), requiring each end to satisfy the label set.\n2. **Whitespace prefix** \u2014 node-level prefixes with a space (`' AND n:'`); edge-level prefixes with a newline (`'\\nAND n:'`). Cosmetic only.\n3. **Scope of the constructor** \u2014 the node-level constructor *only* handles `node_labels` (it ignores edge_types and the date filters entirely). The edge-level constructor handles `node_labels` as one clause among many (`edge_types`, `valid_at`, `invalid_at`, `created_at`, `expired_at`), all keyed off the relationship variable `r`.\n\nThe label-matching semantics themselves (OR across the listed labels via `|`) are identical between the two.",
+    "stop_reason": "end_turn",
+    "session_id": "fd9811cd-b378-413e-8ab9-74421460edbd",
+    "total_cost_usd": 0.26436225,
+    "usage": {
+      "input_tokens": 8475,
+      "cache_creation_input_tokens": 20643,
+      "cache_read_input_tokens": 113737,
+      "output_tokens": 1444,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 20643,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 932,
+          "cache_read_input_tokens": 34999,
+          "cache_creation_input_tokens": 3128,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 3128
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8475,
+        "outputTokens": 1444,
+        "cacheReadInputTokens": 113737,
+        "cacheCreationInputTokens": 20643,
+        "webSearchRequests": 0,
+        "costUSD": 0.26436225,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "cd32c197-42b3-4b6f-b48d-aae38259d532"
+  },
+  "answer": "Both constructors live in `graphiti_core/search/search_filters.py` and handle `node_labels` the same way at the core (`'|'.join(filters.node_labels)`, which is Cypher's \"any of these labels\" OR-syntax), but they apply it to a different number of graph variables.\n\n**Node-level** \u2014 `node_search_filter_query_constructor` (lines 59-62):\n```python\nnode_labels = '|'.join(filters.node_labels)\nnode_label_filter = ' AND n:' + node_labels\nfilter_query += node_label_filter\n```\nIt constrains a **single** node variable `n`, producing e.g. ` AND n:Person|Org`.\n\n**Edge-level** \u2014 `edge_search_filter_query_constructor` (lines 79-82):\n```python\nnode_labels = '|'.join(filters.node_labels)\nnode_label_filter = '\\nAND n:' + node_labels + ' AND m:' + node_labels\nfilter_query += node_label_filter\n```\nBecause an edge connects two endpoints, it constrains **both** endpoint variables `n` **and** `m`, producing e.g. `\\nAND n:Person|Org AND m:Person|Org`. So an edge is only kept if **both** of its endpoints match one of the allowed labels.\n\nThe differences:\n\n1. **Number of variables filtered** \u2014 node-level filters one variable (`n`); edge-level filters both endpoints (`n` and `m`), requiring each end to satisfy the label set.\n2. **Whitespace prefix** \u2014 node-level prefixes with a space (`' AND n:'`); edge-level prefixes with a newline (`'\\nAND n:'`). Cosmetic only.\n3. **Scope of the constructor** \u2014 the node-level constructor *only* handles `node_labels` (it ignores edge_types and the date filters entirely). The edge-level constructor handles `node_labels` as one clause among many (`edge_types`, `valid_at`, `invalid_at`, `created_at`, `expired_at`), all keyed off the relationship variable `r`.\n\nThe label-matching semantics themselves (OR across the listed labels via `|`) are identical between the two.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "node_search_filter_query_constructor is defined in graphiti_core/search/search_filters.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Both constructors live in `graphiti_core/search/search_filters.py`"
+      },
+      {
+        "fact": "A node\u2010label filter in node_search_filter_query_constructor appends \" AND n:Label1|Label2\" to the Cypher query.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "It constrains a **single** node variable `n`, producing e.g. ` AND n:Person|Org`."
+      },
+      {
+        "fact": "edge_search_filter_query_constructor applies the same labels to both ends of the relationship.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "it constrains **both** endpoint variables `n` **and** `m`"
+      },
+      {
+        "fact": "edge_search_filter_query_constructor appends \" AND n:Label1|Label2 AND m:Label1|Label2\" to the Cypher query.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "producing e.g. `\\nAND n:Person|Org AND m:Person|Org`"
+      },
+      {
+        "fact": "edge_search_filter_query_constructor filters on both the start node n and the end node m.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "an edge is only kept if **both** of its endpoints match one of the allowed labels"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 0,
+    "read": 1,
+    "glob": 0,
+    "bash": 2
+  },
+  "gold_facts": [
+    "node_search_filter_query_constructor is defined in graphiti_core/search/search_filters.py.",
+    "A node\u2010label filter in node_search_filter_query_constructor appends \" AND n:Label1|Label2\" to the Cypher query.",
+    "edge_search_filter_query_constructor applies the same labels to both ends of the relationship.",
+    "edge_search_filter_query_constructor appends \" AND n:Label1|Label2 AND m:Label1|Label2\" to the Cypher query.",
+    "edge_search_filter_query_constructor filters on both the start node n and the end node m."
+  ]
+}

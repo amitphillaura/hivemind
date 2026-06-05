@@ -1,0 +1,134 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 80048,
+    "duration_api_ms": 79922,
+    "ttft_ms": 2817,
+    "num_turns": 2,
+    "result": "The docstring of your `Person` class travels through a clean, three-hop chain into the extraction prompt. Here's the precise path.\n\n## 1. Models passed into `add_episode` \u2192 `extract_nodes`\n\n`graphiti_core/graphiti.py:358`\n```python\nentity_types: dict[str, BaseModel] | None = None,\n```\nforwarded at `graphiti.py:462-463`:\n```python\nextracted_nodes = await extract_nodes(\n    self.clients, episode, previous_episodes, entity_types, excluded_entity_types\n```\n\n## 2. The docstring is read via `type_model.__doc__`\n\n`graphiti_core/utils/maintenance/node_operations.py:91-102` \u2014 the dict key becomes the type name, `__doc__` becomes the description:\n```python\nentity_types_context += (\n    [\n        {\n            'entity_type_id': i + 1,\n            'entity_type_name': type_name,\n            'entity_type_description': type_model.__doc__,\n        }\n        for i, (type_name, type_model) in enumerate(entity_types.items())\n    ]\n    ...\n```\nA default \"Entity\" type (id 0) is prepended at `node_operations.py:83-89`.\n\n## 3. Placed in the context dict under `entity_types`\n\n`node_operations.py:104-111`:\n```python\ncontext = {\n    'episode_content': episode.content,\n    ...\n    'entity_types': entity_types_context,\n    'source_description': episode.source_description,\n}\n```\n\n## 4. Interpolated into the prompt template\n\nDispatched by source type at `node_operations.py:114-126`, then f-string-injected into an `<ENTITY TYPES>` block. For messages, `graphiti_core/prompts/extract_nodes.py:86-88`:\n```python\n<ENTITY TYPES>\n{context['entity_types']}\n</ENTITY TYPES>\n```\nwith the instruction at `extract_nodes.py:103-105`:\n```python\n3. **Entity Classification**:\n   - Use the descriptions in ENTITY TYPES to classify each extracted entity.\n   - Assign the appropriate `entity_type_id` for each one.\n```\nThe same injection appears in `extract_text` (`extract_nodes.py:161-163`), `extract_json` (`extract_nodes.py:133-135`), and `classify_nodes` (`extract_nodes.py:222-224`).\n\n## Two important caveats\n\n**Field descriptions take a different route.** `Person`'s field-level `Field(description=...)` values do **not** reach the extraction prompt text. They are only read later, during attribute extraction, to build a dynamic response schema \u2014 `node_operations.py:346-354`:\n```python\nfor field_name, field_info in entity_type.model_fields.items():\n    attributes_definitions[field_name] = (\n        field_info.annotation,\n        Field(description=field_info.description),\n    )\n```\nThat dynamic model is passed as `response_model` (`node_operations.py:364-368`), so field descriptions surface to the LLM via structured output, not prompt text.\n\n**The docstring is also reused for deduplication** at `node_operations.py:230-241` (`entity_type_description` via `.__doc__`).\n\n**Net summary:** `Person.__doc__` \u2192 `entity_type_description` (`node_operations.py:96`) \u2192 `context['entity_types']` (`node_operations.py:109`) \u2192 `{context['entity_types']}` rendered inside `<ENTITY TYPES>` (`extract_nodes.py:87`). The class docstring is the *only* part of your model class that lands in the node-extraction prompt text itself.",
+    "stop_reason": "end_turn",
+    "session_id": "01b061b7-7ef2-4874-9223-3d1df07efb9c",
+    "total_cost_usd": 0.53487475,
+    "usage": {
+      "input_tokens": 7167,
+      "cache_creation_input_tokens": 19332,
+      "cache_read_input_tokens": 43735,
+      "output_tokens": 1821,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 19332,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1206,
+          "cache_read_input_tokens": 26251,
+          "cache_creation_input_tokens": 10565,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 10565
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 12349,
+        "outputTokens": 5952,
+        "cacheReadInputTokens": 109072,
+        "cacheCreationInputTokens": 43167,
+        "webSearchRequests": 0,
+        "costUSD": 0.53487475,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "65943266-7239-4b60-a24b-b53ccf6df0c3"
+  },
+  "answer": "The docstring of your `Person` class travels through a clean, three-hop chain into the extraction prompt. Here's the precise path.\n\n## 1. Models passed into `add_episode` \u2192 `extract_nodes`\n\n`graphiti_core/graphiti.py:358`\n```python\nentity_types: dict[str, BaseModel] | None = None,\n```\nforwarded at `graphiti.py:462-463`:\n```python\nextracted_nodes = await extract_nodes(\n    self.clients, episode, previous_episodes, entity_types, excluded_entity_types\n```\n\n## 2. The docstring is read via `type_model.__doc__`\n\n`graphiti_core/utils/maintenance/node_operations.py:91-102` \u2014 the dict key becomes the type name, `__doc__` becomes the description:\n```python\nentity_types_context += (\n    [\n        {\n            'entity_type_id': i + 1,\n            'entity_type_name': type_name,\n            'entity_type_description': type_model.__doc__,\n        }\n        for i, (type_name, type_model) in enumerate(entity_types.items())\n    ]\n    ...\n```\nA default \"Entity\" type (id 0) is prepended at `node_operations.py:83-89`.\n\n## 3. Placed in the context dict under `entity_types`\n\n`node_operations.py:104-111`:\n```python\ncontext = {\n    'episode_content': episode.content,\n    ...\n    'entity_types': entity_types_context,\n    'source_description': episode.source_description,\n}\n```\n\n## 4. Interpolated into the prompt template\n\nDispatched by source type at `node_operations.py:114-126`, then f-string-injected into an `<ENTITY TYPES>` block. For messages, `graphiti_core/prompts/extract_nodes.py:86-88`:\n```python\n<ENTITY TYPES>\n{context['entity_types']}\n</ENTITY TYPES>\n```\nwith the instruction at `extract_nodes.py:103-105`:\n```python\n3. **Entity Classification**:\n   - Use the descriptions in ENTITY TYPES to classify each extracted entity.\n   - Assign the appropriate `entity_type_id` for each one.\n```\nThe same injection appears in `extract_text` (`extract_nodes.py:161-163`), `extract_json` (`extract_nodes.py:133-135`), and `classify_nodes` (`extract_nodes.py:222-224`).\n\n## Two important caveats\n\n**Field descriptions take a different route.** `Person`'s field-level `Field(description=...)` values do **not** reach the extraction prompt text. They are only read later, during attribute extraction, to build a dynamic response schema \u2014 `node_operations.py:346-354`:\n```python\nfor field_name, field_info in entity_type.model_fields.items():\n    attributes_definitions[field_name] = (\n        field_info.annotation,\n        Field(description=field_info.description),\n    )\n```\nThat dynamic model is passed as `response_model` (`node_operations.py:364-368`), so field descriptions surface to the LLM via structured output, not prompt text.\n\n**The docstring is also reused for deduplication** at `node_operations.py:230-241` (`entity_type_description` via `.__doc__`).\n\n**Net summary:** `Person.__doc__` \u2192 `entity_type_description` (`node_operations.py:96`) \u2192 `context['entity_types']` (`node_operations.py:109`) \u2192 `{context['entity_types']}` rendered inside `<ENTITY TYPES>` (`extract_nodes.py:87`). The class docstring is the *only* part of your model class that lands in the node-extraction prompt text itself.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "Entity docstrings are pulled directly off the Pydantic model.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The docstring is read via `type_model.__doc__`"
+      },
+      {
+        "fact": "Entity docstrings are injected into the LLM prompt in two places.",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "The same injection appears in `extract_text` (`extract_nodes.py:161-163`)... `Person.__doc__` \u2192 `entity_type_description` ... \u2192 `{context['entity_types']}` rendered inside `<ENTITY TYPES>`"
+      },
+      {
+        "fact": "The first injection occurs in extract_nodes in the file graphiti_core/utils/maintenance/node_operations.py.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "`graphiti_core/utils/maintenance/node_operations.py:91-102` \u2014 the dict key becomes the type name, `__doc__` becomes the description"
+      },
+      {
+        "fact": "extract_nodes builds entity_types_context by iterating over entity_types.items().",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "for i, (type_name, type_model) in enumerate(entity_types.items())"
+      },
+      {
+        "fact": "extract_nodes assigns type_model.__doc__ to the 'entity_type_description' field in entity_types_context.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "'entity_type_description': type_model.__doc__,"
+      },
+      {
+        "fact": "The second injection occurs in resolve_extracted_nodes when constructing extracted_nodes_context.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "In resolve_extracted_nodes, 'entity_type_description' is set to the result of entity_types_dict.get(<entity_type>).__doc__ or the string 'Default Entity Type'.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The __doc__ attribute of the Person model becomes the entity_type_description field the LLM sees during node extraction.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`Person.__doc__` \u2192 `entity_type_description` (`node_operations.py:96`)"
+      }
+    ],
+    "recall": 0.625,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 0,
+    "read": 0,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "Entity docstrings are pulled directly off the Pydantic model.",
+    "Entity docstrings are injected into the LLM prompt in two places.",
+    "The first injection occurs in extract_nodes in the file graphiti_core/utils/maintenance/node_operations.py.",
+    "extract_nodes builds entity_types_context by iterating over entity_types.items().",
+    "extract_nodes assigns type_model.__doc__ to the 'entity_type_description' field in entity_types_context.",
+    "The second injection occurs in resolve_extracted_nodes when constructing extracted_nodes_context.",
+    "In resolve_extracted_nodes, 'entity_type_description' is set to the result of entity_types_dict.get(<entity_type>).__doc__ or the string 'Default Entity Type'.",
+    "The __doc__ attribute of the Person model becomes the entity_type_description field the LLM sees during node extraction."
+  ]
+}

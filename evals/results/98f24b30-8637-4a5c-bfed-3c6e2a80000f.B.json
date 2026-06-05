@@ -1,0 +1,60 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "api_error_status": null,
+  "duration_ms": 22196,
+  "duration_api_ms": 22044,
+  "ttft_ms": 2359,
+  "num_turns": 5,
+  "result": "The prompt template references it as `{context['episode_content']}` (e.g. `extract_nodes.py:215` in the `extract_attributes` prompt), so the key is **`episode_content`**.",
+  "stop_reason": "end_turn",
+  "session_id": "afd11afe-b032-4ce1-8180-96061477ea34",
+  "total_cost_usd": 0.267715,
+  "usage": {
+    "input_tokens": 8457,
+    "cache_creation_input_tokens": 20148,
+    "cache_read_input_tokens": 150660,
+    "output_tokens": 967,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 20148,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 65,
+        "cache_read_input_tokens": 37095,
+        "cache_creation_input_tokens": 537,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 537
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-opus-4-8[1m]": {
+      "inputTokens": 8457,
+      "outputTokens": 967,
+      "cacheReadInputTokens": 150660,
+      "cacheCreationInputTokens": 20148,
+      "webSearchRequests": 0,
+      "costUSD": 0.267715,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "uuid": "90eef2ec-de60-42c8-bb91-c06be2c5bba0"
+}

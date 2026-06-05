@@ -1,0 +1,161 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 123219,
+    "duration_api_ms": 124150,
+    "ttft_ms": 2700,
+    "num_turns": 2,
+    "result": "Here's the complete set of functions involved, traced through the `add_episode` flow in `graphiti_core/graphiti.py:348`:\n\n## The pipeline\n\n**1. Identifying duplicates**\n\n- **`extract_nodes`** \u2014 `graphiti_core/utils/maintenance/node_operations.py:69`\n  LLM-extracts raw `EntityNode` objects from the episode. Called at `graphiti.py:462`.\n\n- **`resolve_extracted_nodes`** \u2014 `node_operations.py:179`\n  The core dedup function. Hybrid-searches the graph for candidate existing nodes, asks the LLM (`prompt_library.dedupe_nodes.nodes`) which extracted nodes are duplicates, builds a `uuid_map`, and assembles the `(resolved_node, existing_node)` duplicate pairs. Called concurrently with `extract_edges` at `graphiti.py:467`.\n  - Driven by the LLM response models **`NodeDuplicate`** (`prompts/dedupe_nodes.py:25`) and **`NodeResolutions`** (`dedupe_nodes.py:41`), produced by the **`nodes`** prompt builder (`dedupe_nodes.py:106`).\n\n**2. Filtering**\n\n- **`filter_existing_duplicate_of_edges`** \u2014 `edge_operations.py:524`\n  Called *inside* `resolve_extracted_nodes`. Queries the DB (Cypher at `edge_operations.py:529` matching `RELATES_TO {name: 'IS_DUPLICATE_OF'}`) and drops pairs that are already linked, returning only the new pairs needing an edge.\n\n**3. Constructing the edges**\n\n- **`build_duplicate_of_edges`** \u2014 `edge_operations.py:66`\n  Constructs the `EntityEdge` objects with `name='IS_DUPLICATE_OF'` (the literal is at `edge_operations.py:80`), skipping self-pairs. Called at `graphiti.py:504`, then merged into `entity_edges` at `graphiti.py:506` and persisted via `add_nodes_and_edges_bulk` at `graphiti.py:515`.\n\n## Flow summary\n\n```\nadd_episode (graphiti.py:348)\n  \u251c\u2500 extract_nodes (node_operations.py:69)              \u2192 raw nodes\n  \u251c\u2500 resolve_extracted_nodes (node_operations.py:179)   \u2192 uuid_map + duplicate pairs\n  \u2502    \u2514\u2500 filter_existing_duplicate_of_edges (edge_operations.py:524)  \u2192 strip already-linked\n  \u2514\u2500 build_duplicate_of_edges (edge_operations.py:66)   \u2192 EntityEdge(name='IS_DUPLICATE_OF')\n       \u2192 persisted via add_nodes_and_edges_bulk (graphiti.py:515)\n```\n\n## One caveat on the bulk path\n\n`add_episode_bulk` (`graphiti.py`) uses **`dedupe_nodes_bulk`** (`bulk_utils.py:203`) instead, which calls `resolve_extracted_nodes` per-episode but **does not** call `build_duplicate_of_edges` \u2014 in the bulk path deduplication is encoded only in the `uuid_map` remapping (`bulk_utils.py:295`), so no `IS_DUPLICATE_OF` edges are emitted there. The edge-construction sub-flow above is specific to the single-episode `add_episode`.\n\nRelated but outside the `add_episode` path: **`dedupe_node_list`** (`node_operations.py:381`) dedups an in-memory node list using the `dedupe_nodes.node_list` prompt, used by community maintenance.",
+    "stop_reason": "end_turn",
+    "session_id": "60a21a7f-9895-45ef-9ce6-c5f87a3689a4",
+    "total_cost_usd": 0.50782645,
+    "usage": {
+      "input_tokens": 3858,
+      "cache_creation_input_tokens": 17610,
+      "cache_read_input_tokens": 43746,
+      "output_tokens": 1880,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 17610,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1249,
+          "cache_read_input_tokens": 26262,
+          "cache_creation_input_tokens": 8832,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 8832
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 459,
+        "outputTokens": 19,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000554,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 3858,
+        "outputTokens": 1880,
+        "cacheReadInputTokens": 43746,
+        "cacheCreationInputTokens": 17610,
+        "webSearchRequests": 0,
+        "costUSD": 0.1982255,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      "claude-sonnet-4-6": {
+        "inputTokens": 14,
+        "outputTokens": 6131,
+        "cacheReadInputTokens": 285554,
+        "cacheCreationInputTokens": 35033,
+        "webSearchRequests": 0,
+        "costUSD": 0.30904695,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "0e286ecf-ef1c-43df-9f96-c2f3c1364144"
+  },
+  "answer": "Here's the complete set of functions involved, traced through the `add_episode` flow in `graphiti_core/graphiti.py:348`:\n\n## The pipeline\n\n**1. Identifying duplicates**\n\n- **`extract_nodes`** \u2014 `graphiti_core/utils/maintenance/node_operations.py:69`\n  LLM-extracts raw `EntityNode` objects from the episode. Called at `graphiti.py:462`.\n\n- **`resolve_extracted_nodes`** \u2014 `node_operations.py:179`\n  The core dedup function. Hybrid-searches the graph for candidate existing nodes, asks the LLM (`prompt_library.dedupe_nodes.nodes`) which extracted nodes are duplicates, builds a `uuid_map`, and assembles the `(resolved_node, existing_node)` duplicate pairs. Called concurrently with `extract_edges` at `graphiti.py:467`.\n  - Driven by the LLM response models **`NodeDuplicate`** (`prompts/dedupe_nodes.py:25`) and **`NodeResolutions`** (`dedupe_nodes.py:41`), produced by the **`nodes`** prompt builder (`dedupe_nodes.py:106`).\n\n**2. Filtering**\n\n- **`filter_existing_duplicate_of_edges`** \u2014 `edge_operations.py:524`\n  Called *inside* `resolve_extracted_nodes`. Queries the DB (Cypher at `edge_operations.py:529` matching `RELATES_TO {name: 'IS_DUPLICATE_OF'}`) and drops pairs that are already linked, returning only the new pairs needing an edge.\n\n**3. Constructing the edges**\n\n- **`build_duplicate_of_edges`** \u2014 `edge_operations.py:66`\n  Constructs the `EntityEdge` objects with `name='IS_DUPLICATE_OF'` (the literal is at `edge_operations.py:80`), skipping self-pairs. Called at `graphiti.py:504`, then merged into `entity_edges` at `graphiti.py:506` and persisted via `add_nodes_and_edges_bulk` at `graphiti.py:515`.\n\n## Flow summary\n\n```\nadd_episode (graphiti.py:348)\n  \u251c\u2500 extract_nodes (node_operations.py:69)              \u2192 raw nodes\n  \u251c\u2500 resolve_extracted_nodes (node_operations.py:179)   \u2192 uuid_map + duplicate pairs\n  \u2502    \u2514\u2500 filter_existing_duplicate_of_edges (edge_operations.py:524)  \u2192 strip already-linked\n  \u2514\u2500 build_duplicate_of_edges (edge_operations.py:66)   \u2192 EntityEdge(name='IS_DUPLICATE_OF')\n       \u2192 persisted via add_nodes_and_edges_bulk (graphiti.py:515)\n```\n\n## One caveat on the bulk path\n\n`add_episode_bulk` (`graphiti.py`) uses **`dedupe_nodes_bulk`** (`bulk_utils.py:203`) instead, which calls `resolve_extracted_nodes` per-episode but **does not** call `build_duplicate_of_edges` \u2014 in the bulk path deduplication is encoded only in the `uuid_map` remapping (`bulk_utils.py:295`), so no `IS_DUPLICATE_OF` edges are emitted there. The edge-construction sub-flow above is specific to the single-episode `add_episode`.\n\nRelated but outside the `add_episode` path: **`dedupe_node_list`** (`node_operations.py:381`) dedups an in-memory node list using the `dedupe_nodes.node_list` prompt, used by community maintenance.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**`resolve_extracted_nodes`** \u2014 `node_operations.py:179`"
+      },
+      {
+        "fact": "resolve_extracted_nodes calls the LLM to identify node duplicates",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "asks the LLM (`prompt_library.dedupe_nodes.nodes`) which extracted nodes are duplicates"
+      },
+      {
+        "fact": "resolve_extracted_nodes invokes filter_existing_duplicate_of_edges",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`filter_existing_duplicate_of_edges` \u2014 `edge_operations.py:524` Called *inside* `resolve_extracted_nodes`"
+      },
+      {
+        "fact": "filter_existing_duplicate_of_edges drops any IS_DUPLICATE_OF edges already in the database",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Queries the DB (Cypher at `edge_operations.py:529` matching `RELATES_TO {name: 'IS_DUPLICATE_OF'}`) and drops pairs that are already linked"
+      },
+      {
+        "fact": "build_duplicate_of_edges is defined in graphiti_core/utils/maintenance/edge_operations.py",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**`build_duplicate_of_edges`** \u2014 `edge_operations.py:66`"
+      },
+      {
+        "fact": "build_duplicate_of_edges takes the filtered node_pairs as input",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "build_duplicate_of_edges constructs new EntityEdge objects named \u201cIS_DUPLICATE_OF\u201d",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Constructs the `EntityEdge` objects with `name='IS_DUPLICATE_OF'`"
+      },
+      {
+        "fact": "Graphiti.add_episode merges these edges into the episode\u2019s edge set",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "then merged into `entity_edges` at `graphiti.py:506`"
+      },
+      {
+        "fact": "Graphiti.add_episode bulk-inserts the episode\u2019s edge set edges",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "persisted via `add_nodes_and_edges_bulk` at `graphiti.py:515`"
+      }
+    ],
+    "recall": 0.8888888888888888,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 0,
+    "read": 0,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py",
+    "resolve_extracted_nodes calls the LLM to identify node duplicates",
+    "resolve_extracted_nodes invokes filter_existing_duplicate_of_edges",
+    "filter_existing_duplicate_of_edges drops any IS_DUPLICATE_OF edges already in the database",
+    "build_duplicate_of_edges is defined in graphiti_core/utils/maintenance/edge_operations.py",
+    "build_duplicate_of_edges takes the filtered node_pairs as input",
+    "build_duplicate_of_edges constructs new EntityEdge objects named \u201cIS_DUPLICATE_OF\u201d",
+    "Graphiti.add_episode merges these edges into the episode\u2019s edge set",
+    "Graphiti.add_episode bulk-inserts the episode\u2019s edge set edges"
+  ]
+}

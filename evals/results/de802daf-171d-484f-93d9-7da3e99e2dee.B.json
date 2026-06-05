@@ -1,0 +1,106 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 67647,
+    "duration_api_ms": 67454,
+    "ttft_ms": 4668,
+    "num_turns": 13,
+    "result": "The integration tests extract the **`fact`** attribute.\n\nIn both `tests/test_graphiti_int.py:75-77` and `tests/test_graphiti_falkordb_int.py:86-88`, the test runs a search, then builds a log string via `search_results_to_context_string(results)` and passes it to `logger.info(...)`.\n\nThat helper (`graphiti_core/search/search_helpers.py:30-37`) iterates over `search_results.edges` (the returned `EntityEdge` objects) and pulls:\n\n```python\nfact_json = [\n    {\n        'fact': edge.fact,\n        'valid_at': str(edge.valid_at),\n        'invalid_at': str(edge.invalid_at or 'Present'),\n    }\n    for edge in search_results.edges\n]\n```\n\nSo the core attribute extracted from each `EntityEdge` is **`fact`** (alongside its temporal fields `valid_at`/`invalid_at`).",
+    "stop_reason": "end_turn",
+    "session_id": "82b105df-6f8a-40a6-84dd-e93929cb6a0d",
+    "total_cost_usd": 0.4680097500000001,
+    "usage": {
+      "input_tokens": 8170,
+      "cache_creation_input_tokens": 24007,
+      "cache_read_input_tokens": 420582,
+      "output_tokens": 2673,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 24007,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 466,
+          "cache_read_input_tokens": 40215,
+          "cache_creation_input_tokens": 1276,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1276
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8170,
+        "outputTokens": 2673,
+        "cacheReadInputTokens": 420582,
+        "cacheCreationInputTokens": 24007,
+        "webSearchRequests": 0,
+        "costUSD": 0.4680097500000001,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "2d2091eb-7929-4924-b594-16d4682aa398"
+  },
+  "answer": "The integration tests extract the **`fact`** attribute.\n\nIn both `tests/test_graphiti_int.py:75-77` and `tests/test_graphiti_falkordb_int.py:86-88`, the test runs a search, then builds a log string via `search_results_to_context_string(results)` and passes it to `logger.info(...)`.\n\nThat helper (`graphiti_core/search/search_helpers.py:30-37`) iterates over `search_results.edges` (the returned `EntityEdge` objects) and pulls:\n\n```python\nfact_json = [\n    {\n        'fact': edge.fact,\n        'valid_at': str(edge.valid_at),\n        'invalid_at': str(edge.invalid_at or 'Present'),\n    }\n    for edge in search_results.edges\n]\n```\n\nSo the core attribute extracted from each `EntityEdge` is **`fact`** (alongside its temporal fields `valid_at`/`invalid_at`).",
+  "grade": {
+    "facts": [
+      {
+        "fact": "An integration test uses the helper search_results_to_context_string.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "builds a log string via `search_results_to_context_string(results)` and passes it to `logger.info(...)`"
+      },
+      {
+        "fact": "The helper search_results_to_context_string is located in tests/.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The helper search_results_to_context_string pulls out the context attribute of each EntityEdge.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The helper search_results_to_context_string concatenates the context attributes for logging.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 2,
+    "read": 3,
+    "glob": 0,
+    "bash": 7
+  },
+  "gold_facts": [
+    "An integration test uses the helper search_results_to_context_string.",
+    "The helper search_results_to_context_string is located in tests/.",
+    "The helper search_results_to_context_string pulls out the context attribute of each EntityEdge.",
+    "The helper search_results_to_context_string concatenates the context attributes for logging."
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 21901,
+    "duration_api_ms": 21850,
+    "ttft_ms": 3427,
+    "num_turns": 3,
+    "result": "The answer is **edge invalidation** (along with date/temporal extraction).\n\nThis is stated explicitly in the `add_episode_bulk` docstring and borne out by the code:\n\n> **Important: This method does not perform edge invalidation or date extraction steps. If these operations are required, use the `add_episode` method instead for each individual episode.** \u2014 `graphiti.py:578-580`\n\n## The difference in the code path\n\n**Single-episode `add_episode`** calls `resolve_extracted_edges`, which returns a **two-element tuple** \u2014 both resolved *and* invalidated edges:\n\n```python\n(resolved_edges, invalidated_edges), hydrated_nodes = await semaphore_gather(\n    resolve_extracted_edges(...),   # graphiti.py:489-490\n    ...\n)\n...\nentity_edges = resolved_edges + invalidated_edges + duplicate_of_edges  # graphiti.py:506\n```\n\nSo contradicted edges get marked invalid (temporal invalidation / `expired_at`/`invalid_at` handling), and date extraction happens as part of resolving extracted edges.\n\n**Bulk `add_episode_bulk`** instead only calls `dedupe_edges_bulk`, which just deduplicates \u2014 no invalidation, no date extraction:\n\n```python\n# Dedupe extracted edges in memory\nedges_by_episode = await dedupe_edges_bulk(...)   # graphiti.py:653\n```\n\nThere is no `invalidated_edges` collection anywhere in the bulk path.\n\n## Summary\n\n| Step | `add_episode` | `add_episode_bulk` |\n|------|:---:|:---:|\n| Edge extraction | \u2705 | \u2705 |\n| Edge dedup | \u2705 (`resolve_extracted_edges`) | \u2705 (`dedupe_edges_bulk`) |\n| **Edge invalidation** (temporal contradiction) | \u2705 | \u274c skipped |\n| Date/temporal extraction | \u2705 | \u274c skipped |\n\nThe explicitly-skipped **edge processing** step is **edge invalidation** \u2014 the bulk method never produces an `invalidated_edges` set, so contradicted/expired edges are not detected or marked.",
+    "stop_reason": "end_turn",
+    "session_id": "684562f4-6ee0-4fb3-b1d4-1c187c89e99f",
+    "total_cost_usd": 0.2470795,
+    "usage": {
+      "input_tokens": 7735,
+      "cache_creation_input_tokens": 21048,
+      "cache_read_input_tokens": 77509,
+      "output_tokens": 1524,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 21048,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 568,
+          "output_tokens": 1081,
+          "cache_read_input_tokens": 33768,
+          "cache_creation_input_tokens": 4764,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4764
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 7735,
+        "outputTokens": 1524,
+        "cacheReadInputTokens": 77509,
+        "cacheCreationInputTokens": 21048,
+        "webSearchRequests": 0,
+        "costUSD": 0.2470795,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "b845ea7a-b133-46cb-ace2-d046f2e15dc2"
+  },
+  "answer": "The answer is **edge invalidation** (along with date/temporal extraction).\n\nThis is stated explicitly in the `add_episode_bulk` docstring and borne out by the code:\n\n> **Important: This method does not perform edge invalidation or date extraction steps. If these operations are required, use the `add_episode` method instead for each individual episode.** \u2014 `graphiti.py:578-580`\n\n## The difference in the code path\n\n**Single-episode `add_episode`** calls `resolve_extracted_edges`, which returns a **two-element tuple** \u2014 both resolved *and* invalidated edges:\n\n```python\n(resolved_edges, invalidated_edges), hydrated_nodes = await semaphore_gather(\n    resolve_extracted_edges(...),   # graphiti.py:489-490\n    ...\n)\n...\nentity_edges = resolved_edges + invalidated_edges + duplicate_of_edges  # graphiti.py:506\n```\n\nSo contradicted edges get marked invalid (temporal invalidation / `expired_at`/`invalid_at` handling), and date extraction happens as part of resolving extracted edges.\n\n**Bulk `add_episode_bulk`** instead only calls `dedupe_edges_bulk`, which just deduplicates \u2014 no invalidation, no date extraction:\n\n```python\n# Dedupe extracted edges in memory\nedges_by_episode = await dedupe_edges_bulk(...)   # graphiti.py:653\n```\n\nThere is no `invalidated_edges` collection anywhere in the bulk path.\n\n## Summary\n\n| Step | `add_episode` | `add_episode_bulk` |\n|------|:---:|:---:|\n| Edge extraction | \u2705 | \u2705 |\n| Edge dedup | \u2705 (`resolve_extracted_edges`) | \u2705 (`dedupe_edges_bulk`) |\n| **Edge invalidation** (temporal contradiction) | \u2705 | \u274c skipped |\n| Date/temporal extraction | \u2705 | \u274c skipped |\n\nThe explicitly-skipped **edge processing** step is **edge invalidation** \u2014 the bulk method never produces an `invalidated_edges` set, so contradicted/expired edges are not detected or marked.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "graphiti_core/graphiti.py defines a function named add_episode_bulk.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This is stated explicitly in the `add_episode_bulk` docstring ... `graphiti.py:578-580`"
+      },
+      {
+        "fact": "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the edge-invalidation step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Important: This method does not perform edge invalidation or date extraction steps."
+      },
+      {
+        "fact": "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the associated valid/invalid date extraction step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This method does not perform edge invalidation or date extraction steps."
+      },
+      {
+        "fact": "There is a per-episode flow named add_episode.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "use the `add_episode` method instead for each individual episode."
+      },
+      {
+        "fact": "The per-episode add_episode flow runs the edge-invalidation step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Edge invalidation** (temporal contradiction) | \u2705 | \u274c skipped"
+      },
+      {
+        "fact": "The per-episode add_episode flow runs the associated valid/invalid date extraction step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Date/temporal extraction | \u2705 | \u274c skipped"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 1,
+    "read": 1,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "graphiti_core/graphiti.py defines a function named add_episode_bulk.",
+    "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the edge-invalidation step.",
+    "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the associated valid/invalid date extraction step.",
+    "There is a per-episode flow named add_episode.",
+    "The per-episode add_episode flow runs the edge-invalidation step.",
+    "The per-episode add_episode flow runs the associated valid/invalid date extraction step."
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 93920,
+    "duration_api_ms": 171909,
+    "ttft_ms": 5253,
+    "num_turns": 5,
+    "result": "Verified the orchestration directly. Here's the complete sequence.\n\n## Sequence: podcast message \u2192 deduplicated nodes + extracted edges\n\n### Phase 0 \u2014 Parsing the transcript (example layer)\n\nThe podcast example reads `podcast_transcript.txt` and parses it into `ParsedMessage` objects (speaker, role, timestamp, content):\n\n- `examples/podcast/podcast_runner.py:77` \u2192 `parse_podcast_messages()`\n- `examples/podcast/transcript_parser.py:106-124` builds `Speaker` list and calls `parse_conversation_file()`, returning `list[ParsedMessage]` (`transcript_parser.py:14-20`)\n\nEach message is then formatted as `\"{speaker_name} ({role}): {content}\"` and fed into `add_episode` (`podcast_runner.py:100-116`). This is the only podcast-specific code \u2014 everything below is the generic Graphiti ingestion pipeline in `graphiti_core/graphiti.py`.\n\n### The pipeline inside `add_episode` (`graphiti.py:348-517`)\n\nThe orchestration is structured as **two parallel barriers** \u2014 this ordering is the key to the whole answer:\n\n```\n1. extract_nodes                          (graphiti.py:462)   \u2014 sequential, first\n        \u2502\n        \u25bc\n2. \u250c\u2500 resolve_extracted_nodes  \u2500\u2510                              \u2510\n   \u2502  (node dedup)              \u2502  run CONCURRENTLY            \u2502 barrier #1\n   \u2514\u2500 extract_edges          \u2500\u2500\u2500\u2518  (semaphore_gather)         \u2518 graphiti.py:467-485\n        \u2502\n        \u25bc\n3. resolve_edge_pointers                  (graphiti.py:487)   \u2014 remap edge endpoints to deduped node UUIDs\n        \u2502\n        \u25bc\n4. \u250c\u2500 resolve_extracted_edges  \u2500\u2510                              \u2510\n   \u2502  (edge dedup + invalidate) \u2502  run CONCURRENTLY            \u2502 barrier #2\n   \u2514\u2500 extract_attributes_from_nodes \u2518  (semaphore_gather)     \u2518 graphiti.py:489-502\n        \u2502\n        \u25bc\n5. build_duplicate_of_edges + build_episodic_edges  (graphiti.py:504-508)\n        \u2502\n        \u25bc\n6. add_nodes_and_edges_bulk               (graphiti.py:515)   \u2014 persist\n```\n\n### Step-by-step\n\n**1. Extract nodes** \u2014 `extract_nodes` (`node_operations.py:69-176`)\nRuns first and alone, because both downstream branches need its output. LLM extracts entities using the source-appropriate prompt \u2014 for a podcast message that's `prompt_library.extract_nodes.extract_message` (`node_operations.py:115`). A reflexion loop (`node_operations.py:113-147`) re-prompts up to `MAX_REFLEXION_ITERATIONS` to catch missed entities. Results become `EntityNode` objects, filtered against `excluded_entity_types` (`node_operations.py:152-172`).\n\n**2a. Resolve/dedupe nodes** \u2014 `resolve_extracted_nodes` (`node_operations.py:179-291`)\nFor each extracted node it runs a hybrid search (`NODE_HYBRID_SEARCH_RRF`) to find existing candidates (`node_operations.py:190-201`), then an LLM call with `dedupe_nodes.nodes` decides which extracted node maps to which existing node (`node_operations.py:252-255`). Produces `(resolved nodes, uuid_map, node_duplicates)`. The `uuid_map` (`node_operations.py:277`) is what links the deduped identities back to the freshly extracted ones.\n\n**2b. Extract edges** \u2014 `extract_edges` (`edge_operations.py:110-244`), in parallel with 2a\nLLM extracts facts/relationships via `extract_edges.edge` (`edge_operations.py:159-164`), with its own reflexion loop. Note this branch uses the *pre-dedup* `extracted_nodes` for endpoint indices \u2014 which is exactly why step 3 is needed.\n\n**3. Resolve edge pointers** \u2014 `resolve_edge_pointers` (`bulk_utils.py:431-438`, called `graphiti.py:487`)\nRewrites each edge's `source_node_uuid`/`target_node_uuid` through `uuid_map`, so edges now point at the *deduplicated* node identities rather than the raw extracted ones.\n\n**4a. Resolve/dedupe edges** \u2014 `resolve_extracted_edges` (`edge_operations.py:247-336`)\nEmbeds the edges, searches for `get_relevant_edges` (duplicates) and `get_edge_invalidation_candidates` (contradictions) (`edge_operations.py:260-265`), then per-edge calls `resolve_extracted_edge` \u2192 `dedupe_edges.resolve_edge` LLM (`edge_operations.py:414-418`). This collapses duplicate facts onto existing edges (`edge_operations.py:420-430`) and invalidates contradicted edges by setting `expired_at`/`invalid_at` (`edge_operations.py:432-486`). Returns `(resolved_edges, invalidated_edges)`.\n\n**4b. Extract node attributes** \u2014 `extract_attributes_from_nodes` (`node_operations.py:294-320`), in parallel with 4a\nEnriches each resolved node with LLM-extracted attributes and computes embeddings (`hydrated_nodes`).\n\n**5. Build remaining edges** (`graphiti.py:504-508`)\n- `build_duplicate_of_edges` \u2192 `IS_DUPLICATE_OF` edges for merged nodes (`edge_operations.py:66-89`)\n- `entity_edges = resolved_edges + invalidated_edges + duplicate_of_edges` (`graphiti.py:506`)\n- `build_episodic_edges` \u2192 `MENTIONS` edges from the episode to each node (`edge_operations.py:46-63`)\n\n**6. Persist** \u2014 `add_nodes_and_edges_bulk` (`graphiti.py:515`, impl `bulk_utils.py:86-167`)\nWrites episode, episodic edges, hydrated nodes, and entity edges in a single write transaction.\n\n### The two things worth remembering\n\n1. **Node dedup and edge extraction overlap** \u2014 edges are extracted against raw node indices while nodes are being deduped concurrently, then `resolve_edge_pointers` reconciles the two via `uuid_map`. That's the non-obvious sequencing decision.\n2. **\"Deduplicated nodes\" and \"extracted edges\" aren't independent outputs** \u2014 the deduped nodes' `uuid_map` is a required input to making the extracted edges point at the right entities. The pipeline is node-dedup-first by necessity.",
+    "stop_reason": "end_turn",
+    "session_id": "5be8f288-abd5-4b0d-be90-6b5d501ba631",
+    "total_cost_usd": 0.5674037000000001,
+    "usage": {
+      "input_tokens": 4881,
+      "cache_creation_input_tokens": 29349,
+      "cache_read_input_tokens": 89431,
+      "output_tokens": 3916,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 29349,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 1023,
+          "output_tokens": 2345,
+          "cache_read_input_tokens": 45648,
+          "cache_creation_input_tokens": 1185,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1185
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 558,
+        "outputTokens": 13350,
+        "cacheReadInputTokens": 378102,
+        "cacheCreationInputTokens": 89467,
+        "webSearchRequests": 0,
+        "costUSD": 0.21695195,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 4881,
+        "outputTokens": 3916,
+        "cacheReadInputTokens": 89431,
+        "cacheCreationInputTokens": 29349,
+        "webSearchRequests": 0,
+        "costUSD": 0.35045175,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "5ffdc22b-3c14-419b-acce-deb554b05212"
+  },
+  "answer": "Verified the orchestration directly. Here's the complete sequence.\n\n## Sequence: podcast message \u2192 deduplicated nodes + extracted edges\n\n### Phase 0 \u2014 Parsing the transcript (example layer)\n\nThe podcast example reads `podcast_transcript.txt` and parses it into `ParsedMessage` objects (speaker, role, timestamp, content):\n\n- `examples/podcast/podcast_runner.py:77` \u2192 `parse_podcast_messages()`\n- `examples/podcast/transcript_parser.py:106-124` builds `Speaker` list and calls `parse_conversation_file()`, returning `list[ParsedMessage]` (`transcript_parser.py:14-20`)\n\nEach message is then formatted as `\"{speaker_name} ({role}): {content}\"` and fed into `add_episode` (`podcast_runner.py:100-116`). This is the only podcast-specific code \u2014 everything below is the generic Graphiti ingestion pipeline in `graphiti_core/graphiti.py`.\n\n### The pipeline inside `add_episode` (`graphiti.py:348-517`)\n\nThe orchestration is structured as **two parallel barriers** \u2014 this ordering is the key to the whole answer:\n\n```\n1. extract_nodes                          (graphiti.py:462)   \u2014 sequential, first\n        \u2502\n        \u25bc\n2. \u250c\u2500 resolve_extracted_nodes  \u2500\u2510                              \u2510\n   \u2502  (node dedup)              \u2502  run CONCURRENTLY            \u2502 barrier #1\n   \u2514\u2500 extract_edges          \u2500\u2500\u2500\u2518  (semaphore_gather)         \u2518 graphiti.py:467-485\n        \u2502\n        \u25bc\n3. resolve_edge_pointers                  (graphiti.py:487)   \u2014 remap edge endpoints to deduped node UUIDs\n        \u2502\n        \u25bc\n4. \u250c\u2500 resolve_extracted_edges  \u2500\u2510                              \u2510\n   \u2502  (edge dedup + invalidate) \u2502  run CONCURRENTLY            \u2502 barrier #2\n   \u2514\u2500 extract_attributes_from_nodes \u2518  (semaphore_gather)     \u2518 graphiti.py:489-502\n        \u2502\n        \u25bc\n5. build_duplicate_of_edges + build_episodic_edges  (graphiti.py:504-508)\n        \u2502\n        \u25bc\n6. add_nodes_and_edges_bulk               (graphiti.py:515)   \u2014 persist\n```\n\n### Step-by-step\n\n**1. Extract nodes** \u2014 `extract_nodes` (`node_operations.py:69-176`)\nRuns first and alone, because both downstream branches need its output. LLM extracts entities using the source-appropriate prompt \u2014 for a podcast message that's `prompt_library.extract_nodes.extract_message` (`node_operations.py:115`). A reflexion loop (`node_operations.py:113-147`) re-prompts up to `MAX_REFLEXION_ITERATIONS` to catch missed entities. Results become `EntityNode` objects, filtered against `excluded_entity_types` (`node_operations.py:152-172`).\n\n**2a. Resolve/dedupe nodes** \u2014 `resolve_extracted_nodes` (`node_operations.py:179-291`)\nFor each extracted node it runs a hybrid search (`NODE_HYBRID_SEARCH_RRF`) to find existing candidates (`node_operations.py:190-201`), then an LLM call with `dedupe_nodes.nodes` decides which extracted node maps to which existing node (`node_operations.py:252-255`). Produces `(resolved nodes, uuid_map, node_duplicates)`. The `uuid_map` (`node_operations.py:277`) is what links the deduped identities back to the freshly extracted ones.\n\n**2b. Extract edges** \u2014 `extract_edges` (`edge_operations.py:110-244`), in parallel with 2a\nLLM extracts facts/relationships via `extract_edges.edge` (`edge_operations.py:159-164`), with its own reflexion loop. Note this branch uses the *pre-dedup* `extracted_nodes` for endpoint indices \u2014 which is exactly why step 3 is needed.\n\n**3. Resolve edge pointers** \u2014 `resolve_edge_pointers` (`bulk_utils.py:431-438`, called `graphiti.py:487`)\nRewrites each edge's `source_node_uuid`/`target_node_uuid` through `uuid_map`, so edges now point at the *deduplicated* node identities rather than the raw extracted ones.\n\n**4a. Resolve/dedupe edges** \u2014 `resolve_extracted_edges` (`edge_operations.py:247-336`)\nEmbeds the edges, searches for `get_relevant_edges` (duplicates) and `get_edge_invalidation_candidates` (contradictions) (`edge_operations.py:260-265`), then per-edge calls `resolve_extracted_edge` \u2192 `dedupe_edges.resolve_edge` LLM (`edge_operations.py:414-418`). This collapses duplicate facts onto existing edges (`edge_operations.py:420-430`) and invalidates contradicted edges by setting `expired_at`/`invalid_at` (`edge_operations.py:432-486`). Returns `(resolved_edges, invalidated_edges)`.\n\n**4b. Extract node attributes** \u2014 `extract_attributes_from_nodes` (`node_operations.py:294-320`), in parallel with 4a\nEnriches each resolved node with LLM-extracted attributes and computes embeddings (`hydrated_nodes`).\n\n**5. Build remaining edges** (`graphiti.py:504-508`)\n- `build_duplicate_of_edges` \u2192 `IS_DUPLICATE_OF` edges for merged nodes (`edge_operations.py:66-89`)\n- `entity_edges = resolved_edges + invalidated_edges + duplicate_of_edges` (`graphiti.py:506`)\n- `build_episodic_edges` \u2192 `MENTIONS` edges from the episode to each node (`edge_operations.py:46-63`)\n\n**6. Persist** \u2014 `add_nodes_and_edges_bulk` (`graphiti.py:515`, impl `bulk_utils.py:86-167`)\nWrites episode, episodic edges, hydrated nodes, and entity edges in a single write transaction.\n\n### The two things worth remembering\n\n1. **Node dedup and edge extraction overlap** \u2014 edges are extracted against raw node indices while nodes are being deduped concurrently, then `resolve_edge_pointers` reconciles the two via `uuid_map`. That's the non-obvious sequencing decision.\n2. **\"Deduplicated nodes\" and \"extracted edges\" aren't independent outputs** \u2014 the deduped nodes' `uuid_map` is a required input to making the extracted edges point at the right entities. The pipeline is node-dedup-first by necessity.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The main function in examples/podcast/podcast_runner.py calls parse_podcast_messages().",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`examples/podcast/podcast_runner.py:77` \u2192 `parse_podcast_messages()`"
+      },
+      {
+        "fact": "parse_podcast_messages() returns a list of Message objects.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The main function wraps each Message object in a RawEpisode.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The main function invokes Graphiti.add_episode or Graphiti.add_episode_bulk with each RawEpisode.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "fed into `add_episode` (`podcast_runner.py:100-116`)"
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk create an EpisodicNode from a RawEpisode.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk extract raw EntityNode objects.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Results become `EntityNode` objects"
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk call resolve_extracted_nodes() from graphiti_core/utils/maintenance/node_operations.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`resolve_extracted_nodes` (`node_operations.py:179-291`)"
+      },
+      {
+        "fact": "resolve_extracted_nodes() runs a hybrid search over each extracted EntityNode.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "For each extracted node it runs a hybrid search (`NODE_HYBRID_SEARCH_RRF`)"
+      },
+      {
+        "fact": "resolve_extracted_nodes() builds an LLM prompt via graphiti_core/prompts/dedupe_nodes.py by calling nodes().",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "an LLM call with `dedupe_nodes.nodes` decides which extracted node maps to which existing node"
+      },
+      {
+        "fact": "The LLM returns entity_resolutions, which yields resolved_nodes and a uuid_map.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Produces `(resolved nodes, uuid_map, node_duplicates)`"
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk call extract_edges() from graphiti_core/utils/maintenance/edge_operations.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**2b. Extract edges** \u2014 `extract_edges` (`edge_operations.py:110-244`)"
+      },
+      {
+        "fact": "extract_edges() prepares a context consisting of episode.content, resolved_nodes, previous episodes, and edge_type_map.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "extract_edges() prompts via graphiti_core/prompts/extract_edges.py by calling edge(), using a reflection loop.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "LLM extracts facts/relationships via `extract_edges.edge` (`edge_operations.py:159-164`), with its own reflexion loop"
+      },
+      {
+        "fact": "extract_edges() converts LLM output into EntityEdge objects with valid_at and invalid_at timestamps and source and target UUIDs.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Graphiti persists the deduplicated nodes into Neo4j.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Writes episode, episodic edges, hydrated nodes, and entity edges in a single write transaction"
+      },
+      {
+        "fact": "Graphiti persists the extracted edges into Neo4j.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Writes episode, episodic edges, hydrated nodes, and entity edges in a single write transaction"
+      }
+    ],
+    "recall": 0.6875,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 0,
+    "read": 1,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "The main function in examples/podcast/podcast_runner.py calls parse_podcast_messages().",
+    "parse_podcast_messages() returns a list of Message objects.",
+    "The main function wraps each Message object in a RawEpisode.",
+    "The main function invokes Graphiti.add_episode or Graphiti.add_episode_bulk with each RawEpisode.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk create an EpisodicNode from a RawEpisode.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk extract raw EntityNode objects.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk call resolve_extracted_nodes() from graphiti_core/utils/maintenance/node_operations.py.",
+    "resolve_extracted_nodes() runs a hybrid search over each extracted EntityNode.",
+    "resolve_extracted_nodes() builds an LLM prompt via graphiti_core/prompts/dedupe_nodes.py by calling nodes().",
+    "The LLM returns entity_resolutions, which yields resolved_nodes and a uuid_map.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk call extract_edges() from graphiti_core/utils/maintenance/edge_operations.py.",
+    "extract_edges() prepares a context consisting of episode.content, resolved_nodes, previous episodes, and edge_type_map.",
+    "extract_edges() prompts via graphiti_core/prompts/extract_edges.py by calling edge(), using a reflection loop.",
+    "extract_edges() converts LLM output into EntityEdge objects with valid_at and invalid_at timestamps and source and target UUIDs.",
+    "Graphiti persists the deduplicated nodes into Neo4j.",
+    "Graphiti persists the extracted edges into Neo4j."
+  ]
+}

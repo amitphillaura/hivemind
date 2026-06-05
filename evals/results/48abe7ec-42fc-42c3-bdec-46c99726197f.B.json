@@ -1,0 +1,190 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 59112,
+    "duration_api_ms": 58883,
+    "ttft_ms": 4284,
+    "num_turns": 11,
+    "result": "I now have the complete picture. Here's the end-to-end sequence.\n\n## Sequence: from podcast message \u2192 deduplicated nodes + extracted edges\n\n### Phase 1 \u2014 Parsing (example-side, `examples/podcast/`)\n\n1. **`parse_podcast_messages()`** \u2192 **`parse_conversation_file()`** (`transcript_parser.py:38-103`): reads `podcast_transcript.txt`, splits on `\\n\\n`, and for each block parses the header (`<speaker_index> (<timestamp>)`), maps the speaker index to a `Speaker`, converts the relative timestamp to an absolute `actual_timestamp` (`now - last_timestamp + delta`), and emits a `ParsedMessage`.\n\n2. **`podcast_runner.main()`** (`podcast_runner.py:77-116`): for each message it formats the content as `\"{speaker_name} ({role}): {content}\"`, looks up the 3 prior episodes via `retrieve_episodes`, then calls **`client.add_episode(...)`** with `source_description='Podcast Transcript'`, `entity_types={'Person': Person}`, `edge_types={'IS_PRESIDENT_OF': IsPresidentOf}`, and `previous_episode_uuids`.\n\n### Phase 2 \u2014 Core pipeline (`Graphiti.add_episode`, `graphiti_core/graphiti.py:348-531`)\n\n3. **Validate & set up** (`419-458`): validate entity/edge/group args; resolve `previous_episodes` (from `previous_episode_uuids` here); build the `EpisodicNode` from the body; construct the default edge-type map.\n\n4. **Extract nodes** \u2014 `extract_nodes(...)` (`graphiti.py:462`, impl `node_operations.py:69-176`):\n   - Builds an entity-type context (`Entity` + custom `Person`), then calls the LLM with the source-specific prompt (`extract_message` since `source == EpisodeType.message`).\n   - **Reflexion loop** (`113-147`): up to `MAX_REFLEXION_ITERATIONS`, re-prompts to catch missed entities.\n   - Filters blanks, drops `excluded_entity_types`, and converts results into `EntityNode` objects with labels `{'Entity', <type>}`.\n\n5. **Resolve nodes + extract edges concurrently** (`graphiti.py:467-485`, via `semaphore_gather`):\n   - **`resolve_extracted_nodes(...)`** (`node_operations.py:179-291`) \u2014 the **dedup step**:\n     - For each extracted node, runs a hybrid search (`NODE_HYBRID_SEARCH_RRF`) to gather candidate existing nodes (`190-207`).\n     - Calls the LLM with the `dedupe_nodes.nodes` prompt (`252-255`) to get `entity_resolutions`.\n     - Builds `resolved_nodes`, a `uuid_map` (extracted-uuid \u2192 resolved-uuid), and `node_duplicates` pairs; then `filter_existing_duplicate_of_edges` removes already-recorded duplicates (`287-289`).\n   - **`extract_edges(...)`** (`edge_operations.py:110-`) runs in parallel: LLM extracts facts between the *extracted* node ids, with its own reflexion loop for missed facts, producing `EntityEdge` objects.\n\n6. **Re-point edges** \u2014 `resolve_edge_pointers(extracted_edges, uuid_map)` (`graphiti.py:487`): rewrites each edge's source/target from extracted-node uuids to the deduplicated resolved-node uuids.\n\n7. **Resolve edges + hydrate nodes concurrently** (`graphiti.py:489-502`):\n   - **`resolve_extracted_edges(...)`** (`edge_operations.py:247`): dedupes edges against existing ones and computes temporal **invalidation** \u2192 `resolved_edges` + `invalidated_edges`.\n   - **`extract_attributes_from_nodes(...)`** (`node_operations.py:294-320`): LLM fills each node's typed attributes + summary, then generates name embeddings \u2192 `hydrated_nodes`.\n\n8. **Assemble & persist** (`graphiti.py:504-517`):\n   - `build_duplicate_of_edges` creates `IS_DUPLICATE_OF` edges from `node_duplicates`.\n   - `entity_edges = resolved_edges + invalidated_edges + duplicate_of_edges`.\n   - `build_episodic_edges` links the episode to its nodes.\n   - `add_nodes_and_edges_bulk` writes episode, episodic edges, hydrated nodes, and entity edges (generating embeddings) to the graph.\n\n9. **Return** `AddEpisodeResults(episode, nodes, edges=entity_edges)` (`graphiti.py:531`); optional community update if `update_communities=True`.\n\n### Summary flow\n\n```\nparse_podcast_messages \u2192 ParsedMessage \u2192 add_episode\n  \u2192 extract_nodes (LLM + reflexion)\n  \u2192 [ resolve_extracted_nodes (search + LLM dedupe) \u2016 extract_edges (LLM + reflexion) ]\n  \u2192 resolve_edge_pointers (uuid_map)\n  \u2192 [ resolve_extracted_edges (dedupe + invalidation) \u2016 extract_attributes_from_nodes (attrs + embeddings) ]\n  \u2192 build duplicate_of / episodic edges \u2192 add_nodes_and_edges_bulk\n  \u2192 AddEpisodeResults(nodes, edges)\n```\n\nThe two `semaphore_gather` calls are the key concurrency points: node-dedup runs alongside edge-extraction, and edge-resolution runs alongside node attribute-hydration.",
+    "stop_reason": "end_turn",
+    "session_id": "58f5a644-8d04-4d91-90a1-e3ef9cd54539",
+    "total_cost_usd": 0.5012095,
+    "usage": {
+      "input_tokens": 8584,
+      "cache_creation_input_tokens": 34160,
+      "cache_read_input_tokens": 298479,
+      "output_tokens": 3822,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 34160,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2002,
+          "cache_read_input_tokens": 50085,
+          "cache_creation_input_tokens": 1559,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1559
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8584,
+        "outputTokens": 3822,
+        "cacheReadInputTokens": 298479,
+        "cacheCreationInputTokens": 34160,
+        "webSearchRequests": 0,
+        "costUSD": 0.5012095,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "3290d589-2ae2-4135-8c77-09020245f95d"
+  },
+  "answer": "I now have the complete picture. Here's the end-to-end sequence.\n\n## Sequence: from podcast message \u2192 deduplicated nodes + extracted edges\n\n### Phase 1 \u2014 Parsing (example-side, `examples/podcast/`)\n\n1. **`parse_podcast_messages()`** \u2192 **`parse_conversation_file()`** (`transcript_parser.py:38-103`): reads `podcast_transcript.txt`, splits on `\\n\\n`, and for each block parses the header (`<speaker_index> (<timestamp>)`), maps the speaker index to a `Speaker`, converts the relative timestamp to an absolute `actual_timestamp` (`now - last_timestamp + delta`), and emits a `ParsedMessage`.\n\n2. **`podcast_runner.main()`** (`podcast_runner.py:77-116`): for each message it formats the content as `\"{speaker_name} ({role}): {content}\"`, looks up the 3 prior episodes via `retrieve_episodes`, then calls **`client.add_episode(...)`** with `source_description='Podcast Transcript'`, `entity_types={'Person': Person}`, `edge_types={'IS_PRESIDENT_OF': IsPresidentOf}`, and `previous_episode_uuids`.\n\n### Phase 2 \u2014 Core pipeline (`Graphiti.add_episode`, `graphiti_core/graphiti.py:348-531`)\n\n3. **Validate & set up** (`419-458`): validate entity/edge/group args; resolve `previous_episodes` (from `previous_episode_uuids` here); build the `EpisodicNode` from the body; construct the default edge-type map.\n\n4. **Extract nodes** \u2014 `extract_nodes(...)` (`graphiti.py:462`, impl `node_operations.py:69-176`):\n   - Builds an entity-type context (`Entity` + custom `Person`), then calls the LLM with the source-specific prompt (`extract_message` since `source == EpisodeType.message`).\n   - **Reflexion loop** (`113-147`): up to `MAX_REFLEXION_ITERATIONS`, re-prompts to catch missed entities.\n   - Filters blanks, drops `excluded_entity_types`, and converts results into `EntityNode` objects with labels `{'Entity', <type>}`.\n\n5. **Resolve nodes + extract edges concurrently** (`graphiti.py:467-485`, via `semaphore_gather`):\n   - **`resolve_extracted_nodes(...)`** (`node_operations.py:179-291`) \u2014 the **dedup step**:\n     - For each extracted node, runs a hybrid search (`NODE_HYBRID_SEARCH_RRF`) to gather candidate existing nodes (`190-207`).\n     - Calls the LLM with the `dedupe_nodes.nodes` prompt (`252-255`) to get `entity_resolutions`.\n     - Builds `resolved_nodes`, a `uuid_map` (extracted-uuid \u2192 resolved-uuid), and `node_duplicates` pairs; then `filter_existing_duplicate_of_edges` removes already-recorded duplicates (`287-289`).\n   - **`extract_edges(...)`** (`edge_operations.py:110-`) runs in parallel: LLM extracts facts between the *extracted* node ids, with its own reflexion loop for missed facts, producing `EntityEdge` objects.\n\n6. **Re-point edges** \u2014 `resolve_edge_pointers(extracted_edges, uuid_map)` (`graphiti.py:487`): rewrites each edge's source/target from extracted-node uuids to the deduplicated resolved-node uuids.\n\n7. **Resolve edges + hydrate nodes concurrently** (`graphiti.py:489-502`):\n   - **`resolve_extracted_edges(...)`** (`edge_operations.py:247`): dedupes edges against existing ones and computes temporal **invalidation** \u2192 `resolved_edges` + `invalidated_edges`.\n   - **`extract_attributes_from_nodes(...)`** (`node_operations.py:294-320`): LLM fills each node's typed attributes + summary, then generates name embeddings \u2192 `hydrated_nodes`.\n\n8. **Assemble & persist** (`graphiti.py:504-517`):\n   - `build_duplicate_of_edges` creates `IS_DUPLICATE_OF` edges from `node_duplicates`.\n   - `entity_edges = resolved_edges + invalidated_edges + duplicate_of_edges`.\n   - `build_episodic_edges` links the episode to its nodes.\n   - `add_nodes_and_edges_bulk` writes episode, episodic edges, hydrated nodes, and entity edges (generating embeddings) to the graph.\n\n9. **Return** `AddEpisodeResults(episode, nodes, edges=entity_edges)` (`graphiti.py:531`); optional community update if `update_communities=True`.\n\n### Summary flow\n\n```\nparse_podcast_messages \u2192 ParsedMessage \u2192 add_episode\n  \u2192 extract_nodes (LLM + reflexion)\n  \u2192 [ resolve_extracted_nodes (search + LLM dedupe) \u2016 extract_edges (LLM + reflexion) ]\n  \u2192 resolve_edge_pointers (uuid_map)\n  \u2192 [ resolve_extracted_edges (dedupe + invalidation) \u2016 extract_attributes_from_nodes (attrs + embeddings) ]\n  \u2192 build duplicate_of / episodic edges \u2192 add_nodes_and_edges_bulk\n  \u2192 AddEpisodeResults(nodes, edges)\n```\n\nThe two `semaphore_gather` calls are the key concurrency points: node-dedup runs alongside edge-extraction, and edge-resolution runs alongside node attribute-hydration.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The main function in examples/podcast/podcast_runner.py calls parse_podcast_messages().",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "parse_podcast_messages() returns a list of Message objects.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The main function wraps each Message object in a RawEpisode.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The main function invokes Graphiti.add_episode or Graphiti.add_episode_bulk with each RawEpisode.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "then calls **`client.add_episode(...)`** with `source_description='Podcast Transcript'`"
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk create an EpisodicNode from a RawEpisode.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "build the `EpisodicNode` from the body"
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk extract raw EntityNode objects.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "converts results into `EntityNode` objects with labels `{'Entity', <type>}`"
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk call resolve_extracted_nodes() from graphiti_core/utils/maintenance/node_operations.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**`resolve_extracted_nodes(...)`** (`node_operations.py:179-291`) \u2014 the **dedup step**"
+      },
+      {
+        "fact": "resolve_extracted_nodes() runs a hybrid search over each extracted EntityNode.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "For each extracted node, runs a hybrid search (`NODE_HYBRID_SEARCH_RRF`) to gather candidate existing nodes"
+      },
+      {
+        "fact": "resolve_extracted_nodes() builds an LLM prompt via graphiti_core/prompts/dedupe_nodes.py by calling nodes().",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Calls the LLM with the `dedupe_nodes.nodes` prompt (`252-255`) to get `entity_resolutions`"
+      },
+      {
+        "fact": "The LLM returns entity_resolutions, which yields resolved_nodes and a uuid_map.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "to get `entity_resolutions`.\n     - Builds `resolved_nodes`, a `uuid_map` (extracted-uuid \u2192 resolved-uuid)"
+      },
+      {
+        "fact": "Graphiti.add_episode and Graphiti.add_episode_bulk call extract_edges() from graphiti_core/utils/maintenance/edge_operations.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**`extract_edges(...)`** (`edge_operations.py:110-`) runs in parallel"
+      },
+      {
+        "fact": "extract_edges() prepares a context consisting of episode.content, resolved_nodes, previous episodes, and edge_type_map.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "extract_edges() prompts via graphiti_core/prompts/extract_edges.py by calling edge(), using a reflection loop.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "extract_edges() converts LLM output into EntityEdge objects with valid_at and invalid_at timestamps and source and target UUIDs.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Graphiti persists the deduplicated nodes into Neo4j.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`add_nodes_and_edges_bulk` writes episode, episodic edges, hydrated nodes, and entity edges (generating embeddings) to the graph"
+      },
+      {
+        "fact": "Graphiti persists the extracted edges into Neo4j.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`add_nodes_and_edges_bulk` writes episode, episodic edges, hydrated nodes, and entity edges (generating embeddings) to the graph"
+      }
+    ],
+    "recall": 0.625,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 2,
+    "grep": 3,
+    "read": 5,
+    "glob": 0,
+    "bash": 2
+  },
+  "gold_facts": [
+    "The main function in examples/podcast/podcast_runner.py calls parse_podcast_messages().",
+    "parse_podcast_messages() returns a list of Message objects.",
+    "The main function wraps each Message object in a RawEpisode.",
+    "The main function invokes Graphiti.add_episode or Graphiti.add_episode_bulk with each RawEpisode.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk create an EpisodicNode from a RawEpisode.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk extract raw EntityNode objects.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk call resolve_extracted_nodes() from graphiti_core/utils/maintenance/node_operations.py.",
+    "resolve_extracted_nodes() runs a hybrid search over each extracted EntityNode.",
+    "resolve_extracted_nodes() builds an LLM prompt via graphiti_core/prompts/dedupe_nodes.py by calling nodes().",
+    "The LLM returns entity_resolutions, which yields resolved_nodes and a uuid_map.",
+    "Graphiti.add_episode and Graphiti.add_episode_bulk call extract_edges() from graphiti_core/utils/maintenance/edge_operations.py.",
+    "extract_edges() prepares a context consisting of episode.content, resolved_nodes, previous episodes, and edge_type_map.",
+    "extract_edges() prompts via graphiti_core/prompts/extract_edges.py by calling edge(), using a reflection loop.",
+    "extract_edges() converts LLM output into EntityEdge objects with valid_at and invalid_at timestamps and source and target UUIDs.",
+    "Graphiti persists the deduplicated nodes into Neo4j.",
+    "Graphiti persists the extracted edges into Neo4j."
+  ]
+}

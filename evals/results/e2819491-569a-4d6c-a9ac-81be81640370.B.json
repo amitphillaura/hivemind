@@ -1,0 +1,143 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 50026,
+    "duration_api_ms": 49924,
+    "ttft_ms": 3265,
+    "num_turns": 9,
+    "result": "I now have the full data path. Here's how date-based filters flow from top-level search into the Cypher queries.\n\n## The flow\n\nA single `SearchFilters` object is threaded **by reference, unchanged**, from the top down \u2014 no per-stage transformation happens until the leaf query functions:\n\n```\nsearch()                          search.py:71      search_filter: SearchFilters\n  \u2514\u2500 edge_search()                search.py:168     passes search_filter through\n       \u251c\u2500 edge_fulltext_search()  search_utils.py:155\n       \u251c\u2500 edge_similarity_search()search_utils.py:211\n       \u2514\u2500 edge_bfs_search()       search_utils.py:285\n```\n\nAt `search.py:97-110`, `search()` fans out to `edge_search`/`node_search`/`episode_search` via `semaphore_gather`, handing each the same `search_filter`. `edge_search` (`search.py:179-191`) then forwards it to all three leaf searches.\n\n## Where filters become Cypher\n\nEach leaf function calls **`edge_search_filter_query_constructor(search_filter)`** (`search_filters.py:67`), which returns a `(filter_query, filter_params)` tuple \u2014 a Cypher fragment string plus a params dict \u2014 that gets concatenated into the query:\n\n**Fulltext** (`search_utils.py:164-194`):\n```python\nfilter_query, filter_params = edge_search_filter_query_constructor(search_filter)\nquery = (... \"WHERE r.group_id IN $group_ids \" + filter_query + ...)\nrecords = await driver.execute_query(query, params=filter_params, ...)\n```\n\n**Similarity** (`search_utils.py:219-266`) \u2014 same constructor, but here the params are merged into a broader `query_params` dict before execution:\n```python\nfilter_query, filter_params = edge_search_filter_query_constructor(search_filter)\nquery_params.update(filter_params)              # line 220\nquery = (... + group_filter_query + filter_query + ...)\nrecords = await driver.execute_query(query, params=query_params, ...)\n```\n\n**BFS** (`search_utils.py:292-323`):\n```python\nfilter_query, filter_params = edge_search_filter_query_constructor(search_filter)\nquery = (... \"WHERE r.uuid = rel.uuid\" + filter_query + ...)\nrecords = await driver.execute_query(query, params=filter_params, ...)\n```\n\n## What the constructor emits for dates\n\n`edge_search_filter_query_constructor` (`search_filters.py:84-182`) handles the four date fields \u2014 `valid_at`, `invalid_at`, `created_at`, `expired_at` \u2014 each typed as `list[list[DateFilter]]` (`search_filters.py:47-50`). The nested list encodes **OR-of-ANDs**: the outer list is OR'd, the inner list is AND'd. For `valid_at` (`search_filters.py:84-107`):\n\n- Each inner `DateFilter` becomes `(r.valid_at <op> $valid_at_{j})`, where `<op>` is the `ComparisonOperator` value (`=`, `<>`, `>`, `<`, `>=`, `<=`) and the datetime is bound as a parameter `valid_at_{j}` (line 88, 91).\n- Inner filters are joined with ` AND `, outer groups with ` OR `, wrapped as `\\nAND ( ... )` appended to `filter_query`.\n\nSo a clause like `AND ((r.valid_at >= $valid_at_0) AND (r.valid_at < $valid_at_1) OR (r.valid_at = $valid_at_0))` is produced, with the actual `datetime` values placed in `filter_params`.\n\n## One important detail\n\nDate filters are **edge-only**. `node_search_filter_query_constructor` (`search_filters.py:53-64`) handles only `node_labels` \u2014 it ignores `valid_at`/`invalid_at`/`created_at`/`expired_at` entirely. So node fulltext/similarity/BFS searches never apply date filtering even if those fields are set on the `SearchFilters` object.\n\nOne caveat worth flagging in the param naming: the inner index `j` is reused across OR groups (e.g. `$valid_at_0`), so if two OR-groups have differing lengths, later groups overwrite earlier param values in `filter_params` (`search_filters.py:88`). It works correctly for the common single-group / uniform-length case.",
+    "stop_reason": "end_turn",
+    "session_id": "4a86ec83-6e92-4e00-9372-fa656979760c",
+    "total_cost_usd": 0.4112135,
+    "usage": {
+      "input_tokens": 8165,
+      "cache_creation_input_tokens": 26802,
+      "cache_read_input_tokens": 241802,
+      "output_tokens": 3279,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 26802,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1783,
+          "cache_read_input_tokens": 43196,
+          "cache_creation_input_tokens": 1090,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1090
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8165,
+        "outputTokens": 3279,
+        "cacheReadInputTokens": 241802,
+        "cacheCreationInputTokens": 26802,
+        "webSearchRequests": 0,
+        "costUSD": 0.4112135,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [
+      {
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_01J6bUycsQfnrDtXCTCR4wj1",
+        "tool_input": {
+          "command": "ls ~/.deeplake/../../39_claude_code_plugin/eval-repos/graphiti/graphiti_core/search/ 2>/dev/null; echo \"===\"; ls /home/emanuele/39_claude_code_plugin/eval-repos/graphiti/graphiti_core/search/",
+          "description": "List search directory"
+        }
+      }
+    ],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "65ed45dc-0e0f-4f35-a73d-3a30d441409f"
+  },
+  "answer": "I now have the full data path. Here's how date-based filters flow from top-level search into the Cypher queries.\n\n## The flow\n\nA single `SearchFilters` object is threaded **by reference, unchanged**, from the top down \u2014 no per-stage transformation happens until the leaf query functions:\n\n```\nsearch()                          search.py:71      search_filter: SearchFilters\n  \u2514\u2500 edge_search()                search.py:168     passes search_filter through\n       \u251c\u2500 edge_fulltext_search()  search_utils.py:155\n       \u251c\u2500 edge_similarity_search()search_utils.py:211\n       \u2514\u2500 edge_bfs_search()       search_utils.py:285\n```\n\nAt `search.py:97-110`, `search()` fans out to `edge_search`/`node_search`/`episode_search` via `semaphore_gather`, handing each the same `search_filter`. `edge_search` (`search.py:179-191`) then forwards it to all three leaf searches.\n\n## Where filters become Cypher\n\nEach leaf function calls **`edge_search_filter_query_constructor(search_filter)`** (`search_filters.py:67`), which returns a `(filter_query, filter_params)` tuple \u2014 a Cypher fragment string plus a params dict \u2014 that gets concatenated into the query:\n\n**Fulltext** (`search_utils.py:164-194`):\n```python\nfilter_query, filter_params = edge_search_filter_query_constructor(search_filter)\nquery = (... \"WHERE r.group_id IN $group_ids \" + filter_query + ...)\nrecords = await driver.execute_query(query, params=filter_params, ...)\n```\n\n**Similarity** (`search_utils.py:219-266`) \u2014 same constructor, but here the params are merged into a broader `query_params` dict before execution:\n```python\nfilter_query, filter_params = edge_search_filter_query_constructor(search_filter)\nquery_params.update(filter_params)              # line 220\nquery = (... + group_filter_query + filter_query + ...)\nrecords = await driver.execute_query(query, params=query_params, ...)\n```\n\n**BFS** (`search_utils.py:292-323`):\n```python\nfilter_query, filter_params = edge_search_filter_query_constructor(search_filter)\nquery = (... \"WHERE r.uuid = rel.uuid\" + filter_query + ...)\nrecords = await driver.execute_query(query, params=filter_params, ...)\n```\n\n## What the constructor emits for dates\n\n`edge_search_filter_query_constructor` (`search_filters.py:84-182`) handles the four date fields \u2014 `valid_at`, `invalid_at`, `created_at`, `expired_at` \u2014 each typed as `list[list[DateFilter]]` (`search_filters.py:47-50`). The nested list encodes **OR-of-ANDs**: the outer list is OR'd, the inner list is AND'd. For `valid_at` (`search_filters.py:84-107`):\n\n- Each inner `DateFilter` becomes `(r.valid_at <op> $valid_at_{j})`, where `<op>` is the `ComparisonOperator` value (`=`, `<>`, `>`, `<`, `>=`, `<=`) and the datetime is bound as a parameter `valid_at_{j}` (line 88, 91).\n- Inner filters are joined with ` AND `, outer groups with ` OR `, wrapped as `\\nAND ( ... )` appended to `filter_query`.\n\nSo a clause like `AND ((r.valid_at >= $valid_at_0) AND (r.valid_at < $valid_at_1) OR (r.valid_at = $valid_at_0))` is produced, with the actual `datetime` values placed in `filter_params`.\n\n## One important detail\n\nDate filters are **edge-only**. `node_search_filter_query_constructor` (`search_filters.py:53-64`) handles only `node_labels` \u2014 it ignores `valid_at`/`invalid_at`/`created_at`/`expired_at` entirely. So node fulltext/similarity/BFS searches never apply date filtering even if those fields are set on the `SearchFilters` object.\n\nOne caveat worth flagging in the param naming: the inner index `j` is reused across OR groups (e.g. `$valid_at_0`), so if two OR-groups have differing lengths, later groups overwrite earlier param values in `filter_params` (`search_filters.py:88`). It works correctly for the common single-group / uniform-length case.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "Date filters live in the SearchFilters passed into Graphiti.search().",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "A single `SearchFilters` object is threaded **by reference, unchanged**, from the top down ... search() search.py:71 search_filter: SearchFilters"
+      },
+      {
+        "fact": "The search_filter is carried through into edge_search().",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "edge_search() search.py:168 passes search_filter through"
+      },
+      {
+        "fact": "The search_filter is carried through into edge_fulltext_search, edge_similarity_search, and edge_bfs_search.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "edge_fulltext_search() ... edge_similarity_search() ... edge_bfs_search() ... `edge_search` (`search.py:179-191`) then forwards it to all three leaf searches"
+      },
+      {
+        "fact": "Each of those functions calls edge_search_filter_query_constructor(search_filter) to obtain filter_query and filter_params.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Each leaf function calls **`edge_search_filter_query_constructor(search_filter)`** ... which returns a `(filter_query, filter_params)` tuple"
+      },
+      {
+        "fact": "filter_query is a string containing \u201cAND r.valid_at <= $now \u2026\u201d.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "filter_params is a dictionary that includes {\"now\": datetime.utcnow(), \u2026}.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "filter_query and filter_params are spliced into the Cypher WHERE clauses.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "a Cypher fragment string plus a params dict \u2014 that gets concatenated into the query ... \"WHERE r.group_id IN $group_ids \" + filter_query + ..."
+      },
+      {
+        "fact": "filter_query and filter_params are bound in driver.execute_query.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "records = await driver.execute_query(query, params=filter_params, ...)"
+      }
+    ],
+    "recall": 0.75,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 0,
+    "read": 3,
+    "glob": 0,
+    "bash": 5
+  },
+  "gold_facts": [
+    "Date filters live in the SearchFilters passed into Graphiti.search().",
+    "The search_filter is carried through into edge_search().",
+    "The search_filter is carried through into edge_fulltext_search, edge_similarity_search, and edge_bfs_search.",
+    "Each of those functions calls edge_search_filter_query_constructor(search_filter) to obtain filter_query and filter_params.",
+    "filter_query is a string containing \u201cAND r.valid_at <= $now \u2026\u201d.",
+    "filter_params is a dictionary that includes {\"now\": datetime.utcnow(), \u2026}.",
+    "filter_query and filter_params are spliced into the Cypher WHERE clauses.",
+    "filter_query and filter_params are bound in driver.execute_query."
+  ]
+}

@@ -89,9 +89,10 @@ describe("graphContextLine", () => {
     expect(line).toContain("~/.deeplake/memory/graph/find/<pattern>");
     expect(line).toContain("~/.deeplake/memory/graph/show/<handle-or-pattern>");
     expect(line).toContain("~/.deeplake/memory/graph/query/<pattern>"); // C7: primary entry advertised
-    expect(line).toContain("no semantic edges yet");
+    // v1.2 reframe: graph positioned as a navigation INDEX, then Read the source.
+    expect(line).toContain("fast INDEX to locate");
     // Cross-file resolution wording (replaces the old "intra-file only" caveat).
-    expect(line).toContain("Cross-file calls/imports/extends resolved");
+    expect(line).toContain("Cross-file calls/imports resolved for named imports");
   });
 
   it("renders '?' for counts on legacy files without node_count/edge_count", () => {

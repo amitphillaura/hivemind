@@ -1,0 +1,120 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 20707,
+    "duration_api_ms": 20641,
+    "ttft_ms": 2188,
+    "num_turns": 8,
+    "result": "The two configs use **different field names**:\n\n## LLM client config \u2014 `model`\n\nIn `LLMConfig` (`graphiti_core/llm_client/config.py:37-68`), the model is set via the **`model`** parameter (with a secondary **`small_model`** for simpler prompts):\n\n```python\nclass LLMConfig:\n    def __init__(self, api_key=None, model=None, base_url=None,\n                 temperature=..., max_tokens=..., small_model=None):\n        self.model = model            # config.py:65\n        self.small_model = small_model # config.py:66\n```\n\n## Embedder client config \u2014 `embedding_model`\n\nThe embedder configs use **`embedding_model`** instead. The base `EmbedderConfig` (`graphiti_core/embedder/client.py:25`) doesn't define it; each concrete subclass does:\n\n- `OpenAIEmbedderConfig` \u2014 `embedding_model: EmbeddingModel | str` (`openai.py:28`)\n- `GeminiEmbedderConfig` \u2014 `embedding_model: str` (`gemini.py:46`)\n- `VoyageAIEmbedderConfig` \u2014 `embedding_model: str` (`voyage.py:39`)\n\n## Summary\n\n| Config | Field name |\n|---|---|\n| LLM (`LLMConfig`) | **`model`** (plus `small_model`) |\n| Embedder (`*EmbedderConfig`) | **`embedding_model`** |\n\nSo they are intentionally distinct: LLM clients read `config.model` / `config.small_model`, while embedder clients read `config.embedding_model`.",
+    "stop_reason": "end_turn",
+    "session_id": "a34f5124-6711-4f1c-9c37-bd2c5bf823cb",
+    "total_cost_usd": 0.27460724999999997,
+    "usage": {
+      "input_tokens": 7737,
+      "cache_creation_input_tokens": 23855,
+      "cache_read_input_tokens": 112957,
+      "output_tokens": 1214,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 23855,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 521,
+          "cache_read_input_tokens": 35482,
+          "cache_creation_input_tokens": 5857,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 5857
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 7737,
+        "outputTokens": 1214,
+        "cacheReadInputTokens": 112957,
+        "cacheCreationInputTokens": 23855,
+        "webSearchRequests": 0,
+        "costUSD": 0.27460724999999997,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "0bca84c8-b2ac-40bd-b44f-e61044760fa5"
+  },
+  "answer": "The two configs use **different field names**:\n\n## LLM client config \u2014 `model`\n\nIn `LLMConfig` (`graphiti_core/llm_client/config.py:37-68`), the model is set via the **`model`** parameter (with a secondary **`small_model`** for simpler prompts):\n\n```python\nclass LLMConfig:\n    def __init__(self, api_key=None, model=None, base_url=None,\n                 temperature=..., max_tokens=..., small_model=None):\n        self.model = model            # config.py:65\n        self.small_model = small_model # config.py:66\n```\n\n## Embedder client config \u2014 `embedding_model`\n\nThe embedder configs use **`embedding_model`** instead. The base `EmbedderConfig` (`graphiti_core/embedder/client.py:25`) doesn't define it; each concrete subclass does:\n\n- `OpenAIEmbedderConfig` \u2014 `embedding_model: EmbeddingModel | str` (`openai.py:28`)\n- `GeminiEmbedderConfig` \u2014 `embedding_model: str` (`gemini.py:46`)\n- `VoyageAIEmbedderConfig` \u2014 `embedding_model: str` (`voyage.py:39`)\n\n## Summary\n\n| Config | Field name |\n|---|---|\n| LLM (`LLMConfig`) | **`model`** (plus `small_model`) |\n| Embedder (`*EmbedderConfig`) | **`embedding_model`** |\n\nSo they are intentionally distinct: LLM clients read `config.model` / `config.small_model`, while embedder clients read `config.embedding_model`.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "In GraphitiLLMConfig.create_client, the model is passed via the LLMConfig field model.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "the model is set via the **`model`** parameter (with a secondary **`small_model`** for simpler prompts)"
+      },
+      {
+        "fact": "In GraphitiLLMConfig.create_client, a small model can be passed via the LLMConfig field small_model.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "with a secondary **`small_model`** for simpler prompts"
+      },
+      {
+        "fact": "In GraphitiEmbedderConfig.create_client, AzureOpenAIEmbedderClient is used with model=self.model.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "In GraphitiEmbedderConfig.create_client, OpenAIEmbedderConfig is used with embedding_model=self.model.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "`OpenAIEmbedderConfig` \u2014 `embedding_model: EmbeddingModel | str` (`openai.py:28`)"
+      },
+      {
+        "fact": "The OpenAIEmbedderConfig field for the embedding model is named embedding_model.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`OpenAIEmbedderConfig` \u2014 `embedding_model: EmbeddingModel | str` (`openai.py:28`)"
+      },
+      {
+        "fact": "The LLMConfig field for the model is named model.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "the model is set via the **`model`** parameter"
+      }
+    ],
+    "recall": 0.6666666666666666,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 0,
+    "read": 5,
+    "glob": 2,
+    "bash": 0
+  },
+  "gold_facts": [
+    "In GraphitiLLMConfig.create_client, the model is passed via the LLMConfig field model.",
+    "In GraphitiLLMConfig.create_client, a small model can be passed via the LLMConfig field small_model.",
+    "In GraphitiEmbedderConfig.create_client, AzureOpenAIEmbedderClient is used with model=self.model.",
+    "In GraphitiEmbedderConfig.create_client, OpenAIEmbedderConfig is used with embedding_model=self.model.",
+    "The OpenAIEmbedderConfig field for the embedding model is named embedding_model.",
+    "The LLMConfig field for the model is named model."
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 25899,
+    "duration_api_ms": 26851,
+    "ttft_ms": 2315,
+    "num_turns": 4,
+    "result": "The mechanism is a **flatten-on-save / collect-on-read** pattern. Here's the complete data path.\n\n## The model field\n\n`EntityEdge` declares a catch-all dict for anything beyond the fixed schema (`graphiti_core/edges.py:209-211`):\n\n```python\nattributes: dict[str, Any] = Field(\n    default={}, description='Additional attributes of the edge. Dependent on edge name'\n)\n```\n\n## Saving \u2014 flatten attributes into the top-level property map\n\nIn `EntityEdge.save()` (`edges.py:236-257`), the fixed fields are assembled into `edge_data`, then the custom attributes are merged in as siblings \u2014 not nested:\n\n```python\nedge_data: dict[str, Any] = { 'source_uuid': ..., 'uuid': ..., 'fact': ..., ... }\nedge_data.update(self.attributes or {})   # line 252 \u2014 flattens attrs to top level\n\nawait driver.execute_query(ENTITY_EDGE_SAVE, edge_data=edge_data)\n```\n\nThe query then writes the **entire** dict as the relationship's properties with `SET r = $edge_data` (`models/edges/edge_db_queries.py:33-39`):\n\n```cypher\nMERGE (source)-[r:RELATES_TO {uuid: $uuid}]->(target)\nSET r = $edge_data\n```\n\nBecause `SET r = $edge_data` replaces all properties with whatever keys are in the map, each custom attribute becomes its own first-class property on the `RELATES_TO` relationship. (`SET r =` also means a re-save with fewer attributes drops the old ones \u2014 it's a full overwrite, not a merge.)\n\n## Retrieving \u2014 grab all properties, then subtract the known ones\n\nThe return clause doesn't enumerate custom keys (it can't \u2014 they vary per edge name). Instead it pulls the whole property map via `properties(e)` (`edges.py:40-54`):\n\n```cypher\nRETURN\n    e.uuid AS uuid,\n    ...\n    properties(e) AS attributes\n```\n\nSo `attributes` initially contains *everything*, including the fixed fields. `get_entity_edge_from_record()` (`edges.py:453-481`) reconstructs the typed fields from their dedicated record keys, then **pops every known field out of `attributes`** so only the genuinely-custom keys remain:\n\n```python\nedge = EntityEdge(..., attributes=record['attributes'])\n\nedge.attributes.pop('uuid', None)\nedge.attributes.pop('source_node_uuid', None)\nedge.attributes.pop('fact', None)\nedge.attributes.pop('name', None)\n# ... fact_embedding, group_id, episodes, created_at, expired_at, valid_at, invalid_at\n```\n\n## Summary\n\n| Phase | Mechanism | Location |\n|---|---|---|\n| Save | `edge_data.update(self.attributes)` flattens custom attrs to top level | `edges.py:252` |\n| Save | `SET r = $edge_data` writes all keys as relationship properties | `edge_db_queries.py:37` |\n| Read | `properties(e) AS attributes` returns the full property map | `edges.py:53` |\n| Read | `.pop()` the known fields so only custom attrs remain | `edges.py:469-479` |\n\nThe design avoids hardcoding attribute names anywhere: custom attributes ride along as ordinary graph properties, and the round-trip cleanly separates them from the typed schema fields. One note \u2014 the bulk path (`ENTITY_EDGE_SAVE_BULK`, `edge_db_queries.py:41-49`) relies on the same `SET r = edge` flattening, so edges built for bulk save must already have their attributes merged into the edge dict the same way.",
+    "stop_reason": "end_turn",
+    "session_id": "96d9f285-4ecf-4246-a71a-babc6d487922",
+    "total_cost_usd": 0.248806,
+    "usage": {
+      "input_tokens": 4881,
+      "cache_creation_input_tokens": 21996,
+      "cache_read_input_tokens": 81800,
+      "output_tokens": 1820,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 21996,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 1023,
+          "output_tokens": 1321,
+          "cache_read_input_tokens": 38062,
+          "cache_creation_input_tokens": 1418,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1418
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 456,
+        "outputTokens": 14,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000526,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 4881,
+        "outputTokens": 1820,
+        "cacheReadInputTokens": 81800,
+        "cacheCreationInputTokens": 21996,
+        "webSearchRequests": 0,
+        "costUSD": 0.24828,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "b38ef8e5-4f8b-443a-a50f-604a3d9dcbda"
+  },
+  "answer": "The mechanism is a **flatten-on-save / collect-on-read** pattern. Here's the complete data path.\n\n## The model field\n\n`EntityEdge` declares a catch-all dict for anything beyond the fixed schema (`graphiti_core/edges.py:209-211`):\n\n```python\nattributes: dict[str, Any] = Field(\n    default={}, description='Additional attributes of the edge. Dependent on edge name'\n)\n```\n\n## Saving \u2014 flatten attributes into the top-level property map\n\nIn `EntityEdge.save()` (`edges.py:236-257`), the fixed fields are assembled into `edge_data`, then the custom attributes are merged in as siblings \u2014 not nested:\n\n```python\nedge_data: dict[str, Any] = { 'source_uuid': ..., 'uuid': ..., 'fact': ..., ... }\nedge_data.update(self.attributes or {})   # line 252 \u2014 flattens attrs to top level\n\nawait driver.execute_query(ENTITY_EDGE_SAVE, edge_data=edge_data)\n```\n\nThe query then writes the **entire** dict as the relationship's properties with `SET r = $edge_data` (`models/edges/edge_db_queries.py:33-39`):\n\n```cypher\nMERGE (source)-[r:RELATES_TO {uuid: $uuid}]->(target)\nSET r = $edge_data\n```\n\nBecause `SET r = $edge_data` replaces all properties with whatever keys are in the map, each custom attribute becomes its own first-class property on the `RELATES_TO` relationship. (`SET r =` also means a re-save with fewer attributes drops the old ones \u2014 it's a full overwrite, not a merge.)\n\n## Retrieving \u2014 grab all properties, then subtract the known ones\n\nThe return clause doesn't enumerate custom keys (it can't \u2014 they vary per edge name). Instead it pulls the whole property map via `properties(e)` (`edges.py:40-54`):\n\n```cypher\nRETURN\n    e.uuid AS uuid,\n    ...\n    properties(e) AS attributes\n```\n\nSo `attributes` initially contains *everything*, including the fixed fields. `get_entity_edge_from_record()` (`edges.py:453-481`) reconstructs the typed fields from their dedicated record keys, then **pops every known field out of `attributes`** so only the genuinely-custom keys remain:\n\n```python\nedge = EntityEdge(..., attributes=record['attributes'])\n\nedge.attributes.pop('uuid', None)\nedge.attributes.pop('source_node_uuid', None)\nedge.attributes.pop('fact', None)\nedge.attributes.pop('name', None)\n# ... fact_embedding, group_id, episodes, created_at, expired_at, valid_at, invalid_at\n```\n\n## Summary\n\n| Phase | Mechanism | Location |\n|---|---|---|\n| Save | `edge_data.update(self.attributes)` flattens custom attrs to top level | `edges.py:252` |\n| Save | `SET r = $edge_data` writes all keys as relationship properties | `edge_db_queries.py:37` |\n| Read | `properties(e) AS attributes` returns the full property map | `edges.py:53` |\n| Read | `.pop()` the known fields so only custom attrs remain | `edges.py:469-479` |\n\nThe design avoids hardcoding attribute names anywhere: custom attributes ride along as ordinary graph properties, and the round-trip cleanly separates them from the typed schema fields. One note \u2014 the bulk path (`ENTITY_EDGE_SAVE_BULK`, `edge_db_queries.py:41-49`) relies on the same `SET r = edge` flattening, so edges built for bulk save must already have their attributes merged into the edge dict the same way.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "EntityEdge.save is defined in graphiti_core/edges.py",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "In `EntityEdge.save()` (`edges.py:236-257`)"
+      },
+      {
+        "fact": "EntityEdge.save builds its payload dictionary",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "the fixed fields are assembled into `edge_data`"
+      },
+      {
+        "fact": "EntityEdge.save calls edge_data.update(self.attributes or {})",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "edge_data.update(self.attributes or {})   # line 252 \u2014 flattens attrs to top level"
+      },
+      {
+        "fact": "Any custom key/value in an edge\u2019s attributes is written as relationship properties when saving",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "each custom attribute becomes its own first-class property on the `RELATES_TO` relationship"
+      },
+      {
+        "fact": "In the get methods and the full-text, similarity, and search utilities, each Cypher query returns properties(r) AS attributes",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "properties(e) AS attributes"
+      },
+      {
+        "fact": "get_entity_edge_from_record(record) assigns record['attributes'] to EntityEdge.attributes",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "edge = EntityEdge(..., attributes=record['attributes'])"
+      },
+      {
+        "fact": "get_entity_edge_from_record(record) removes reserved keys from the attributes",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "then **pops every known field out of `attributes`** so only the genuinely-custom keys remain"
+      },
+      {
+        "fact": "Extra attributes added to an edge are preserved through save and load operations",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "custom attributes ride along as ordinary graph properties, and the round-trip cleanly separates them from the typed schema fields"
+      }
+    ],
+    "recall": 0.875,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 1,
+    "read": 2,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "EntityEdge.save is defined in graphiti_core/edges.py",
+    "EntityEdge.save builds its payload dictionary",
+    "EntityEdge.save calls edge_data.update(self.attributes or {})",
+    "Any custom key/value in an edge\u2019s attributes is written as relationship properties when saving",
+    "In the get methods and the full-text, similarity, and search utilities, each Cypher query returns properties(r) AS attributes",
+    "get_entity_edge_from_record(record) assigns record['attributes'] to EntityEdge.attributes",
+    "get_entity_edge_from_record(record) removes reserved keys from the attributes",
+    "Extra attributes added to an edge are preserved through save and load operations"
+  ]
+}

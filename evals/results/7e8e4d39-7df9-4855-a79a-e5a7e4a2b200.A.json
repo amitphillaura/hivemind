@@ -1,0 +1,141 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 70334,
+    "duration_api_ms": 70210,
+    "ttft_ms": 3956,
+    "num_turns": 12,
+    "result": "I now have the complete picture across both paths. Here's the answer.\n\n## Embedding generation: bulk insert path vs. edge resolution path\n\nThere are **two distinct embedding primitives** in play, and the two paths use them differently:\n\n| Primitive | Method | Text source | Newline handling |\n|---|---|---|---|\n| `node.generate_name_embedding` (`nodes.py:291`) | `embedder.create([text])` \u2014 single | `self.name` | strips `\\n`\u2192space |\n| `edge.generate_embedding` (`edges.py:213`) | `embedder.create([text])` \u2014 single | `self.fact` | strips `\\n`\u2192space |\n| `create_entity_node_embeddings` (`nodes.py:577`) | `embedder.create_batch([names])` | `node.name` | **no** newline stripping |\n| `create_entity_edge_embeddings` (`edges.py:494`) | `embedder.create_batch([facts])` | `edge.fact` | **no** newline stripping |\n\n### Bulk insert path \u2014 `add_nodes_and_edges_bulk_tx` (`bulk_utils.py:109`)\n\nThis is the final DB-write step (called by every `add_episode`, both single and bulk). It embeds **lazily, per-object, only as a fallback**:\n\n- **Entity nodes** (`bulk_utils.py:122-124`): `if node.name_embedding is None: await node.generate_name_embedding(embedder)` \u2014 one `create()` call per un-embedded node, embedding the **name**.\n- **Entity edges** (`bulk_utils.py:139-141`): `if edge.fact_embedding is None: await edge.generate_embedding(embedder)` \u2014 one `create()` call per un-embedded edge, embedding the **fact**.\n\nSo in normal operation these guards are no-ops, because the resolution stages upstream already populated the embeddings. They only fire as a safety net (e.g. `add_triplet` at `graphiti.py:864-869` pre-fills them; community building also goes through here).\n\n### Edge resolution path \u2014 `resolve_extracted_edges` (`edge_operations.py:247`)\n\nEdges get embedded via the **batch** primitive, **twice**:\n\n1. **Before resolution** (`edge_operations.py:258`): `await create_entity_edge_embeddings(embedder, extracted_edges)` \u2014 batch-embeds all extracted edges' facts. This is required so `get_relevant_edges` and `get_edge_invalidation_candidates` (`:261-262`) can do vector similarity search to find duplicate/contradicting edges.\n2. **After resolution** (`edge_operations.py:331-334`): `create_entity_edge_embeddings` is called again on `resolved_edges` and `invalidated_edges`. Re-embedding is necessary because resolution can change which edge object / fact text is carried forward (an LLM-resolved or deduplicated fact differs from the originally extracted one).\n\nBy the time these resolved edges reach `add_nodes_and_edges_bulk_tx`, `fact_embedding` is already set, so the bulk path's `is None` guard skips them.\n\n### Key differences\n\n- **Trigger:** Bulk insert embeds **conditionally** (`is None` fallback); edge resolution embeds **unconditionally** (the embeddings are inputs to similarity search, not just persisted columns).\n- **API call shape:** Bulk insert uses **single** `create()` calls in a per-object loop (`generate_*_embedding`); edge resolution uses **batched** `create_batch()` calls.\n- **Newline normalization:** The single-object methods strip newlines from the text before embedding; the batch `create_entity_*_embeddings` functions **do not**. So the same fact can be embedded from slightly different text depending on which path produced it.\n- **Count:** An edge is embedded once in resolution (and re-embedded post-resolution), then *not* re-embedded at insert time. The insert-time embedding only happens for objects that bypassed resolution.\n\n### For reference \u2014 the node analogue\n\nNodes are not embedded inside `resolve_extracted_nodes`. Instead `extract_attributes_from_nodes` calls `create_entity_node_embeddings` at the end (`node_operations.py:318`), and the bulk dedup path embeds via `create_entity_node_embeddings` before resolution (`bulk_utils.py:213-215`, `dedupe_nodes_bulk`, needed for the semantic-similarity candidate filtering at `:239`). The insert-time `generate_name_embedding` guard is again just the fallback.",
+    "stop_reason": "end_turn",
+    "session_id": "db9e0d7c-6a31-4b93-99f0-9ec2fa1db052",
+    "total_cost_usd": 0.554316,
+    "usage": {
+      "input_tokens": 7876,
+      "cache_creation_input_tokens": 34768,
+      "cache_read_input_tokens": 359222,
+      "output_tokens": 4721,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 34768,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2425,
+          "cache_read_input_tokens": 50591,
+          "cache_creation_input_tokens": 1661,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1661
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 7876,
+        "outputTokens": 4721,
+        "cacheReadInputTokens": 359222,
+        "cacheCreationInputTokens": 34768,
+        "webSearchRequests": 0,
+        "costUSD": 0.554316,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "c27552fb-eb3e-4151-9cd6-f9e7adfb74e8"
+  },
+  "answer": "I now have the complete picture across both paths. Here's the answer.\n\n## Embedding generation: bulk insert path vs. edge resolution path\n\nThere are **two distinct embedding primitives** in play, and the two paths use them differently:\n\n| Primitive | Method | Text source | Newline handling |\n|---|---|---|---|\n| `node.generate_name_embedding` (`nodes.py:291`) | `embedder.create([text])` \u2014 single | `self.name` | strips `\\n`\u2192space |\n| `edge.generate_embedding` (`edges.py:213`) | `embedder.create([text])` \u2014 single | `self.fact` | strips `\\n`\u2192space |\n| `create_entity_node_embeddings` (`nodes.py:577`) | `embedder.create_batch([names])` | `node.name` | **no** newline stripping |\n| `create_entity_edge_embeddings` (`edges.py:494`) | `embedder.create_batch([facts])` | `edge.fact` | **no** newline stripping |\n\n### Bulk insert path \u2014 `add_nodes_and_edges_bulk_tx` (`bulk_utils.py:109`)\n\nThis is the final DB-write step (called by every `add_episode`, both single and bulk). It embeds **lazily, per-object, only as a fallback**:\n\n- **Entity nodes** (`bulk_utils.py:122-124`): `if node.name_embedding is None: await node.generate_name_embedding(embedder)` \u2014 one `create()` call per un-embedded node, embedding the **name**.\n- **Entity edges** (`bulk_utils.py:139-141`): `if edge.fact_embedding is None: await edge.generate_embedding(embedder)` \u2014 one `create()` call per un-embedded edge, embedding the **fact**.\n\nSo in normal operation these guards are no-ops, because the resolution stages upstream already populated the embeddings. They only fire as a safety net (e.g. `add_triplet` at `graphiti.py:864-869` pre-fills them; community building also goes through here).\n\n### Edge resolution path \u2014 `resolve_extracted_edges` (`edge_operations.py:247`)\n\nEdges get embedded via the **batch** primitive, **twice**:\n\n1. **Before resolution** (`edge_operations.py:258`): `await create_entity_edge_embeddings(embedder, extracted_edges)` \u2014 batch-embeds all extracted edges' facts. This is required so `get_relevant_edges` and `get_edge_invalidation_candidates` (`:261-262`) can do vector similarity search to find duplicate/contradicting edges.\n2. **After resolution** (`edge_operations.py:331-334`): `create_entity_edge_embeddings` is called again on `resolved_edges` and `invalidated_edges`. Re-embedding is necessary because resolution can change which edge object / fact text is carried forward (an LLM-resolved or deduplicated fact differs from the originally extracted one).\n\nBy the time these resolved edges reach `add_nodes_and_edges_bulk_tx`, `fact_embedding` is already set, so the bulk path's `is None` guard skips them.\n\n### Key differences\n\n- **Trigger:** Bulk insert embeds **conditionally** (`is None` fallback); edge resolution embeds **unconditionally** (the embeddings are inputs to similarity search, not just persisted columns).\n- **API call shape:** Bulk insert uses **single** `create()` calls in a per-object loop (`generate_*_embedding`); edge resolution uses **batched** `create_batch()` calls.\n- **Newline normalization:** The single-object methods strip newlines from the text before embedding; the batch `create_entity_*_embeddings` functions **do not**. So the same fact can be embedded from slightly different text depending on which path produced it.\n- **Count:** An edge is embedded once in resolution (and re-embedded post-resolution), then *not* re-embedded at insert time. The insert-time embedding only happens for objects that bypassed resolution.\n\n### For reference \u2014 the node analogue\n\nNodes are not embedded inside `resolve_extracted_nodes`. Instead `extract_attributes_from_nodes` calls `create_entity_node_embeddings` at the end (`node_operations.py:318`), and the bulk dedup path embeds via `create_entity_node_embeddings` before resolution (`bulk_utils.py:213-215`, `dedupe_nodes_bulk`, needed for the semantic-similarity candidate filtering at `:239`). The insert-time `generate_name_embedding` guard is again just the fallback.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The bulk\u2010insert path is implemented in graphiti_core/utils/bulk_utils.py in the add_nodes_and_edges_bulk_tx function.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Bulk insert path \u2014 `add_nodes_and_edges_bulk_tx` (`bulk_utils.py:109`)"
+      },
+      {
+        "fact": "In the bulk\u2010insert path, for each EntityNode whose name_embedding is None, node.generate_name_embedding(embedder) is awaited.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Entity nodes** (`bulk_utils.py:122-124`): `if node.name_embedding is None: await node.generate_name_embedding(embedder)`"
+      },
+      {
+        "fact": "In the bulk\u2010insert path, for each EntityEdge whose fact_embedding is None, edge.generate_embedding(embedder) is awaited.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Entity edges** (`bulk_utils.py:139-141`): `if edge.fact_embedding is None: await edge.generate_embedding(embedder)`"
+      },
+      {
+        "fact": "The edge\u2010resolution path is implemented in graphiti_core/utils/maintenance/edge_operations.py in the resolve_extracted_edges function.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Edge resolution path \u2014 `resolve_extracted_edges` (`edge_operations.py:247`)"
+      },
+      {
+        "fact": "In the edge\u2010resolution path, per\u2010edge.generate_embedding() is never called directly.",
+        "present": true,
+        "votes_present": 2,
+        "evidence": "Edges get embedded via the **batch** primitive, **twice**"
+      },
+      {
+        "fact": "In the edge\u2010resolution path, edge embeddings are batched via create_entity_edge_embeddings(embedder, \u2026).",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`await create_entity_edge_embeddings(embedder, extracted_edges)` \u2014 batch-embeds all extracted edges' facts"
+      },
+      {
+        "fact": "In the edge\u2010resolution path, create_entity_edge_embeddings(embedder, \u2026) is called once on the newly extracted_edges before matching.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Before resolution** (`edge_operations.py:258`): `await create_entity_edge_embeddings(embedder, extracted_edges)` ... so `get_relevant_edges` and `get_edge_invalidation_candidates` ... can do vector similarity search"
+      },
+      {
+        "fact": "In the edge\u2010resolution path, create_entity_edge_embeddings(embedder, \u2026) is called again in parallel on the resolved_edges and invalidated_edges.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**After resolution** (`edge_operations.py:331-334`): `create_entity_edge_embeddings` is called again on `resolved_edges` and `invalidated_edges`"
+      },
+      {
+        "fact": "No node embeddings are generated in the edge\u2010resolution path.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.8888888888888888,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 6,
+    "read": 5,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "The bulk\u2010insert path is implemented in graphiti_core/utils/bulk_utils.py in the add_nodes_and_edges_bulk_tx function.",
+    "In the bulk\u2010insert path, for each EntityNode whose name_embedding is None, node.generate_name_embedding(embedder) is awaited.",
+    "In the bulk\u2010insert path, for each EntityEdge whose fact_embedding is None, edge.generate_embedding(embedder) is awaited.",
+    "The edge\u2010resolution path is implemented in graphiti_core/utils/maintenance/edge_operations.py in the resolve_extracted_edges function.",
+    "In the edge\u2010resolution path, per\u2010edge.generate_embedding() is never called directly.",
+    "In the edge\u2010resolution path, edge embeddings are batched via create_entity_edge_embeddings(embedder, \u2026).",
+    "In the edge\u2010resolution path, create_entity_edge_embeddings(embedder, \u2026) is called once on the newly extracted_edges before matching.",
+    "In the edge\u2010resolution path, create_entity_edge_embeddings(embedder, \u2026) is called again in parallel on the resolved_edges and invalidated_edges.",
+    "No node embeddings are generated in the edge\u2010resolution path."
+  ]
+}

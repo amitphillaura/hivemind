@@ -1,0 +1,70 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "api_error_status": null,
+  "duration_ms": 20729,
+  "duration_api_ms": 21603,
+  "ttft_ms": 1899,
+  "num_turns": 4,
+  "result": "The episode's content is held under the **`episode_content`** key.\n\nIn `graphiti_core/utils/maintenance/node_operations.py:356-362`, the context dict passed to the attribute extraction prompt is built as:\n\n```python\nsummary_context: dict[str, Any] = {\n    'node': node_context,\n    'episode_content': episode.content if episode is not None else '',\n    'previous_episodes': [ep.content for ep in previous_episodes] ...,\n}\n```\n\nThis `summary_context` is then passed to `prompt_library.extract_nodes.extract_attributes(summary_context)` (line 365). The prompt itself reads it back via the same key \u2014 in `graphiti_core/prompts/extract_nodes.py` the `extract_attributes` function references `context['episode_content']`.",
+  "stop_reason": "end_turn",
+  "session_id": "10bd866e-3e7e-42ac-8844-9470a87e90b4",
+  "total_cost_usd": 0.1874575,
+  "usage": {
+    "input_tokens": 4883,
+    "cache_creation_input_tokens": 14962,
+    "cache_read_input_tokens": 105044,
+    "output_tokens": 659,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 14962,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 269,
+        "cache_read_input_tokens": 30902,
+        "cache_creation_input_tokens": 1544,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 1544
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 453,
+      "outputTokens": 16,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.000533,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000
+    },
+    "claude-opus-4-8[1m]": {
+      "inputTokens": 4883,
+      "outputTokens": 659,
+      "cacheReadInputTokens": 105044,
+      "cacheCreationInputTokens": 14962,
+      "webSearchRequests": 0,
+      "costUSD": 0.1869245,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "uuid": "ac21fca1-7b49-4753-967a-23649013c9ef"
+}

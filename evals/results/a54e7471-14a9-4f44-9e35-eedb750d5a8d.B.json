@@ -1,0 +1,127 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 28955,
+    "duration_api_ms": 28837,
+    "ttft_ms": 1845,
+    "num_turns": 5,
+    "result": "## Answer\n\n**The function:** `node_distance_reranker` in `graphiti_core/search/search_utils.py:923`.\n\nIt does *not* rerank edges directly \u2014 it ranks **nodes** by their distance to the center node, and the edge-search path maps edges to nodes and back. Here's the full chain for `EdgeReranker.node_distance` (`graphiti_core/search/search.py:228-253`):\n\n**1. Edges \u2192 source node UUIDs**\nAfter an RRF preliminary sort, each edge is grouped by its `source_node_uuid` into a multimap, and the distinct source node UUIDs are extracted (`search.py:240-244`):\n```python\nsource_to_edge_uuid_map = defaultdict(list)\nfor edge in sorted_results:\n    source_to_edge_uuid_map[edge.source_node_uuid].append(edge.uuid)\nsource_uuids = [source_node_uuid for source_node_uuid in source_to_edge_uuid_map]\n```\n\n**2. Compute node distances**\n`node_distance_reranker` is called with those source UUIDs (`search.py:246-248`). Inside (`search_utils.py:933-958`), it runs a Cypher query that matches a one-hop `RELATES_TO` relationship between the center `Entity` and each candidate node:\n```cypher\nMATCH (center:Entity {uuid: $center_uuid})-[:RELATES_TO]-(n:Entity {uuid: node_uuid})\nRETURN 1 AS score, node_uuid AS uuid\n```\nNodes directly connected get `score = 1`; the center node itself gets `0.0`; any node with no match defaults to `float('inf')` (`search_utils.py:931, 955`). It then sorts ascending by score so closest nodes come first (`search_utils.py:958`). (Despite the \"shortest path\" comments, this is effectively a 1-hop adjacency check, not a multi-hop path computation.)\n\n**3. Node IDs mapped back to edges**\nThe reranked list of node UUIDs is expanded back into edge UUIDs via the same multimap (`search.py:250-251`):\n```python\nfor node_uuid in reranked_node_uuids:\n    reranked_uuids.extend(source_to_edge_uuid_map[node_uuid])\n```\nFinally the edge UUIDs are resolved to edge objects through `edge_uuid_map` (`search.py:253`).\n\nSo the mapping is: **edge \u2192 `source_node_uuid` \u2192 rank by distance to center \u2192 expand each ranked source node back to its edges via `source_to_edge_uuid_map`.** Edges are ordered by how close their *source node* sits to the center node.\n\nOne note: the `min_score` filter at the end uses `(1 / scores[uuid]) >= min_score` (`search_utils.py:965`), so unreachable nodes (score `inf`) yield `0` and are dropped when `min_score > 0`.",
+    "stop_reason": "end_turn",
+    "session_id": "3230cad0-6c77-4cbc-b905-c9b8d34aacb4",
+    "total_cost_usd": 0.28772450000000005,
+    "usage": {
+      "input_tokens": 8032,
+      "cache_creation_input_tokens": 20492,
+      "cache_read_input_tokens": 150329,
+      "output_tokens": 1773,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 20492,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 982,
+          "cache_read_input_tokens": 37087,
+          "cache_creation_input_tokens": 889,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 889
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8032,
+        "outputTokens": 1773,
+        "cacheReadInputTokens": 150329,
+        "cacheCreationInputTokens": 20492,
+        "webSearchRequests": 0,
+        "costUSD": 0.28772450000000005,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "2ec16497-2e3e-43da-990c-99cd6d4465d9"
+  },
+  "answer": "## Answer\n\n**The function:** `node_distance_reranker` in `graphiti_core/search/search_utils.py:923`.\n\nIt does *not* rerank edges directly \u2014 it ranks **nodes** by their distance to the center node, and the edge-search path maps edges to nodes and back. Here's the full chain for `EdgeReranker.node_distance` (`graphiti_core/search/search.py:228-253`):\n\n**1. Edges \u2192 source node UUIDs**\nAfter an RRF preliminary sort, each edge is grouped by its `source_node_uuid` into a multimap, and the distinct source node UUIDs are extracted (`search.py:240-244`):\n```python\nsource_to_edge_uuid_map = defaultdict(list)\nfor edge in sorted_results:\n    source_to_edge_uuid_map[edge.source_node_uuid].append(edge.uuid)\nsource_uuids = [source_node_uuid for source_node_uuid in source_to_edge_uuid_map]\n```\n\n**2. Compute node distances**\n`node_distance_reranker` is called with those source UUIDs (`search.py:246-248`). Inside (`search_utils.py:933-958`), it runs a Cypher query that matches a one-hop `RELATES_TO` relationship between the center `Entity` and each candidate node:\n```cypher\nMATCH (center:Entity {uuid: $center_uuid})-[:RELATES_TO]-(n:Entity {uuid: node_uuid})\nRETURN 1 AS score, node_uuid AS uuid\n```\nNodes directly connected get `score = 1`; the center node itself gets `0.0`; any node with no match defaults to `float('inf')` (`search_utils.py:931, 955`). It then sorts ascending by score so closest nodes come first (`search_utils.py:958`). (Despite the \"shortest path\" comments, this is effectively a 1-hop adjacency check, not a multi-hop path computation.)\n\n**3. Node IDs mapped back to edges**\nThe reranked list of node UUIDs is expanded back into edge UUIDs via the same multimap (`search.py:250-251`):\n```python\nfor node_uuid in reranked_node_uuids:\n    reranked_uuids.extend(source_to_edge_uuid_map[node_uuid])\n```\nFinally the edge UUIDs are resolved to edge objects through `edge_uuid_map` (`search.py:253`).\n\nSo the mapping is: **edge \u2192 `source_node_uuid` \u2192 rank by distance to center \u2192 expand each ranked source node back to its edges via `source_to_edge_uuid_map`.** Edges are ordered by how close their *source node* sits to the center node.\n\nOne note: the `min_score` filter at the end uses `(1 / scores[uuid]) >= min_score` (`search_utils.py:965`), so unreachable nodes (score `inf`) yield `0` and are dropped when `min_score > 0`.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "Edge-reranking with the shortest-path strategy is implemented in the function node_distance_reranker in the file graphiti_core/search/search_utils.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**The function:** `node_distance_reranker` in `graphiti_core/search/search_utils.py:923`."
+      },
+      {
+        "fact": "node_distance_reranker fires a Cypher UNWIND/MATCH query.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "it runs a Cypher query that matches a one-hop `RELATES_TO` relationship between the center `Entity` and each candidate node:\n```cypher\nMATCH (center:Entity {uuid: $center_uuid})-[:RELATES_TO]-(n:Entity {uuid: node_uuid})\nRETURN 1 AS score, node_uuid AS uuid\n```"
+      },
+      {
+        "fact": "The Cypher UNWIND/MATCH query retrieves each node\u2019s distance to the center.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Inside (`search_utils.py:933-958`), it runs a Cypher query that matches a one-hop `RELATES_TO` relationship between the center `Entity` and each candidate node ... It then sorts ascending by score so closest nodes come first"
+      },
+      {
+        "fact": "edge_search in the file graphiti_core/search/search.py builds a data structure named source_to_edge_uuid_map.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "each edge is grouped by its `source_node_uuid` into a multimap ... `source_to_edge_uuid_map = defaultdict(list)`"
+      },
+      {
+        "fact": "source_to_edge_uuid_map maps each source_node_uuid to a list of edge.uuid.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "for edge in sorted_results:\n    source_to_edge_uuid_map[edge.source_node_uuid].append(edge.uuid)"
+      },
+      {
+        "fact": "edge_search iterates over node UUIDs returned by node_distance_reranker and retrieves edges for each node UUID using source_to_edge_uuid_map.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The reranked list of node UUIDs is expanded back into edge UUIDs via the same multimap (`search.py:250-251`):\n```python\nfor node_uuid in reranked_node_uuids:\n    reranked_uuids.extend(source_to_edge_uuid_map[node_uuid])\n```"
+      },
+      {
+        "fact": "edge_search uses the retrieved edges to produce the reranked edge list.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Finally the edge UUIDs are resolved to edge objects through `edge_uuid_map` (`search.py:253`)."
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 1,
+    "read": 2,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "Edge-reranking with the shortest-path strategy is implemented in the function node_distance_reranker in the file graphiti_core/search/search_utils.py.",
+    "node_distance_reranker fires a Cypher UNWIND/MATCH query.",
+    "The Cypher UNWIND/MATCH query retrieves each node\u2019s distance to the center.",
+    "edge_search in the file graphiti_core/search/search.py builds a data structure named source_to_edge_uuid_map.",
+    "source_to_edge_uuid_map maps each source_node_uuid to a list of edge.uuid.",
+    "edge_search iterates over node UUIDs returned by node_distance_reranker and retrieves edges for each node UUID using source_to_edge_uuid_map.",
+    "edge_search uses the retrieved edges to produce the reranked edge list."
+  ]
+}

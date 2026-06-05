@@ -1,0 +1,190 @@
+{
+  "repo": "https://github.com/getzep/graphiti.git",
+  "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+  "selection": "broad (n_context_files>=3) AND non-searchable (no identifier)",
+  "questions": [
+    {
+      "id": "26b8f70d-8cae-4af8-abe4-1b908e03ec52",
+      "question": "In the triplet insertion flow, how are deduplication tasks for entities and facts orchestrated before persisting the data?",
+      "answer": "Entity and fact de-duplication in the triplet flow is entirely handled before the bulk write in Graphiti.add_triplet (graphiti_core/graphiti.py):\n\n1. resolve_extracted_nodes (graphiti_core/utils/maintenance/node_operations.py)  \n   \u2013 runs hybrid search + the dedupe_nodes.nodes LLM prompt to map each extracted EntityNode to an existing or new node  \n   \u2013 returns resolved_nodes and a uuid_map for edge pointer resolution  \n\n2. resolve_edge_pointers uses that uuid_map to rewire the new edge to the deduped nodes  \n\n3. Fetch relevant/invalidation candidates via get_relevant_edges and get_edge_invalidation_candidates  \n\n4. resolve_extracted_edge (graphiti_core/utils/maintenance/edge_operations.py)  \n   \u2013 calls the dedupe_edges.resolve_edge LLM prompt to identify duplicate facts, contradictions and fact types  \n   \u2013 returns a single resolved_edge plus lists of invalidated and duplicate edges  \n\n5. add_nodes_and_edges_bulk persists the deduped resolved_nodes and [resolved_edge + invalidated_edges]  \n\nBoth node and edge resolves use semaphore_gather to parallelize searches and LLM calls.",
+      "facts": [
+        "Entity and fact de-duplication in the triplet flow takes place before the bulk write in Graphiti.add_triplet.",
+        "Graphiti.add_triplet is defined in graphiti_core/graphiti.py.",
+        "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py.",
+        "resolve_extracted_nodes runs hybrid search and the dedupe_nodes.nodes LLM prompt to map each extracted EntityNode to an existing or new node.",
+        "resolve_extracted_nodes returns resolved_nodes and a uuid_map for edge pointer resolution.",
+        "resolve_edge_pointers uses a uuid_map to rewire the new edge to the deduped nodes.",
+        "get_relevant_edges fetches relevant edge candidates.",
+        "get_edge_invalidation_candidates fetches invalidation edge candidates.",
+        "resolve_extracted_edge is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+        "resolve_extracted_edge calls the dedupe_edges.resolve_edge LLM prompt to identify duplicate facts, contradictions, and fact types.",
+        "resolve_extracted_edge returns a single resolved_edge plus lists of invalidated and duplicate edges.",
+        "add_nodes_and_edges_bulk persists the deduped resolved_nodes and the resolved_edge plus invalidated edges.",
+        "Both node and edge resolves use semaphore_gather to parallelize searches and LLM calls."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    },
+    {
+      "id": "48abe7ec-42fc-42c3-bdec-46c99726197f",
+      "question": "What is the sequence of operations from parsing a podcast message to generating deduplicated nodes and extracted edges?",
+      "answer": "Here\u2019s the end-to-end flow:\n\n1. In examples/podcast/podcast_runner.py:main  \n   \u2013 call parse_podcast_messages() \u2192 list of Message objects  \n   \u2013 wrap each Message in a RawEpisode and invoke Graphiti.add_episode(\u2026) or add_episode_bulk(\u2026)\n\n2. Inside Graphiti.add_episode / add_episode_bulk  \n   a. create an EpisodicNode from your RawEpisode  \n   b. **Extract raw EntityNode objects** (not shown in context)  \n   c. call graphiti_core/utils/maintenance/node_operations.py::resolve_extracted_nodes()  \n      \u2013 runs hybrid search over each extracted node  \n      \u2013 builds LLM prompt via graphiti_core/prompts/dedupe_nodes.py::nodes()  \n      \u2013 LLM returns entity_resolutions \u2192 you get resolved_nodes (and a uuid_map)  \n   d. call graphiti_core/utils/maintenance/edge_operations.py::extract_edges()  \n      \u2013 prepares context (episode.content, resolved_nodes, previous episodes, edge_type_map)  \n      \u2013 prompts via graphiti_core/prompts/extract_edges.py::edge() (with reflexion loop)  \n      \u2013 converts LLM output into EntityEdge objects with valid_at/invalid_at, source/target UUIDs  \n\n3. finally, Graphiti persists the deduplicated nodes and extracted edges into Neo4j.",
+      "facts": [
+        "The main function in examples/podcast/podcast_runner.py calls parse_podcast_messages().",
+        "parse_podcast_messages() returns a list of Message objects.",
+        "The main function wraps each Message object in a RawEpisode.",
+        "The main function invokes Graphiti.add_episode or Graphiti.add_episode_bulk with each RawEpisode.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk create an EpisodicNode from a RawEpisode.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk extract raw EntityNode objects.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk call resolve_extracted_nodes() from graphiti_core/utils/maintenance/node_operations.py.",
+        "resolve_extracted_nodes() runs a hybrid search over each extracted EntityNode.",
+        "resolve_extracted_nodes() builds an LLM prompt via graphiti_core/prompts/dedupe_nodes.py by calling nodes().",
+        "The LLM returns entity_resolutions, which yields resolved_nodes and a uuid_map.",
+        "Graphiti.add_episode and Graphiti.add_episode_bulk call extract_edges() from graphiti_core/utils/maintenance/edge_operations.py.",
+        "extract_edges() prepares a context consisting of episode.content, resolved_nodes, previous episodes, and edge_type_map.",
+        "extract_edges() prompts via graphiti_core/prompts/extract_edges.py by calling edge(), using a reflection loop.",
+        "extract_edges() converts LLM output into EntityEdge objects with valid_at and invalid_at timestamps and source and target UUIDs.",
+        "Graphiti persists the deduplicated nodes into Neo4j.",
+        "Graphiti persists the extracted edges into Neo4j."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    },
+    {
+      "id": "be95faed-82d3-4d7a-bce3-c1cf4c5ca52a",
+      "question": "What sequence of actions is used to perform a fulltext relationship search, from provider-specific query construction through result mapping?",
+      "answer": "The fulltext\u2010relationship search is implemented in graphiti_core/search/search_utils.py in edge_fulltext_search:\n\n1. fulltext_query(query, group_ids) \u2192 a fuzzy search string  \n2. edge_search_filter_query_constructor(search_filter) \u2192 WHERE-clause + params  \n3. get_relationships_query('edge_name_and_fact', db_type=driver.provider) (in graphiti_core/graph_queries.py) \u2192 provider-specific `CALL db.index.fulltext.queryRelationships(...)`  \n4. embed the filter and fuzzy query into a single Cypher string  \n5. await driver.execute_query(cypher, params=filter_params, query=fuzzy_query, group_ids=\u2026, limit=\u2026, routing_='r')  \n6. map each raw record via get_entity_edge_from_record (in graphiti_core/edges.py) \u2192 EntityEdge instances  \n\nThis pipeline handles provider differences (Neo4j vs FalkorDB) in the call generation step and then normalizes all results into your domain model.",
+      "facts": [
+        "The fulltext\u2010relationship search is implemented in graphiti_core/search/search_utils.py in the function edge_fulltext_search.",
+        "The function fulltext_query accepts parameters query and group_ids and returns a fuzzy search string.",
+        "The function edge_search_filter_query_constructor accepts a search_filter parameter and returns a WHERE-clause and params.",
+        "The function get_relationships_query is defined in graphiti_core/graph_queries.py.",
+        "The function get_relationships_query is called with 'edge_name_and_fact' and db_type equal to driver.provider.",
+        "The function get_relationships_query returns a provider-specific CALL db.index.fulltext.queryRelationships(...) call.",
+        "The pipeline embeds the filter and the fuzzy query into a single Cypher string.",
+        "The pipeline awaits driver.execute_query with cypher, params=filter_params, query=fuzzy_query, group_ids, limit, and routing_='r'.",
+        "The pipeline maps each raw record via get_entity_edge_from_record defined in graphiti_core/edges.py.",
+        "The function get_entity_edge_from_record returns EntityEdge instances.",
+        "The pipeline handles provider differences between Neo4j and FalkorDB in the call generation step.",
+        "The pipeline normalizes all results into the domain model."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    },
+    {
+      "id": "dec8778c-6aad-48f6-87ee-19aa31134e21",
+      "question": "Can you outline the end-to-end flow for resolving extracted entities into unique nodes, from search results through the deduplication prompt to final duplicate filtering?",
+      "answer": "1. In graphiti_core/utils/maintenance/node_operations.py \u2192 resolve_extracted_nodes():  \n   a. For each extracted EntityNode, call search(...) (NODE_HYBRID_SEARCH_RRF) to retrieve candidate_nodes.  \n   b. Build existing_nodes_context (from search results) and extracted_nodes_context.  \n   c. Invoke llm_client.generate_response( prompt_library.dedupe_nodes.node(context), response_model=NodeResolutions ) using the NodeDuplicate schema (graphiti_core/prompts/dedupe_nodes.py).  \n\n2. LLM returns a list of entity_resolutions (each with id, duplicate_idx, name, duplicates):  \n   \u2013 Map each resolution.id to its extracted_node;  \n   \u2013 If duplicate_idx \u22650, pick that existing_node, else keep the extracted_node;  \n   \u2013 Populate resolved_nodes and uuid_map;  \n   \u2013 Collect raw duplicate pairs (resolved_node, existing_node) from duplicates[].  \n\n3. Call filter_existing_duplicate_of_edges(driver, node_duplicates) (to remove duplicates implied by existing edges).  \n\n4. Return (resolved_nodes, uuid_map, new_node_duplicates).",
+      "facts": [
+        "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py",
+        "resolve_extracted_nodes iterates over each extracted EntityNode",
+        "resolve_extracted_nodes calls search(...) with NODE_HYBRID_SEARCH_RRF to retrieve candidate_nodes for each extracted EntityNode",
+        "resolve_extracted_nodes builds existing_nodes_context from the search results",
+        "resolve_extracted_nodes builds extracted_nodes_context",
+        "resolve_extracted_nodes invokes llm_client.generate_response with prompt_library.dedupe_nodes.node(context) and response_model NodeResolutions",
+        "The NodeDuplicate schema is located in graphiti_core/prompts/dedupe_nodes.py",
+        "The LLM returns a list of entity_resolutions",
+        "Each entity_resolution includes id, duplicate_idx, name, and duplicates",
+        "The code maps each entity_resolution.id to its extracted_node",
+        "The code checks if entity_resolution.duplicate_idx is greater than or equal to zero",
+        "If entity_resolution.duplicate_idx is greater than or equal to zero, the code selects the corresponding existing_node",
+        "If entity_resolution.duplicate_idx is less than zero, the code retains the extracted_node",
+        "The code populates resolved_nodes",
+        "The code populates uuid_map",
+        "The code collects raw duplicate pairs (resolved_node, existing_node) from entity_resolution.duplicates",
+        "resolve_extracted_nodes calls filter_existing_duplicate_of_edges(driver, node_duplicates)",
+        "filter_existing_duplicate_of_edges removes duplicates implied by existing edges",
+        "resolve_extracted_nodes returns a tuple (resolved_nodes, uuid_map, new_node_duplicates)"
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    },
+    {
+      "id": "6dcd2cbd-a5de-4ea9-ab78-7c478cffc0f6",
+      "question": "Trace the flow of a message's UUID from the ingestion endpoint to its retrieval as an edge result.",
+      "answer": "1. Ingestion  \n   \u2022 In server/graph_service/routers/ingest.py (add_messages_task) we extract the message UUID (`m.uuid`) from the request and call  \n     `await graphiti.add_episode(uuid=m.uuid, \u2026)`.  \n   \u2022 Inside your Graphiti client (e.g. server/graph_service/graphiti.py), `add_episode` constructs an Episode node by calling  \n     `Episode.save(driver)` (graphiti_core/nodes.py), which runs a Cypher MERGE/CREATE with the supplied `uuid`.  \n   \u2022 If any edges are created (e.g. linking this episode to a conversation or parent entity), they\u2019re instantiated as subclasses of `Edge` and persisted via their `save(driver)` methods in graphiti_core/edges.py, embedding the same UUIDs.  \n\n2. Retrieval  \n   \u2022 A GET to `/entity/{uuid}/edge` in server/graph_service/routers/retrieve.py invokes  \n     `await graphiti.get_entity_edge(uuid)` (ZepGraphitiDep).  \n   \u2022 Under the hood this calls `Edge.get_by_uuid(driver, uuid)` (graphiti_core/edges.py), running a Cypher `MATCH` on the `uuid` to load the edge.  \n   \u2022 The resulting `Edge` model is then converted to the API schema via `get_fact_result_from_edge` and returned.",
+      "facts": [
+        "The add_messages_task function in server/graph_service/routers/ingest.py extracts the message UUID m.uuid from the request.",
+        "The add_messages_task function in server/graph_service/routers/ingest.py calls await graphiti.add_episode with uuid=m.uuid.",
+        "The add_episode method in the Graphiti client constructs an Episode node by calling Episode.save(driver).",
+        "The Episode.save(driver) method is defined in graphiti_core/nodes.py.",
+        "The Episode.save(driver) method runs a Cypher MERGE/CREATE query with the supplied uuid.",
+        "When edges are created to link an episode to a conversation or parent entity, they are instantiated as subclasses of Edge.",
+        "Edge subclasses are persisted via their save(driver) methods in graphiti_core/edges.py.",
+        "The save(driver) methods for Edge subclasses embed the same UUIDs.",
+        "A GET request to /entity/{uuid}/edge in server/graph_service/routers/retrieve.py invokes await graphiti.get_entity_edge(uuid).",
+        "The get_entity_edge method on the Graphiti client calls Edge.get_by_uuid(driver, uuid).",
+        "The Edge.get_by_uuid(driver, uuid) method is defined in graphiti_core/edges.py.",
+        "The Edge.get_by_uuid(driver, uuid) method runs a Cypher MATCH query on the uuid to load the edge.",
+        "The get_fact_result_from_edge function converts the resulting Edge model to the API schema.",
+        "The converted Edge model is returned to the client."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 4
+    },
+    {
+      "id": "f9275c73-9e2f-4cb4-8f6f-3b725ded2658",
+      "question": "How are custom entity types supplied to the episode addition flow applied during node extraction and saved with their attributes and labels in the graph?",
+      "answer": "When you call Graphiti.add_episode (or add_episode_bulk) with an entity_types dict, that mapping is fed into:\n\n1. extract_nodes (in graphiti_core/utils/maintenance/node_operations.py):  \n   \u2013 Builds an entity_types_context list from your custom Pydantic models (using their __doc__ as descriptions) plus the default \u201cEntity\u201d type.  \n   \u2013 Passes it to the LLM prompt so each ExtractedEntity gets an entity_type_id.  \n   \u2013 Creates each EntityNode with labels = [\u201cEntity\u201d, your_type_name].\n\n2. extract_attributes_from_nodes then populates node.attributes based on your model\u2019s fields.\n\n3. add_nodes_and_edges_bulk_tx (in graphiti_core/utils/bulk_utils.py) (or EntityNode.save for single-node writes) merges node.attributes and node.labels into the Cypher save payload so your custom attributes and labels are persisted in the graph.",
+      "facts": [
+        "Graphiti.add_episode and Graphiti.add_episode_bulk accept an entity_types dict.",
+        "The entity_types dict mapping passed to Graphiti.add_episode or Graphiti.add_episode_bulk is fed into extract_nodes in graphiti_core/utils/maintenance/node_operations.py.",
+        "extract_nodes builds an entity_types_context list from custom Pydantic models using their __doc__ as descriptions plus the default \"Entity\" type.",
+        "extract_nodes passes the entity_types_context list to the LLM prompt so each ExtractedEntity gets an entity_type_id.",
+        "extract_nodes creates each EntityNode with labels equal to [\"Entity\", your_type_name].",
+        "The entity_types dict mapping passed to Graphiti.add_episode or Graphiti.add_episode_bulk is fed into extract_attributes_from_nodes.",
+        "extract_attributes_from_nodes populates node.attributes based on the model\u2019s fields.",
+        "The entity_types dict mapping passed to Graphiti.add_episode or Graphiti.add_episode_bulk is fed into add_nodes_and_edges_bulk_tx in graphiti_core/utils/bulk_utils.py.",
+        "For single-node writes, EntityNode.save is used.",
+        "add_nodes_and_edges_bulk_tx merges node.attributes and node.labels into the Cypher save payload.",
+        "EntityNode.save merges node.attributes and node.labels into the Cypher save payload.",
+        "Merging node.attributes and node.labels into the Cypher save payload persists the custom attributes and labels in the graph."
+      ],
+      "difficulty": "hard",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 4
+    },
+    {
+      "id": "591e0b08-b66a-4917-92f1-9d54e2276802",
+      "question": "How does the code ensure additional edge attributes are included when saving and retrieving EntityEdge objects?",
+      "answer": "When saving, EntityEdge.save (graphiti_core/edges.py) builds its payload dict and then does\n\n\u2022\u2003edge_data.update(self.attributes or {})\n\nso any custom key/\u200bvalue in the edge\u2019s .attributes gets written as relationship properties.  \n\nWhen loading (in all \u201cget\u2026\u201d methods and the full-text/similarity/search utils) each Cypher query returns\n\n\u2022\u2003properties(r) AS attributes\n\nand get_entity_edge_from_record(record) feeds record['attributes'] into the EntityEdge.attributes field (then pops out the reserved keys). This round-trips any extra attributes you added.",
+      "facts": [
+        "EntityEdge.save is defined in graphiti_core/edges.py",
+        "EntityEdge.save builds its payload dictionary",
+        "EntityEdge.save calls edge_data.update(self.attributes or {})",
+        "Any custom key/value in an edge\u2019s attributes is written as relationship properties when saving",
+        "In the get methods and the full-text, similarity, and search utilities, each Cypher query returns properties(r) AS attributes",
+        "get_entity_edge_from_record(record) assigns record['attributes'] to EntityEdge.attributes",
+        "get_entity_edge_from_record(record) removes reserved keys from the attributes",
+        "Extra attributes added to an edge are preserved through save and load operations"
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    },
+    {
+      "id": "fa25fe30-2d05-4d7c-a517-4859c3dd5720",
+      "question": "Which functions are involved in identifying, filtering, and constructing IS_DUPLICATE_OF edges during episode addition?",
+      "answer": "During add_episode the \u201cduplicate\u201d workflow spans:\n\n\u2022 resolve_extracted_nodes (graphiti_core/utils/maintenance/node_operations.py) \u2013 calls the LLM to identify node duplicates, then invokes filter_existing_duplicate_of_edges (to drop any IS_DUPLICATE_OF edges already in the DB)  \n\u2022 build_duplicate_of_edges (graphiti_core/utils/maintenance/edge_operations.py) \u2013 takes the filtered node_pairs and constructs new EntityEdge objects named \u201cIS_DUPLICATE_OF\u201d  \n\u2022 Graphiti.add_episode then merges these edges into the episode\u2019s edge set before bulk\u2010inserting.",
+      "facts": [
+        "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py",
+        "resolve_extracted_nodes calls the LLM to identify node duplicates",
+        "resolve_extracted_nodes invokes filter_existing_duplicate_of_edges",
+        "filter_existing_duplicate_of_edges drops any IS_DUPLICATE_OF edges already in the database",
+        "build_duplicate_of_edges is defined in graphiti_core/utils/maintenance/edge_operations.py",
+        "build_duplicate_of_edges takes the filtered node_pairs as input",
+        "build_duplicate_of_edges constructs new EntityEdge objects named \u201cIS_DUPLICATE_OF\u201d",
+        "Graphiti.add_episode merges these edges into the episode\u2019s edge set",
+        "Graphiti.add_episode bulk-inserts the episode\u2019s edge set edges"
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 3
+    }
+  ]
+}

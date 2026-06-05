@@ -1,0 +1,120 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 22185,
+    "duration_api_ms": 22136,
+    "ttft_ms": 2669,
+    "num_turns": 5,
+    "result": "The example is `examples/podcast/podcast_runner.py`. It does **not** compute the subset dynamically \u2014 the split is just hardcoded Python list slices on the parsed `messages` list, gated by the `use_bulk` flag passed to `main()`.\n\n**The mechanism (`podcast_runner.py:72-119`):**\n\n- `messages = parse_podcast_messages()` loads the full transcript (line 77).\n- `main(use_bulk=False)` is the toggle; the script runs `asyncio.run(main(False))` at line 119, so **sequential is the default**.\n\n**Bulk mode** (`use_bulk=True`, lines 80-98):\n- Builds `raw_episodes` from the slice **`messages[3:7]`** \u2014 indices 3,4,5,6 (4 messages) \u2014 into `RawEpisode` objects (lines 81-90).\n- Sends them in one shot via `client.add_episode_bulk(...)` (line 92).\n\n**Sequential mode** (`else`, lines 100-116):\n- Iterates the slice **`messages[3:14]`** \u2014 indices 3 through 13 (11 messages).\n- For each, first calls `retrieve_episodes(...)` to fetch the 3 prior episodes and passes their UUIDs as `previous_episode_uuids`, then calls `client.add_episode(...)` one at a time (lines 100-116).\n\nSo the \"subset\" is determined purely by literal slice bounds, and they differ per mode: `[3:7]` for bulk vs `[3:14]` for sequential. One caveat worth noting \u2014 `raw_episodes` is always constructed from `messages[3:7]` (lines 80-90) even when `use_bulk` is `False`, in which case that list is built but never used; the sequential branch independently re-slices `messages[3:14]`.",
+    "stop_reason": "end_turn",
+    "session_id": "f10b66ea-0a51-4258-b7e8-caeac6bfe57a",
+    "total_cost_usd": 0.26926625,
+    "usage": {
+      "input_tokens": 8025,
+      "cache_creation_input_tokens": 21741,
+      "cache_read_input_tokens": 116070,
+      "output_tokens": 1409,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 21741,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 863,
+          "cache_read_input_tokens": 36855,
+          "cache_creation_input_tokens": 2370,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2370
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8025,
+        "outputTokens": 1409,
+        "cacheReadInputTokens": 116070,
+        "cacheCreationInputTokens": 21741,
+        "webSearchRequests": 0,
+        "costUSD": 0.26926625,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "6b47f618-6343-454e-8c11-f63cb90bf6da"
+  },
+  "answer": "The example is `examples/podcast/podcast_runner.py`. It does **not** compute the subset dynamically \u2014 the split is just hardcoded Python list slices on the parsed `messages` list, gated by the `use_bulk` flag passed to `main()`.\n\n**The mechanism (`podcast_runner.py:72-119`):**\n\n- `messages = parse_podcast_messages()` loads the full transcript (line 77).\n- `main(use_bulk=False)` is the toggle; the script runs `asyncio.run(main(False))` at line 119, so **sequential is the default**.\n\n**Bulk mode** (`use_bulk=True`, lines 80-98):\n- Builds `raw_episodes` from the slice **`messages[3:7]`** \u2014 indices 3,4,5,6 (4 messages) \u2014 into `RawEpisode` objects (lines 81-90).\n- Sends them in one shot via `client.add_episode_bulk(...)` (line 92).\n\n**Sequential mode** (`else`, lines 100-116):\n- Iterates the slice **`messages[3:14]`** \u2014 indices 3 through 13 (11 messages).\n- For each, first calls `retrieve_episodes(...)` to fetch the 3 prior episodes and passes their UUIDs as `previous_episode_uuids`, then calls `client.add_episode(...)` one at a time (lines 100-116).\n\nSo the \"subset\" is determined purely by literal slice bounds, and they differ per mode: `[3:7]` for bulk vs `[3:14]` for sequential. One caveat worth noting \u2014 `raw_episodes` is always constructed from `messages[3:7]` (lines 80-90) even when `use_bulk` is `False`, in which case that list is built but never used; the sequential branch independently re-slices `messages[3:14]`.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The main() function in examples/podcast/podcast_runner.py has a use_bulk flag that determines which slice of the parsed messages is processed.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "gated by the `use_bulk` flag passed to `main()`"
+      },
+      {
+        "fact": "If use_bulk=True, the code sets raw_episodes to messages[3:7].",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Builds `raw_episodes` from the slice **`messages[3:7]`**"
+      },
+      {
+        "fact": "If use_bulk=True, the code calls client.add_episode_bulk(raw_episodes, \u2026).",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Sends them in one shot via `client.add_episode_bulk(...)` (line 92)"
+      },
+      {
+        "fact": "If use_bulk=False, the code loops over messages[3:14].",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Iterates the slice **`messages[3:14]`** \u2014 indices 3 through 13 (11 messages)"
+      },
+      {
+        "fact": "If use_bulk=False, for each message the code retrieves recent episodes.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "first calls `retrieve_episodes(...)` to fetch the 3 prior episodes"
+      },
+      {
+        "fact": "If use_bulk=False, for each message the code calls client.add_episode(\u2026) sequentially.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "then calls `client.add_episode(...)` one at a time (lines 100-116)"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 1,
+    "read": 1,
+    "glob": 1,
+    "bash": 1
+  },
+  "gold_facts": [
+    "The main() function in examples/podcast/podcast_runner.py has a use_bulk flag that determines which slice of the parsed messages is processed.",
+    "If use_bulk=True, the code sets raw_episodes to messages[3:7].",
+    "If use_bulk=True, the code calls client.add_episode_bulk(raw_episodes, \u2026).",
+    "If use_bulk=False, the code loops over messages[3:14].",
+    "If use_bulk=False, for each message the code retrieves recent episodes.",
+    "If use_bulk=False, for each message the code calls client.add_episode(\u2026) sequentially."
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 18548,
+    "duration_api_ms": 18319,
+    "ttft_ms": 2659,
+    "num_turns": 3,
+    "result": "Looking at the source in `graphiti_core/helpers.py:99-109`:\n\n```python\nasync def semaphore_gather(\n    *coroutines: Coroutine,\n    max_coroutines: int | None = None,\n) -> list[Any]:\n    semaphore = asyncio.Semaphore(max_coroutines or SEMAPHORE_LIMIT)\n\n    async def _wrap_coroutine(coroutine):\n        async with semaphore:\n            return await coroutine\n\n    return await asyncio.gather(*(_wrap_coroutine(coroutine) for coroutine in coroutines))\n```\n\n## Answer\n\nThere is **no special exception handling**. Exceptions propagate normally, with two specific consequences worth noting:\n\n**1. The semaphore is always released.** The `async with semaphore` block (`helpers.py:106-107`) guarantees the slot is released even when `await coroutine` raises \u2014 `__aexit__` runs on exception just as it does on success. So a failing coroutine never leaks its concurrency permit; the limit stays intact for the remaining work.\n\n**2. The first exception propagates and the rest keep running detached.** The call is plain `asyncio.gather(...)` (`helpers.py:109`) with **no** `return_exceptions=True`. Per asyncio semantics, the default `return_exceptions=False` means:\n\n- The first coroutine to raise causes the `gather` (and thus `semaphore_gather`) to re-raise that exception immediately to the caller.\n- The other coroutines are **not cancelled** \u2014 they continue running in the background. Their results/exceptions are silently discarded (a later-failing one may surface an \"exception was never retrieved\" warning).\n\nSo the failure model is \"fail-fast on the first error, no aggregation.\" If a caller needs every result regardless of individual failures, this helper doesn't provide it \u2014 they'd have to wrap each coroutine to catch its own exception, since `semaphore_gather` exposes no `return_exceptions` passthrough.\n\nOne caveat per the graph's limitations note: the snippet above is the complete definition, confirmed against the file \u2014 `_wrap_coroutine` is a nested function (which the code graph omits), so I verified it directly in source rather than relying on the index.",
+    "stop_reason": "end_turn",
+    "session_id": "72fdd895-43c6-4161-80dd-4e95a9171d01",
+    "total_cost_usd": 0.22514050000000002,
+    "usage": {
+      "input_tokens": 8023,
+      "cache_creation_input_tokens": 19286,
+      "cache_read_input_tokens": 78226,
+      "output_tokens": 1015,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 19286,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 449,
+          "output_tokens": 763,
+          "cache_read_input_tokens": 34326,
+          "cache_creation_input_tokens": 2444,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2444
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8023,
+        "outputTokens": 1015,
+        "cacheReadInputTokens": 78226,
+        "cacheCreationInputTokens": 19286,
+        "webSearchRequests": 0,
+        "costUSD": 0.22514050000000002,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "460295b5-0b95-45ea-8628-10be381fbf77"
+  },
+  "answer": "Looking at the source in `graphiti_core/helpers.py:99-109`:\n\n```python\nasync def semaphore_gather(\n    *coroutines: Coroutine,\n    max_coroutines: int | None = None,\n) -> list[Any]:\n    semaphore = asyncio.Semaphore(max_coroutines or SEMAPHORE_LIMIT)\n\n    async def _wrap_coroutine(coroutine):\n        async with semaphore:\n            return await coroutine\n\n    return await asyncio.gather(*(_wrap_coroutine(coroutine) for coroutine in coroutines))\n```\n\n## Answer\n\nThere is **no special exception handling**. Exceptions propagate normally, with two specific consequences worth noting:\n\n**1. The semaphore is always released.** The `async with semaphore` block (`helpers.py:106-107`) guarantees the slot is released even when `await coroutine` raises \u2014 `__aexit__` runs on exception just as it does on success. So a failing coroutine never leaks its concurrency permit; the limit stays intact for the remaining work.\n\n**2. The first exception propagates and the rest keep running detached.** The call is plain `asyncio.gather(...)` (`helpers.py:109`) with **no** `return_exceptions=True`. Per asyncio semantics, the default `return_exceptions=False` means:\n\n- The first coroutine to raise causes the `gather` (and thus `semaphore_gather`) to re-raise that exception immediately to the caller.\n- The other coroutines are **not cancelled** \u2014 they continue running in the background. Their results/exceptions are silently discarded (a later-failing one may surface an \"exception was never retrieved\" warning).\n\nSo the failure model is \"fail-fast on the first error, no aggregation.\" If a caller needs every result regardless of individual failures, this helper doesn't provide it \u2014 they'd have to wrap each coroutine to catch its own exception, since `semaphore_gather` exposes no `return_exceptions` passthrough.\n\nOne caveat per the graph's limitations note: the snippet above is the complete definition, confirmed against the file \u2014 `_wrap_coroutine` is a nested function (which the code graph omits), so I verified it directly in source rather than relying on the index.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "semaphore_gather is defined in graphiti_core/helpers.py",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Looking at the source in `graphiti_core/helpers.py:99-109`"
+      },
+      {
+        "fact": "Each coroutine in semaphore_gather is executed under an async with semaphore",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The `async with semaphore` block (`helpers.py:106-107`)"
+      },
+      {
+        "fact": "If a coroutine in semaphore_gather raises an exception, the semaphore\u2019s __aexit__ still runs",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "guarantees the slot is released even when `await coroutine` raises \u2014 `__aexit__` runs on exception just as it does on success"
+      },
+      {
+        "fact": "The semaphore\u2019s __aexit__ releases the slot",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "guarantees the slot is released even when `await coroutine` raises \u2014 `__aexit__` runs on exception"
+      },
+      {
+        "fact": "asyncio.gather with default return_exceptions=False re-raises exceptions to the caller",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The first coroutine to raise causes the `gather` (and thus `semaphore_gather`) to re-raise that exception immediately to the caller."
+      },
+      {
+        "fact": "asyncio.gather with default return_exceptions=False cancels any still-pending wrapped coroutines",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.8333333333333334,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 0,
+    "read": 1,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "semaphore_gather is defined in graphiti_core/helpers.py",
+    "Each coroutine in semaphore_gather is executed under an async with semaphore",
+    "If a coroutine in semaphore_gather raises an exception, the semaphore\u2019s __aexit__ still runs",
+    "The semaphore\u2019s __aexit__ releases the slot",
+    "asyncio.gather with default return_exceptions=False re-raises exceptions to the caller",
+    "asyncio.gather with default return_exceptions=False cancels any still-pending wrapped coroutines"
+  ]
+}

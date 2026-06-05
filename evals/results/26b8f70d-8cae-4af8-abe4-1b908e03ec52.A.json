@@ -1,0 +1,179 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 52847,
+    "duration_api_ms": 53719,
+    "ttft_ms": 3051,
+    "num_turns": 9,
+    "result": "I now have the full picture. Here's how the triplet insertion flow orchestrates deduplication before persisting.\n\n## Entry point: `Graphiti.add_triplet` (`graphiti_core/graphiti.py:863`)\n\nThe flow runs **sequentially in four stages** \u2014 not as a parallel task fan-out. Dedup of entities happens first, then facts, because the edge dedup depends on the resolved node UUIDs.\n\n### 1. Embedding backfill (`graphiti.py:864-869`)\nBefore any dedup, it ensures embeddings exist for the two nodes' names and the edge's fact. These are needed because node dedup uses hybrid (semantic + keyword) search.\n\n### 2. Entity deduplication \u2014 `resolve_extracted_nodes` (`graphiti.py:871-874` \u2192 `node_operations.py:179`)\nBoth `source_node` and `target_node` are passed together:\n- **Candidate gathering** (`node_operations.py:190-201`): a `semaphore_gather` runs a `NODE_HYBRID_SEARCH_RRF` search per node *in parallel* to find existing candidate nodes.\n- **LLM resolution** (`node_operations.py:243-255`): a single `dedupe_nodes` LLM call resolves all extracted nodes against candidates at once, returning a `NodeResolutions` mapping.\n- **Output** (`node_operations.py:259-291`): builds `resolved_nodes` plus a `uuid_map` (extracted UUID \u2192 resolved UUID), and filters duplicate-of edges via `filter_existing_duplicate_of_edges`.\n\n### 3. Pointer rewrite \u2014 `resolve_edge_pointers` (`graphiti.py:876`)\nThe edge's `source_node_uuid`/`target_node_uuid` are remapped through the `uuid_map` so the fact now points at the *resolved* (possibly pre-existing) nodes rather than the freshly extracted ones. This is the dependency that forces node dedup to precede edge dedup.\n\n### 4. Fact deduplication \u2014 `resolve_extracted_edge` (`graphiti.py:878-897` \u2192 `edge_operations.py:372`)\nFirst it fetches comparison sets from the DB:\n- `get_relevant_edges` \u2192 `related_edges` (dedup candidates)\n- `get_edge_invalidation_candidates` \u2192 `existing_edges` (contradiction candidates)\n\nThen `resolve_extracted_edge`:\n- Short-circuits and returns the edge unchanged if there are no related/existing edges (`edge_operations.py:380-381`).\n- Otherwise makes one `resolve_edge` LLM call (`edge_operations.py:414-418`) that simultaneously identifies **duplicate facts**, **contradicted facts**, and the **fact type**.\n- Resolves to an existing edge if a duplicate is found (appending the episode UUID), computes temporal invalidation/expiry, and returns `(resolved_edge, invalidated_edges, duplicate_edges)` (`edge_operations.py:420-488`).\n\nNote: `add_triplet` synthesizes a throwaway `EpisodicNode` (`graphiti.py:888-896`) just to satisfy the dedup signature, since there's no real episode in this path.\n\n### 5. Persistence \u2014 `add_nodes_and_edges_bulk` (`graphiti.py:899-901`)\nOnly after both dedup stages complete does it write: the resolved nodes and `[resolved_edge] + invalidated_edges` are persisted in a single bulk call.\n\n## Summary\nOrchestration is **dependency-ordered, not concurrent at the top level**: entity dedup \u2192 UUID remap \u2192 fact dedup \u2192 bulk persist. Parallelism (`semaphore_gather`) is used *within* entity dedup for candidate search, and each dedup stage collapses its decisions into a single LLM call. The edge stage must wait for the node stage because the fact's endpoints are rewritten to resolved node UUIDs before its own dedup/invalidation candidates are fetched.",
+    "stop_reason": "end_turn",
+    "session_id": "93bbe4f4-2adc-495d-8c76-083921ed932f",
+    "total_cost_usd": 0.3680905,
+    "usage": {
+      "input_tokens": 5022,
+      "cache_creation_input_tokens": 21066,
+      "cache_read_input_tokens": 276974,
+      "output_tokens": 2891,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 21066,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 131,
+          "output_tokens": 1463,
+          "cache_read_input_tokens": 36561,
+          "cache_creation_input_tokens": 1989,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1989
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 461,
+        "outputTokens": 19,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000556,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 5022,
+        "outputTokens": 2891,
+        "cacheReadInputTokens": 276974,
+        "cacheCreationInputTokens": 21066,
+        "webSearchRequests": 0,
+        "costUSD": 0.3675345,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "bcd5c746-83f2-4233-93e7-f696647d03fe"
+  },
+  "answer": "I now have the full picture. Here's how the triplet insertion flow orchestrates deduplication before persisting.\n\n## Entry point: `Graphiti.add_triplet` (`graphiti_core/graphiti.py:863`)\n\nThe flow runs **sequentially in four stages** \u2014 not as a parallel task fan-out. Dedup of entities happens first, then facts, because the edge dedup depends on the resolved node UUIDs.\n\n### 1. Embedding backfill (`graphiti.py:864-869`)\nBefore any dedup, it ensures embeddings exist for the two nodes' names and the edge's fact. These are needed because node dedup uses hybrid (semantic + keyword) search.\n\n### 2. Entity deduplication \u2014 `resolve_extracted_nodes` (`graphiti.py:871-874` \u2192 `node_operations.py:179`)\nBoth `source_node` and `target_node` are passed together:\n- **Candidate gathering** (`node_operations.py:190-201`): a `semaphore_gather` runs a `NODE_HYBRID_SEARCH_RRF` search per node *in parallel* to find existing candidate nodes.\n- **LLM resolution** (`node_operations.py:243-255`): a single `dedupe_nodes` LLM call resolves all extracted nodes against candidates at once, returning a `NodeResolutions` mapping.\n- **Output** (`node_operations.py:259-291`): builds `resolved_nodes` plus a `uuid_map` (extracted UUID \u2192 resolved UUID), and filters duplicate-of edges via `filter_existing_duplicate_of_edges`.\n\n### 3. Pointer rewrite \u2014 `resolve_edge_pointers` (`graphiti.py:876`)\nThe edge's `source_node_uuid`/`target_node_uuid` are remapped through the `uuid_map` so the fact now points at the *resolved* (possibly pre-existing) nodes rather than the freshly extracted ones. This is the dependency that forces node dedup to precede edge dedup.\n\n### 4. Fact deduplication \u2014 `resolve_extracted_edge` (`graphiti.py:878-897` \u2192 `edge_operations.py:372`)\nFirst it fetches comparison sets from the DB:\n- `get_relevant_edges` \u2192 `related_edges` (dedup candidates)\n- `get_edge_invalidation_candidates` \u2192 `existing_edges` (contradiction candidates)\n\nThen `resolve_extracted_edge`:\n- Short-circuits and returns the edge unchanged if there are no related/existing edges (`edge_operations.py:380-381`).\n- Otherwise makes one `resolve_edge` LLM call (`edge_operations.py:414-418`) that simultaneously identifies **duplicate facts**, **contradicted facts**, and the **fact type**.\n- Resolves to an existing edge if a duplicate is found (appending the episode UUID), computes temporal invalidation/expiry, and returns `(resolved_edge, invalidated_edges, duplicate_edges)` (`edge_operations.py:420-488`).\n\nNote: `add_triplet` synthesizes a throwaway `EpisodicNode` (`graphiti.py:888-896`) just to satisfy the dedup signature, since there's no real episode in this path.\n\n### 5. Persistence \u2014 `add_nodes_and_edges_bulk` (`graphiti.py:899-901`)\nOnly after both dedup stages complete does it write: the resolved nodes and `[resolved_edge] + invalidated_edges` are persisted in a single bulk call.\n\n## Summary\nOrchestration is **dependency-ordered, not concurrent at the top level**: entity dedup \u2192 UUID remap \u2192 fact dedup \u2192 bulk persist. Parallelism (`semaphore_gather`) is used *within* entity dedup for candidate search, and each dedup stage collapses its decisions into a single LLM call. The edge stage must wait for the node stage because the fact's endpoints are rewritten to resolved node UUIDs before its own dedup/invalidation candidates are fetched.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "Entity and fact de-duplication in the triplet flow takes place before the bulk write in Graphiti.add_triplet.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Only after both dedup stages complete does it write: the resolved nodes and `[resolved_edge] + invalidated_edges` are persisted in a single bulk call."
+      },
+      {
+        "fact": "Graphiti.add_triplet is defined in graphiti_core/graphiti.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "## Entry point: `Graphiti.add_triplet` (`graphiti_core/graphiti.py:863`)"
+      },
+      {
+        "fact": "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`resolve_extracted_nodes` (`graphiti.py:871-874` \u2192 `node_operations.py:179`)"
+      },
+      {
+        "fact": "resolve_extracted_nodes runs hybrid search and the dedupe_nodes.nodes LLM prompt to map each extracted EntityNode to an existing or new node.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "a `semaphore_gather` runs a `NODE_HYBRID_SEARCH_RRF` search per node *in parallel*... a single `dedupe_nodes` LLM call resolves all extracted nodes against candidates at once, returning a `NodeResolutions` mapping."
+      },
+      {
+        "fact": "resolve_extracted_nodes returns resolved_nodes and a uuid_map for edge pointer resolution.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "builds `resolved_nodes` plus a `uuid_map` (extracted UUID \u2192 resolved UUID)"
+      },
+      {
+        "fact": "resolve_edge_pointers uses a uuid_map to rewire the new edge to the deduped nodes.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Pointer rewrite \u2014 `resolve_edge_pointers` (`graphiti.py:876`)... remapped through the `uuid_map` so the fact now points at the *resolved* (possibly pre-existing) nodes"
+      },
+      {
+        "fact": "get_relevant_edges fetches relevant edge candidates.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`get_relevant_edges` \u2192 `related_edges` (dedup candidates)"
+      },
+      {
+        "fact": "get_edge_invalidation_candidates fetches invalidation edge candidates.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`get_edge_invalidation_candidates` \u2192 `existing_edges` (contradiction candidates)"
+      },
+      {
+        "fact": "resolve_extracted_edge is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`resolve_extracted_edge` (`graphiti.py:878-897` \u2192 `edge_operations.py:372`)"
+      },
+      {
+        "fact": "resolve_extracted_edge calls the dedupe_edges.resolve_edge LLM prompt to identify duplicate facts, contradictions, and fact types.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "makes one `resolve_edge` LLM call (`edge_operations.py:414-418`) that simultaneously identifies **duplicate facts**, **contradicted facts**, and the **fact type**."
+      },
+      {
+        "fact": "resolve_extracted_edge returns a single resolved_edge plus lists of invalidated and duplicate edges.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "returns `(resolved_edge, invalidated_edges, duplicate_edges)` (`edge_operations.py:420-488`)"
+      },
+      {
+        "fact": "add_nodes_and_edges_bulk persists the deduped resolved_nodes and the resolved_edge plus invalidated edges.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "the resolved nodes and `[resolved_edge] + invalidated_edges` are persisted in a single bulk call."
+      },
+      {
+        "fact": "Both node and edge resolves use semaphore_gather to parallelize searches and LLM calls.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.9230769230769231,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 5,
+    "read": 3,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "Entity and fact de-duplication in the triplet flow takes place before the bulk write in Graphiti.add_triplet.",
+    "Graphiti.add_triplet is defined in graphiti_core/graphiti.py.",
+    "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py.",
+    "resolve_extracted_nodes runs hybrid search and the dedupe_nodes.nodes LLM prompt to map each extracted EntityNode to an existing or new node.",
+    "resolve_extracted_nodes returns resolved_nodes and a uuid_map for edge pointer resolution.",
+    "resolve_edge_pointers uses a uuid_map to rewire the new edge to the deduped nodes.",
+    "get_relevant_edges fetches relevant edge candidates.",
+    "get_edge_invalidation_candidates fetches invalidation edge candidates.",
+    "resolve_extracted_edge is defined in graphiti_core/utils/maintenance/edge_operations.py.",
+    "resolve_extracted_edge calls the dedupe_edges.resolve_edge LLM prompt to identify duplicate facts, contradictions, and fact types.",
+    "resolve_extracted_edge returns a single resolved_edge plus lists of invalidated and duplicate edges.",
+    "add_nodes_and_edges_bulk persists the deduped resolved_nodes and the resolved_edge plus invalidated edges.",
+    "Both node and edge resolves use semaphore_gather to parallelize searches and LLM calls."
+  ]
+}

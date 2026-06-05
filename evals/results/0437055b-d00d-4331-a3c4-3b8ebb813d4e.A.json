@@ -1,0 +1,127 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 116828,
+    "duration_api_ms": 116701,
+    "ttft_ms": 3975,
+    "num_turns": 12,
+    "result": "Now I have the full picture. Here's the answer.\n\n## Bulk vs. single-episode ingestion: edge invalidation & date extraction\n\nThe short version is captured in `add_episode_bulk`'s own docstring (`graphiti_core/graphiti.py:578-580`):\n\n> **Important: This method does not perform edge invalidation or date extraction steps.** If these operations are required, use the `add_episode` method instead for each individual episode.\n\nHere's what that actually means in the code.\n\n### Single-episode path (`add_episode`)\n\nThe single path calls **`resolve_extracted_edges`** (`graphiti.py:489-497`), which resolves the new edges *against the persisted graph*:\n\n1. It queries the live DB for both related edges and contradiction candidates \u2014 `get_relevant_edges(...)` and `get_edge_invalidation_candidates(...)` (`edge_operations.py:260-263`).\n2. It returns a **two-tuple `(resolved_edges, invalidated_edges)`** (`edge_operations.py:320-336`). The per-edge `resolve_extracted_edge` contains the temporal logic: it reads `contradicted_facts` from the LLM (`edge_operations.py:432-434`), sets `expired_at = now` when an edge is invalidated (`edge_operations.py:463-464`), and walks the invalidation candidates sorted by `valid_at` to expire contradicted edges (`edge_operations.py:467-471+`).\n3. Back in `add_episode`, the invalidated edges are merged into the saved set: `entity_edges = resolved_edges + invalidated_edges + duplicate_of_edges` (`graphiti.py:506`), so expirations are persisted.\n\n### Bulk path (`add_episode_bulk`)\n\nThe bulk path runs only **`dedupe_edges_bulk`** (`graphiti.py:653-660`) and has an explicit **`# TODO: Resolve nodes and edges against the existing graph`** at `graphiti.py:698`. The differences:\n\n1. **No lookup against the existing graph.** `dedupe_edges_bulk` builds candidate lists only from *other edges within the same bulk batch* (`bulk_utils.py:319-347`) \u2014 it never calls `get_edge_invalidation_candidates`/`get_relevant_edges`. So edges already in the DB can never be contradicted or expired by a bulk insert.\n2. **The invalidation output is discarded.** It calls the same `resolve_extracted_edge` (`bulk_utils.py:353`), but `resolve_extracted_edge` returns a *three-tuple* `(resolved_edge, invalidated_edges, duplicates)` (`edge_operations.py:379`). The bulk code unpacks only index `[2]` \u2014 the duplicates \u2014 to build a dedup map (`bulk_utils.py:361-367`); the `invalidated_edges` list (index `[1]`) is thrown away. Nothing gets an `expired_at` set as a result.\n\n### Nuance on \"date extraction\"\n\nOne honest caveat: the *parsing* of `valid_at`/`invalid_at` from the LLM's extracted facts lives in `extract_edges` (`edge_operations.py:194-235`), and **both** paths call `extract_edges` (the bulk path via `extract_nodes_and_edges_bulk`). So per-fact date fields are populated in both.\n\nWhat bulk genuinely skips is the **temporal *invalidation/expiration*** step \u2014 comparing a new edge's dates against contradicting edges in the graph to set `expired_at`/`invalid_at` on the older edge. That logic only runs in the single path's `resolve_extracted_edges`. The docstring lumps this under \"date extraction,\" but mechanically it's the contradiction-driven expiration that's missing, not the date-field parsing.\n\n### Bottom line\n\n| | `add_episode` (single) | `add_episode_bulk` |\n|---|---|---|\n| Dedup within batch | n/a | yes (`dedupe_edges_bulk`) |\n| Resolve against existing graph | yes | **no** (TODO at `graphiti.py:698`) |\n| Contradiction / edge invalidation | yes, persisted (`graphiti.py:506`) | **no** (invalidated list discarded) |\n| Temporal expiration (`expired_at`) | yes | **no** |\n| Per-fact date parsing (`valid_at`/`invalid_at`) | yes | yes (both via `extract_edges`) |\n\nSo bulk is a faster, batch-local dedup-and-insert that trades away temporal correctness against the existing graph \u2014 if you need invalidation or temporal expiration, you must use `add_episode` per episode.",
+    "stop_reason": "end_turn",
+    "session_id": "a9eb8bab-aabf-45b1-b05a-7f82b3c08178",
+    "total_cost_usd": 0.6814627499999999,
+    "usage": {
+      "input_tokens": 8329,
+      "cache_creation_input_tokens": 36119,
+      "cache_read_input_tokens": 474648,
+      "output_tokens": 7070,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 36119,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2613,
+          "cache_read_input_tokens": 51149,
+          "cache_creation_input_tokens": 2454,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2454
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8329,
+        "outputTokens": 7070,
+        "cacheReadInputTokens": 474648,
+        "cacheCreationInputTokens": 36119,
+        "webSearchRequests": 0,
+        "costUSD": 0.6814627499999999,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "668f3806-c4c8-498c-96b5-bec2bd35705a"
+  },
+  "answer": "Now I have the full picture. Here's the answer.\n\n## Bulk vs. single-episode ingestion: edge invalidation & date extraction\n\nThe short version is captured in `add_episode_bulk`'s own docstring (`graphiti_core/graphiti.py:578-580`):\n\n> **Important: This method does not perform edge invalidation or date extraction steps.** If these operations are required, use the `add_episode` method instead for each individual episode.\n\nHere's what that actually means in the code.\n\n### Single-episode path (`add_episode`)\n\nThe single path calls **`resolve_extracted_edges`** (`graphiti.py:489-497`), which resolves the new edges *against the persisted graph*:\n\n1. It queries the live DB for both related edges and contradiction candidates \u2014 `get_relevant_edges(...)` and `get_edge_invalidation_candidates(...)` (`edge_operations.py:260-263`).\n2. It returns a **two-tuple `(resolved_edges, invalidated_edges)`** (`edge_operations.py:320-336`). The per-edge `resolve_extracted_edge` contains the temporal logic: it reads `contradicted_facts` from the LLM (`edge_operations.py:432-434`), sets `expired_at = now` when an edge is invalidated (`edge_operations.py:463-464`), and walks the invalidation candidates sorted by `valid_at` to expire contradicted edges (`edge_operations.py:467-471+`).\n3. Back in `add_episode`, the invalidated edges are merged into the saved set: `entity_edges = resolved_edges + invalidated_edges + duplicate_of_edges` (`graphiti.py:506`), so expirations are persisted.\n\n### Bulk path (`add_episode_bulk`)\n\nThe bulk path runs only **`dedupe_edges_bulk`** (`graphiti.py:653-660`) and has an explicit **`# TODO: Resolve nodes and edges against the existing graph`** at `graphiti.py:698`. The differences:\n\n1. **No lookup against the existing graph.** `dedupe_edges_bulk` builds candidate lists only from *other edges within the same bulk batch* (`bulk_utils.py:319-347`) \u2014 it never calls `get_edge_invalidation_candidates`/`get_relevant_edges`. So edges already in the DB can never be contradicted or expired by a bulk insert.\n2. **The invalidation output is discarded.** It calls the same `resolve_extracted_edge` (`bulk_utils.py:353`), but `resolve_extracted_edge` returns a *three-tuple* `(resolved_edge, invalidated_edges, duplicates)` (`edge_operations.py:379`). The bulk code unpacks only index `[2]` \u2014 the duplicates \u2014 to build a dedup map (`bulk_utils.py:361-367`); the `invalidated_edges` list (index `[1]`) is thrown away. Nothing gets an `expired_at` set as a result.\n\n### Nuance on \"date extraction\"\n\nOne honest caveat: the *parsing* of `valid_at`/`invalid_at` from the LLM's extracted facts lives in `extract_edges` (`edge_operations.py:194-235`), and **both** paths call `extract_edges` (the bulk path via `extract_nodes_and_edges_bulk`). So per-fact date fields are populated in both.\n\nWhat bulk genuinely skips is the **temporal *invalidation/expiration*** step \u2014 comparing a new edge's dates against contradicting edges in the graph to set `expired_at`/`invalid_at` on the older edge. That logic only runs in the single path's `resolve_extracted_edges`. The docstring lumps this under \"date extraction,\" but mechanically it's the contradiction-driven expiration that's missing, not the date-field parsing.\n\n### Bottom line\n\n| | `add_episode` (single) | `add_episode_bulk` |\n|---|---|---|\n| Dedup within batch | n/a | yes (`dedupe_edges_bulk`) |\n| Resolve against existing graph | yes | **no** (TODO at `graphiti.py:698`) |\n| Contradiction / edge invalidation | yes, persisted (`graphiti.py:506`) | **no** (invalidated list discarded) |\n| Temporal expiration (`expired_at`) | yes | **no** |\n| Per-fact date parsing (`valid_at`/`invalid_at`) | yes | yes (both via `extract_edges`) |\n\nSo bulk is a faster, batch-local dedup-and-insert that trades away temporal correctness against the existing graph \u2014 if you need invalidation or temporal expiration, you must use `add_episode` per episode.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "In graphiti_core/graphiti.py, the add_episode function runs resolve_extracted_edges.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "The single path calls **`resolve_extracted_edges`** (`graphiti.py:489-497`)"
+      },
+      {
+        "fact": "In graphiti_core/graphiti.py, the add_episode function collects invalidated edges.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "the invalidated edges are merged into the saved set: `entity_edges = resolved_edges + invalidated_edges + duplicate_of_edges` (`graphiti.py:506`)"
+      },
+      {
+        "fact": "In graphiti_core/graphiti.py, the add_episode function invokes extract_attributes_from_nodes.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The extract_attributes_from_nodes function includes date-field extraction.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "In graphiti_core/graphiti.py, the add_episode function writes to Neo4j.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "In graphiti_core/graphiti.py, the add_episode_bulk method does not perform edge invalidation.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "**Important: This method does not perform edge invalidation or date extraction steps.**"
+      },
+      {
+        "fact": "In graphiti_core/graphiti.py, the add_episode_bulk method does not perform date extraction steps.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This method does not perform edge invalidation or date extraction steps."
+      }
+    ],
+    "recall": 0.2857142857142857,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 4,
+    "read": 7,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "In graphiti_core/graphiti.py, the add_episode function runs resolve_extracted_edges.",
+    "In graphiti_core/graphiti.py, the add_episode function collects invalidated edges.",
+    "In graphiti_core/graphiti.py, the add_episode function invokes extract_attributes_from_nodes.",
+    "The extract_attributes_from_nodes function includes date-field extraction.",
+    "In graphiti_core/graphiti.py, the add_episode function writes to Neo4j.",
+    "In graphiti_core/graphiti.py, the add_episode_bulk method does not perform edge invalidation.",
+    "In graphiti_core/graphiti.py, the add_episode_bulk method does not perform date extraction steps."
+  ]
+}

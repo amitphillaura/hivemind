@@ -1,0 +1,221 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 46563,
+    "duration_api_ms": 47387,
+    "ttft_ms": 4214,
+    "num_turns": 8,
+    "result": "I have the full chain traced end-to-end. Here's the flow.\n\n## Entity Resolution / Deduplication Flow\n\nEntry point: `resolve_extracted_nodes()` in `graphiti_core/utils/maintenance/node_operations.py:179`, called from `Graphiti.add_episode` at `graphiti.py:468` (concurrently with edge extraction).\n\n### 1. Candidate retrieval via search \u2014 `node_operations.py:190-207`\nFor each extracted node, a hybrid search runs in parallel (`semaphore_gather`):\n- `search(query=node.name, group_ids=[node.group_id], config=NODE_HYBRID_SEARCH_RRF)` \u2014 node hybrid search using RRF (reciprocal rank fusion over semantic + BM25 + graph).\n- All returned `result.nodes` across every search are **flattened into one combined candidate pool** (`candidate_nodes`), then deduped by UUID into `existing_nodes_dict` \u2192 `existing_nodes` (`:203-211`).\n- If `existing_nodes_override` is passed, search results are ignored and the override is used directly (this is the path `add_triplet` uses, `graphiti.py:871`).\n\n### 2. Building LLM context \u2014 `node_operations.py:213-250`\n- `existing_nodes_context` \u2014 each candidate flattened to `{idx, name, entity_types, **attributes}`, indexed by position `i`.\n- `extracted_nodes_context` \u2014 each extracted node as `{id, name, entity_type, entity_type_description}` (description pulled from the Pydantic entity-type's `__doc__`).\n- Plus `episode_content` and `previous_episodes`.\n\n### 3. The deduplication prompt \u2014 `prompts/dedupe_nodes.py:106` (`nodes`)\n- System + user message asking the LLM to decide, for each extracted entity, whether it's a duplicate of any existing entity.\n- Rule: duplicates only if they refer to the *same real-world object/concept*; not if \"related but distinct.\"\n- Response is forced into `NodeResolutions` (`dedupe_nodes.py:41`), a list of `NodeDuplicate` objects, each with: `id` (the extracted entity), `duplicate_idx` (first matching candidate index, or `-1`), `name`, and `duplicates` (all matching indices).\n\n> Note: the prompt's documented JSON schema describes a *per-entity* `duplication_candidates` array, but the code actually passes one global flat `existing_nodes` list shared across all extracted entities \u2014 candidates aren't scoped per extracted node.\n\n### 4. Mapping resolutions back to nodes \u2014 `node_operations.py:257-285`\nFor each resolution:\n- `resolved_node` = the existing candidate at `duplicate_idx` if `0 <= duplicate_idx < len(existing_nodes)`, otherwise the extracted node itself (it's new/unique).\n- `resolved_nodes` collects the winning node; `uuid_map[extracted.uuid] = resolved.uuid` records the redirect so edges can be repointed later.\n- Every index in `duplicates` produces a `(resolved_node, existing_node)` tuple in `node_duplicates`.\n\n### 5. Final duplicate filtering \u2014 `node_operations.py:287-289` \u2192 `edge_operations.py:524`\n`filter_existing_duplicate_of_edges(driver, node_duplicates)`:\n- Queries the graph for `IS_DUPLICATE_OF` `RELATES_TO` edges that **already exist** between each pair.\n- Pops any pair already linked, returning only **new** duplicate relationships \u2192 `new_node_duplicates`.\n\n### 6. Downstream consumption \u2014 `graphiti.py:487-516`\n- `uuid_map` repoints extracted edges onto resolved node UUIDs (`resolve_edge_pointers`, `:487`).\n- `new_node_duplicates` \u2192 `build_duplicate_of_edges` creates `IS_DUPLICATE_OF` edges (`:504`), persisted alongside nodes/edges in `add_nodes_and_edges_bulk` (`:515`).\n\n### Flow summary\n```\nextracted_nodes\n  \u2192 parallel hybrid search (per node.name, RRF)        [step 1]\n  \u2192 flatten + dedup by UUID \u2192 existing_nodes pool      [step 1]\n  \u2192 build extracted/existing contexts                  [step 2]\n  \u2192 dedupe_nodes.nodes() prompt \u2192 NodeResolutions       [step 3]\n  \u2192 map: duplicate_idx \u2192 resolved_node, uuid_map,       [step 4]\n         duplicates \u2192 node_duplicates tuples\n  \u2192 filter_existing_duplicate_of_edges (drop pairs      [step 5]\n         already linked in graph) \u2192 new_node_duplicates\n  \u2192 returns (resolved_nodes, uuid_map, new_node_duplicates)\n  \u2192 edges repointed via uuid_map; IS_DUPLICATE_OF       [step 6]\n         edges built + persisted\n```\n\nNote there's a *separate* batch path \u2014 `dedupe_node_list()` (`node_operations.py:381`) using the `node_list` prompt \u2014 which clusters a flat node list into UUID groups; that's used by bulk ingestion, not the per-episode `add_episode` flow above.",
+    "stop_reason": "end_turn",
+    "session_id": "b70c71b4-477b-465e-9b98-95574f6b7cf9",
+    "total_cost_usd": 0.35094899999999996,
+    "usage": {
+      "input_tokens": 4559,
+      "cache_creation_input_tokens": 26904,
+      "cache_read_input_tokens": 158200,
+      "output_tokens": 3214,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 26904,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 131,
+          "output_tokens": 1763,
+          "cache_read_input_tokens": 43267,
+          "cache_creation_input_tokens": 1121,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1121
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 469,
+        "outputTokens": 17,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000554,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 4559,
+        "outputTokens": 3214,
+        "cacheReadInputTokens": 158200,
+        "cacheCreationInputTokens": 26904,
+        "webSearchRequests": 0,
+        "costUSD": 0.35039499999999996,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "546eac00-50a7-479a-8e12-7ba4734a6299"
+  },
+  "answer": "I have the full chain traced end-to-end. Here's the flow.\n\n## Entity Resolution / Deduplication Flow\n\nEntry point: `resolve_extracted_nodes()` in `graphiti_core/utils/maintenance/node_operations.py:179`, called from `Graphiti.add_episode` at `graphiti.py:468` (concurrently with edge extraction).\n\n### 1. Candidate retrieval via search \u2014 `node_operations.py:190-207`\nFor each extracted node, a hybrid search runs in parallel (`semaphore_gather`):\n- `search(query=node.name, group_ids=[node.group_id], config=NODE_HYBRID_SEARCH_RRF)` \u2014 node hybrid search using RRF (reciprocal rank fusion over semantic + BM25 + graph).\n- All returned `result.nodes` across every search are **flattened into one combined candidate pool** (`candidate_nodes`), then deduped by UUID into `existing_nodes_dict` \u2192 `existing_nodes` (`:203-211`).\n- If `existing_nodes_override` is passed, search results are ignored and the override is used directly (this is the path `add_triplet` uses, `graphiti.py:871`).\n\n### 2. Building LLM context \u2014 `node_operations.py:213-250`\n- `existing_nodes_context` \u2014 each candidate flattened to `{idx, name, entity_types, **attributes}`, indexed by position `i`.\n- `extracted_nodes_context` \u2014 each extracted node as `{id, name, entity_type, entity_type_description}` (description pulled from the Pydantic entity-type's `__doc__`).\n- Plus `episode_content` and `previous_episodes`.\n\n### 3. The deduplication prompt \u2014 `prompts/dedupe_nodes.py:106` (`nodes`)\n- System + user message asking the LLM to decide, for each extracted entity, whether it's a duplicate of any existing entity.\n- Rule: duplicates only if they refer to the *same real-world object/concept*; not if \"related but distinct.\"\n- Response is forced into `NodeResolutions` (`dedupe_nodes.py:41`), a list of `NodeDuplicate` objects, each with: `id` (the extracted entity), `duplicate_idx` (first matching candidate index, or `-1`), `name`, and `duplicates` (all matching indices).\n\n> Note: the prompt's documented JSON schema describes a *per-entity* `duplication_candidates` array, but the code actually passes one global flat `existing_nodes` list shared across all extracted entities \u2014 candidates aren't scoped per extracted node.\n\n### 4. Mapping resolutions back to nodes \u2014 `node_operations.py:257-285`\nFor each resolution:\n- `resolved_node` = the existing candidate at `duplicate_idx` if `0 <= duplicate_idx < len(existing_nodes)`, otherwise the extracted node itself (it's new/unique).\n- `resolved_nodes` collects the winning node; `uuid_map[extracted.uuid] = resolved.uuid` records the redirect so edges can be repointed later.\n- Every index in `duplicates` produces a `(resolved_node, existing_node)` tuple in `node_duplicates`.\n\n### 5. Final duplicate filtering \u2014 `node_operations.py:287-289` \u2192 `edge_operations.py:524`\n`filter_existing_duplicate_of_edges(driver, node_duplicates)`:\n- Queries the graph for `IS_DUPLICATE_OF` `RELATES_TO` edges that **already exist** between each pair.\n- Pops any pair already linked, returning only **new** duplicate relationships \u2192 `new_node_duplicates`.\n\n### 6. Downstream consumption \u2014 `graphiti.py:487-516`\n- `uuid_map` repoints extracted edges onto resolved node UUIDs (`resolve_edge_pointers`, `:487`).\n- `new_node_duplicates` \u2192 `build_duplicate_of_edges` creates `IS_DUPLICATE_OF` edges (`:504`), persisted alongside nodes/edges in `add_nodes_and_edges_bulk` (`:515`).\n\n### Flow summary\n```\nextracted_nodes\n  \u2192 parallel hybrid search (per node.name, RRF)        [step 1]\n  \u2192 flatten + dedup by UUID \u2192 existing_nodes pool      [step 1]\n  \u2192 build extracted/existing contexts                  [step 2]\n  \u2192 dedupe_nodes.nodes() prompt \u2192 NodeResolutions       [step 3]\n  \u2192 map: duplicate_idx \u2192 resolved_node, uuid_map,       [step 4]\n         duplicates \u2192 node_duplicates tuples\n  \u2192 filter_existing_duplicate_of_edges (drop pairs      [step 5]\n         already linked in graph) \u2192 new_node_duplicates\n  \u2192 returns (resolved_nodes, uuid_map, new_node_duplicates)\n  \u2192 edges repointed via uuid_map; IS_DUPLICATE_OF       [step 6]\n         edges built + persisted\n```\n\nNote there's a *separate* batch path \u2014 `dedupe_node_list()` (`node_operations.py:381`) using the `node_list` prompt \u2014 which clusters a flat node list into UUID groups; that's used by bulk ingestion, not the per-episode `add_episode` flow above.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`resolve_extracted_nodes()` in `graphiti_core/utils/maintenance/node_operations.py:179`"
+      },
+      {
+        "fact": "resolve_extracted_nodes iterates over each extracted EntityNode",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "For each extracted node, a hybrid search runs in parallel"
+      },
+      {
+        "fact": "resolve_extracted_nodes calls search(...) with NODE_HYBRID_SEARCH_RRF to retrieve candidate_nodes for each extracted EntityNode",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`search(query=node.name, group_ids=[node.group_id], config=NODE_HYBRID_SEARCH_RRF)` \u2014 node hybrid search using RRF ... into one combined candidate pool (`candidate_nodes`)"
+      },
+      {
+        "fact": "resolve_extracted_nodes builds existing_nodes_context from the search results",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`existing_nodes_context` \u2014 each candidate flattened to `{idx, name, entity_types, **attributes}`"
+      },
+      {
+        "fact": "resolve_extracted_nodes builds extracted_nodes_context",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`extracted_nodes_context` \u2014 each extracted node as `{id, name, entity_type, entity_type_description}`"
+      },
+      {
+        "fact": "resolve_extracted_nodes invokes llm_client.generate_response with prompt_library.dedupe_nodes.node(context) and response_model NodeResolutions",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "dedupe_nodes.nodes() prompt \u2192 NodeResolutions ... Response is forced into `NodeResolutions`"
+      },
+      {
+        "fact": "The NodeDuplicate schema is located in graphiti_core/prompts/dedupe_nodes.py",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Response is forced into `NodeResolutions` (`dedupe_nodes.py:41`), a list of `NodeDuplicate` objects"
+      },
+      {
+        "fact": "The LLM returns a list of entity_resolutions",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "a list of `NodeDuplicate` objects, each with ... For each resolution:"
+      },
+      {
+        "fact": "Each entity_resolution includes id, duplicate_idx, name, and duplicates",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "each with: `id` (the extracted entity), `duplicate_idx` ..., `name`, and `duplicates`"
+      },
+      {
+        "fact": "The code maps each entity_resolution.id to its extracted_node",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`id` (the extracted entity)"
+      },
+      {
+        "fact": "The code checks if entity_resolution.duplicate_idx is greater than or equal to zero",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "if `0 <= duplicate_idx < len(existing_nodes)`"
+      },
+      {
+        "fact": "If entity_resolution.duplicate_idx is greater than or equal to zero, the code selects the corresponding existing_node",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`resolved_node` = the existing candidate at `duplicate_idx` if `0 <= duplicate_idx < len(existing_nodes)`"
+      },
+      {
+        "fact": "If entity_resolution.duplicate_idx is less than zero, the code retains the extracted_node",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "otherwise the extracted node itself (it's new/unique)"
+      },
+      {
+        "fact": "The code populates resolved_nodes",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`resolved_nodes` collects the winning node"
+      },
+      {
+        "fact": "The code populates uuid_map",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`uuid_map[extracted.uuid] = resolved.uuid` records the redirect"
+      },
+      {
+        "fact": "The code collects raw duplicate pairs (resolved_node, existing_node) from entity_resolution.duplicates",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Every index in `duplicates` produces a `(resolved_node, existing_node)` tuple in `node_duplicates`"
+      },
+      {
+        "fact": "resolve_extracted_nodes calls filter_existing_duplicate_of_edges(driver, node_duplicates)",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "`filter_existing_duplicate_of_edges(driver, node_duplicates)`"
+      },
+      {
+        "fact": "filter_existing_duplicate_of_edges removes duplicates implied by existing edges",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "Queries the graph for `IS_DUPLICATE_OF` `RELATES_TO` edges that **already exist** between each pair. Pops any pair already linked"
+      },
+      {
+        "fact": "resolve_extracted_nodes returns a tuple (resolved_nodes, uuid_map, new_node_duplicates)",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "returns (resolved_nodes, uuid_map, new_node_duplicates)"
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 3,
+    "read": 3,
+    "glob": 1,
+    "bash": 0
+  },
+  "gold_facts": [
+    "resolve_extracted_nodes is defined in graphiti_core/utils/maintenance/node_operations.py",
+    "resolve_extracted_nodes iterates over each extracted EntityNode",
+    "resolve_extracted_nodes calls search(...) with NODE_HYBRID_SEARCH_RRF to retrieve candidate_nodes for each extracted EntityNode",
+    "resolve_extracted_nodes builds existing_nodes_context from the search results",
+    "resolve_extracted_nodes builds extracted_nodes_context",
+    "resolve_extracted_nodes invokes llm_client.generate_response with prompt_library.dedupe_nodes.node(context) and response_model NodeResolutions",
+    "The NodeDuplicate schema is located in graphiti_core/prompts/dedupe_nodes.py",
+    "The LLM returns a list of entity_resolutions",
+    "Each entity_resolution includes id, duplicate_idx, name, and duplicates",
+    "The code maps each entity_resolution.id to its extracted_node",
+    "The code checks if entity_resolution.duplicate_idx is greater than or equal to zero",
+    "If entity_resolution.duplicate_idx is greater than or equal to zero, the code selects the corresponding existing_node",
+    "If entity_resolution.duplicate_idx is less than zero, the code retains the extracted_node",
+    "The code populates resolved_nodes",
+    "The code populates uuid_map",
+    "The code collects raw duplicate pairs (resolved_node, existing_node) from entity_resolution.duplicates",
+    "resolve_extracted_nodes calls filter_existing_duplicate_of_edges(driver, node_duplicates)",
+    "filter_existing_duplicate_of_edges removes duplicates implied by existing edges",
+    "resolve_extracted_nodes returns a tuple (resolved_nodes, uuid_map, new_node_duplicates)"
+  ]
+}

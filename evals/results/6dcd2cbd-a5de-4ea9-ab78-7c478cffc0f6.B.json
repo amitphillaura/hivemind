@@ -1,0 +1,176 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 89165,
+    "duration_api_ms": 88635,
+    "ttft_ms": 6922,
+    "num_turns": 17,
+    "result": "I've traced the full path with evidence at each hop. Here's the flow.\n\n## Trace: message UUID \u2192 edge result\n\n### 1. Ingestion endpoint accepts the UUID\nA message arrives at `POST /messages`. The `Message` DTO carries an **optional** `uuid`:\n\n- `server/graph_service/dto/common.py:15` \u2014 `uuid: str | None = Field(default=None, ...)`\n\nThe handler queues one task per message, passing that UUID straight into the core:\n\n- `server/graph_service/routers/ingest.py:56-65` \u2014 `await graphiti.add_episode(uuid=m.uuid, ...)`\n\n### 2. The message UUID *becomes the episode's UUID*\nIn `add_episode`, the `uuid` arg decides whether an existing episode is loaded or a new one is created:\n\n- `graphiti_core/graphiti.py:438-451` \u2014\n  ```python\n  episode = (\n      await EpisodicNode.get_by_uuid(self.driver, uuid)   # uuid provided\n      if uuid is not None\n      else EpisodicNode(name=name, ...)                   # uuid None \u2192 auto uuid4\n  )\n  ```\n\nSo if the client supplied `m.uuid`, that string is the `EpisodicNode.uuid`. If `None`, the episode gets a fresh `uuid4`. **From here on, the \"message UUID\" lives as `episode.uuid`.**\n\n### 3. Edges record the episode UUID in their `episodes` list\nDuring extraction, every new `EntityEdge` is stamped with the episode UUID:\n\n- `graphiti_core/utils/maintenance/edge_operations.py:232` \u2014 `episodes=[episode.uuid]`\n\nAnd when an extracted edge dedupes onto an already-existing edge, the episode UUID is appended rather than replaced:\n\n- `graphiti_core/utils/maintenance/edge_operations.py:430` \u2014 `resolved_edge.episodes.append(episode.uuid)`\n\nBack in `add_episode`, the reverse pointer is also set on the episode, then everything is persisted in bulk:\n\n- `graphiti_core/graphiti.py:510` \u2014 `episode.entity_edges = [edge.uuid for edge in entity_edges]`\n- `graphiti_core/graphiti.py:515-517` \u2014 `add_nodes_and_edges_bulk(...)`\n\nThe `episodes` list is written as an edge property by the save query:\n\n- `graphiti_core/edges.py:245` \u2014 `'episodes': self.episodes` in `ENTITY_EDGE_SAVE`'s `edge_data`\n\n### 4. Retrieval reads the edge back (UUID round-trips)\n`POST /search` calls `graphiti.search(...)`, which returns `list[EntityEdge]`:\n\n- `server/graph_service/routers/retrieve.py:18-24`\n- `graphiti_core/graphiti.py:750-807` \u2014 returns `(...).edges`\n\nThe Cypher return clause explicitly re-reads the episodes list, and the record hydrator restores it onto the object:\n\n- `graphiti_core/edges.py:49` \u2014 `e.episodes AS episodes`\n- `graphiti_core/edges.py:461` \u2014 `episodes=record['episodes']` in `get_entity_edge_from_record`\n\n### 5. The edge becomes a `FactResult`\nFinally each edge is mapped to the API response object:\n\n- `server/graph_service/zep_graphiti.py:102-111` \u2014 `get_fact_result_from_edge(edge)` \u2192 `FactResult(uuid=edge.uuid, ...)`\n\n## The important catch\n\nThere are **two distinct UUIDs**, and they don't survive the same way:\n\n| UUID | Where it lives at retrieval |\n|------|------------------------------|\n| **Message/episode UUID** (the one the client submitted) | Only inside `EntityEdge.episodes` (`edges.py:196-199`) \u2014 a list of episode IDs that reference the edge. |\n| **Edge UUID** (auto-generated `uuid4`, `edges.py:58`) | This is what `FactResult.uuid` exposes (`zep_graphiti.py:104`). |\n\nSo the message's UUID **does** round-trip end-to-end into the stored edge (as a member of `episodes`), but it is **not surfaced** in the `/search` response \u2014 `FactResult` (`server/graph_service/dto/retrieve.py:16-26`) carries the *edge's* uuid and has no `episodes` field. The only way to recover the originating message UUID from a retrieved edge is via the full `EntityEdge` object's `episodes` list, which the server's `FactResult` projection drops.\n\nIf your goal is to follow a specific message UUID all the way to a search hit, the link is: `m.uuid` \u2192 `episode.uuid` \u2192 `EntityEdge.episodes[]` \u2014 and you'd need to query the edge's `episodes` property (e.g. via `get_entity_edge` returning the full edge, not the `FactResult` facts list) to see it.",
+    "stop_reason": "end_turn",
+    "session_id": "2d76d9d5-5e44-47a6-8c4c-52462d0ff6d2",
+    "total_cost_usd": 0.6131840000000001,
+    "usage": {
+      "input_tokens": 8273,
+      "cache_creation_input_tokens": 40306,
+      "cache_read_input_tokens": 359013,
+      "output_tokens": 5616,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 40306,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2550,
+          "cache_read_input_tokens": 55749,
+          "cache_creation_input_tokens": 2041,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2041
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8273,
+        "outputTokens": 5616,
+        "cacheReadInputTokens": 359013,
+        "cacheCreationInputTokens": 40306,
+        "webSearchRequests": 0,
+        "costUSD": 0.6131840000000001,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "b5766b0e-1f86-4e76-9299-3cc535c54695"
+  },
+  "answer": "I've traced the full path with evidence at each hop. Here's the flow.\n\n## Trace: message UUID \u2192 edge result\n\n### 1. Ingestion endpoint accepts the UUID\nA message arrives at `POST /messages`. The `Message` DTO carries an **optional** `uuid`:\n\n- `server/graph_service/dto/common.py:15` \u2014 `uuid: str | None = Field(default=None, ...)`\n\nThe handler queues one task per message, passing that UUID straight into the core:\n\n- `server/graph_service/routers/ingest.py:56-65` \u2014 `await graphiti.add_episode(uuid=m.uuid, ...)`\n\n### 2. The message UUID *becomes the episode's UUID*\nIn `add_episode`, the `uuid` arg decides whether an existing episode is loaded or a new one is created:\n\n- `graphiti_core/graphiti.py:438-451` \u2014\n  ```python\n  episode = (\n      await EpisodicNode.get_by_uuid(self.driver, uuid)   # uuid provided\n      if uuid is not None\n      else EpisodicNode(name=name, ...)                   # uuid None \u2192 auto uuid4\n  )\n  ```\n\nSo if the client supplied `m.uuid`, that string is the `EpisodicNode.uuid`. If `None`, the episode gets a fresh `uuid4`. **From here on, the \"message UUID\" lives as `episode.uuid`.**\n\n### 3. Edges record the episode UUID in their `episodes` list\nDuring extraction, every new `EntityEdge` is stamped with the episode UUID:\n\n- `graphiti_core/utils/maintenance/edge_operations.py:232` \u2014 `episodes=[episode.uuid]`\n\nAnd when an extracted edge dedupes onto an already-existing edge, the episode UUID is appended rather than replaced:\n\n- `graphiti_core/utils/maintenance/edge_operations.py:430` \u2014 `resolved_edge.episodes.append(episode.uuid)`\n\nBack in `add_episode`, the reverse pointer is also set on the episode, then everything is persisted in bulk:\n\n- `graphiti_core/graphiti.py:510` \u2014 `episode.entity_edges = [edge.uuid for edge in entity_edges]`\n- `graphiti_core/graphiti.py:515-517` \u2014 `add_nodes_and_edges_bulk(...)`\n\nThe `episodes` list is written as an edge property by the save query:\n\n- `graphiti_core/edges.py:245` \u2014 `'episodes': self.episodes` in `ENTITY_EDGE_SAVE`'s `edge_data`\n\n### 4. Retrieval reads the edge back (UUID round-trips)\n`POST /search` calls `graphiti.search(...)`, which returns `list[EntityEdge]`:\n\n- `server/graph_service/routers/retrieve.py:18-24`\n- `graphiti_core/graphiti.py:750-807` \u2014 returns `(...).edges`\n\nThe Cypher return clause explicitly re-reads the episodes list, and the record hydrator restores it onto the object:\n\n- `graphiti_core/edges.py:49` \u2014 `e.episodes AS episodes`\n- `graphiti_core/edges.py:461` \u2014 `episodes=record['episodes']` in `get_entity_edge_from_record`\n\n### 5. The edge becomes a `FactResult`\nFinally each edge is mapped to the API response object:\n\n- `server/graph_service/zep_graphiti.py:102-111` \u2014 `get_fact_result_from_edge(edge)` \u2192 `FactResult(uuid=edge.uuid, ...)`\n\n## The important catch\n\nThere are **two distinct UUIDs**, and they don't survive the same way:\n\n| UUID | Where it lives at retrieval |\n|------|------------------------------|\n| **Message/episode UUID** (the one the client submitted) | Only inside `EntityEdge.episodes` (`edges.py:196-199`) \u2014 a list of episode IDs that reference the edge. |\n| **Edge UUID** (auto-generated `uuid4`, `edges.py:58`) | This is what `FactResult.uuid` exposes (`zep_graphiti.py:104`). |\n\nSo the message's UUID **does** round-trip end-to-end into the stored edge (as a member of `episodes`), but it is **not surfaced** in the `/search` response \u2014 `FactResult` (`server/graph_service/dto/retrieve.py:16-26`) carries the *edge's* uuid and has no `episodes` field. The only way to recover the originating message UUID from a retrieved edge is via the full `EntityEdge` object's `episodes` list, which the server's `FactResult` projection drops.\n\nIf your goal is to follow a specific message UUID all the way to a search hit, the link is: `m.uuid` \u2192 `episode.uuid` \u2192 `EntityEdge.episodes[]` \u2014 and you'd need to query the edge's `episodes` property (e.g. via `get_entity_edge` returning the full edge, not the `FactResult` facts list) to see it.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The add_messages_task function in server/graph_service/routers/ingest.py extracts the message UUID m.uuid from the request.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "`server/graph_service/routers/ingest.py:56-65` \u2014 `await graphiti.add_episode(uuid=m.uuid, ...)`"
+      },
+      {
+        "fact": "The add_messages_task function in server/graph_service/routers/ingest.py calls await graphiti.add_episode with uuid=m.uuid.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "`server/graph_service/routers/ingest.py:56-65` \u2014 `await graphiti.add_episode(uuid=m.uuid, ...)`"
+      },
+      {
+        "fact": "The add_episode method in the Graphiti client constructs an Episode node by calling Episode.save(driver).",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The Episode.save(driver) method is defined in graphiti_core/nodes.py.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The Episode.save(driver) method runs a Cypher MERGE/CREATE query with the supplied uuid.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "When edges are created to link an episode to a conversation or parent entity, they are instantiated as subclasses of Edge.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Edge subclasses are persisted via their save(driver) methods in graphiti_core/edges.py.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The save(driver) methods for Edge subclasses embed the same UUIDs.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "`graphiti_core/edges.py:245` \u2014 `'episodes': self.episodes` in `ENTITY_EDGE_SAVE`'s `edge_data`"
+      },
+      {
+        "fact": "A GET request to /entity/{uuid}/edge in server/graph_service/routers/retrieve.py invokes await graphiti.get_entity_edge(uuid).",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The get_entity_edge method on the Graphiti client calls Edge.get_by_uuid(driver, uuid).",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The Edge.get_by_uuid(driver, uuid) method is defined in graphiti_core/edges.py.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The Edge.get_by_uuid(driver, uuid) method runs a Cypher MATCH query on the uuid to load the edge.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The get_fact_result_from_edge function converts the resulting Edge model to the API schema.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "`server/graph_service/zep_graphiti.py:102-111` \u2014 `get_fact_result_from_edge(edge)` \u2192 `FactResult(uuid=edge.uuid, ...)`"
+      },
+      {
+        "fact": "The converted Edge model is returned to the client.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "Finally each edge is mapped to the API response object: `server/graph_service/zep_graphiti.py:102-111` \u2014 `get_fact_result_from_edge(edge)` \u2192 `FactResult(uuid=edge.uuid, ...)`"
+      }
+    ],
+    "recall": 0.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 3,
+    "grep": 0,
+    "read": 10,
+    "glob": 0,
+    "bash": 6
+  },
+  "gold_facts": [
+    "The add_messages_task function in server/graph_service/routers/ingest.py extracts the message UUID m.uuid from the request.",
+    "The add_messages_task function in server/graph_service/routers/ingest.py calls await graphiti.add_episode with uuid=m.uuid.",
+    "The add_episode method in the Graphiti client constructs an Episode node by calling Episode.save(driver).",
+    "The Episode.save(driver) method is defined in graphiti_core/nodes.py.",
+    "The Episode.save(driver) method runs a Cypher MERGE/CREATE query with the supplied uuid.",
+    "When edges are created to link an episode to a conversation or parent entity, they are instantiated as subclasses of Edge.",
+    "Edge subclasses are persisted via their save(driver) methods in graphiti_core/edges.py.",
+    "The save(driver) methods for Edge subclasses embed the same UUIDs.",
+    "A GET request to /entity/{uuid}/edge in server/graph_service/routers/retrieve.py invokes await graphiti.get_entity_edge(uuid).",
+    "The get_entity_edge method on the Graphiti client calls Edge.get_by_uuid(driver, uuid).",
+    "The Edge.get_by_uuid(driver, uuid) method is defined in graphiti_core/edges.py.",
+    "The Edge.get_by_uuid(driver, uuid) method runs a Cypher MATCH query on the uuid to load the edge.",
+    "The get_fact_result_from_edge function converts the resulting Edge model to the API schema.",
+    "The converted Edge model is returned to the client."
+  ]
+}

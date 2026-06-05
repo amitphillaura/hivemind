@@ -1,0 +1,109 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 12316,
+    "duration_api_ms": 13512,
+    "ttft_ms": 2026,
+    "num_turns": 3,
+    "result": "A `ValueError` with the message `'Empty embedding values returned'`.\n\nIn `graphiti_core/embedder/gemini.py:149-150`, during batch processing:\n\n```python\nfor embedding in result.embeddings:\n    if not embedding.values:\n        raise ValueError('Empty embedding values returned')\n```\n\nThe same `ValueError` is also raised in the individual-processing fallback path at `gemini.py:168-169`.",
+    "stop_reason": "end_turn",
+    "session_id": "aa92b9aa-4e92-422f-8cf3-abab250d46cd",
+    "total_cost_usd": 0.161637,
+    "usage": {
+      "input_tokens": 4876,
+      "cache_creation_input_tokens": 13998,
+      "cache_read_input_tokens": 74437,
+      "output_tokens": 481,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 13998,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 904,
+          "output_tokens": 141,
+          "cache_read_input_tokens": 30669,
+          "cache_creation_input_tokens": 813,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 813
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 451,
+        "outputTokens": 15,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.000526,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 4876,
+        "outputTokens": 481,
+        "cacheReadInputTokens": 74437,
+        "cacheCreationInputTokens": 13998,
+        "webSearchRequests": 0,
+        "costUSD": 0.161111,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "32adbb90-8fcf-45b9-8f00-89803dae35c9"
+  },
+  "answer": "A `ValueError` with the message `'Empty embedding values returned'`.\n\nIn `graphiti_core/embedder/gemini.py:149-150`, during batch processing:\n\n```python\nfor embedding in result.embeddings:\n    if not embedding.values:\n        raise ValueError('Empty embedding values returned')\n```\n\nThe same `ValueError` is also raised in the individual-processing fallback path at `gemini.py:168-169`.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "GeminiEmbedder.create_batch is defined in the file graphiti_core/embedder/gemini.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "In `graphiti_core/embedder/gemini.py:149-150`, during batch processing:"
+      },
+      {
+        "fact": "In GeminiEmbedder.create_batch, if embedding.values is empty in the batch response, the method raises a ValueError.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "if not embedding.values:\n        raise ValueError('Empty embedding values returned')"
+      },
+      {
+        "fact": "The ValueError raised by GeminiEmbedder.create_batch has the message \"Empty embedding values returned\".",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "A `ValueError` with the message `'Empty embedding values returned'`."
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 1,
+    "read": 1,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "GeminiEmbedder.create_batch is defined in the file graphiti_core/embedder/gemini.py.",
+    "In GeminiEmbedder.create_batch, if embedding.values is empty in the batch response, the method raises a ValueError.",
+    "The ValueError raised by GeminiEmbedder.create_batch has the message \"Empty embedding values returned\"."
+  ]
+}

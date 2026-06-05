@@ -1,0 +1,120 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 19724,
+    "duration_api_ms": 18834,
+    "ttft_ms": 4590,
+    "num_turns": 4,
+    "result": "The variant is **`Graphiti.add_episode_bulk`**, defined in `graphiti_core/graphiti.py:537`.\n\nIt processes multiple episodes in one batch operation, and its docstring states this explicitly at `graphiti_core/graphiti.py:578-580`:\n\n> **Important: This method does not perform edge invalidation or date extraction steps. If these operations are required, use the `add_episode` method instead for each individual episode.**\n\nThe contrast is with `Graphiti.add_episode` (the single-episode variant at `graphiti_core/graphiti.py`), which does perform edge invalidation and temporal date extraction. `add_episode_bulk` instead runs a streamlined pipeline \u2014 save episodes, extract nodes/edges in bulk, dedupe in memory, and persist \u2014 without those two steps, trading temporal accuracy for batch efficiency.\n\n(Note: I did not run a multi-agent Workflow here \u2014 \"workflow\" in your question referred to the episode-addition code path, and this was a direct lookup. If you did want a multi-agent run, let me know.)",
+    "stop_reason": "end_turn",
+    "session_id": "576bddd7-e1b2-4a87-b71d-8fd4b4e57442",
+    "total_cost_usd": 0.251509,
+    "usage": {
+      "input_tokens": 8743,
+      "cache_creation_input_tokens": 19960,
+      "cache_read_input_tokens": 113338,
+      "output_tokens": 1055,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 19960,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 676,
+          "output_tokens": 355,
+          "cache_read_input_tokens": 34830,
+          "cache_creation_input_tokens": 2614,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2614
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8743,
+        "outputTokens": 1055,
+        "cacheReadInputTokens": 113338,
+        "cacheCreationInputTokens": 19960,
+        "webSearchRequests": 0,
+        "costUSD": 0.251509,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "da2c0e85-c7a3-405d-a933-2c146091a4d8"
+  },
+  "answer": "The variant is **`Graphiti.add_episode_bulk`**, defined in `graphiti_core/graphiti.py:537`.\n\nIt processes multiple episodes in one batch operation, and its docstring states this explicitly at `graphiti_core/graphiti.py:578-580`:\n\n> **Important: This method does not perform edge invalidation or date extraction steps. If these operations are required, use the `add_episode` method instead for each individual episode.**\n\nThe contrast is with `Graphiti.add_episode` (the single-episode variant at `graphiti_core/graphiti.py`), which does perform edge invalidation and temporal date extraction. `add_episode_bulk` instead runs a streamlined pipeline \u2014 save episodes, extract nodes/edges in bulk, dedupe in memory, and persist \u2014 without those two steps, trading temporal accuracy for batch efficiency.\n\n(Note: I did not run a multi-agent Workflow here \u2014 \"workflow\" in your question referred to the episode-addition code path, and this was a direct lookup. If you did want a multi-agent run, let me know.)",
+  "grade": {
+    "facts": [
+      {
+        "fact": "The bulk\u2010add workflow is the Graphiti.add_episode_bulk method.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "The variant is **`Graphiti.add_episode_bulk`**"
+      },
+      {
+        "fact": "The Graphiti.add_episode_bulk method is defined in graphiti_core/graphiti.py.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "defined in `graphiti_core/graphiti.py:537`"
+      },
+      {
+        "fact": "The Graphiti.add_episode_bulk method processes a list of RawEpisode in one batch.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "It processes multiple episodes in one batch operation"
+      },
+      {
+        "fact": "The Graphiti.add_episode_bulk method does not perform edge invalidation.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This method does not perform edge invalidation or date extraction steps"
+      },
+      {
+        "fact": "The Graphiti.add_episode_bulk method does not perform date extraction.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This method does not perform edge invalidation or date extraction steps"
+      },
+      {
+        "fact": "The add_episode method should be used for edge invalidation or date extraction.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "If these operations are required, use the `add_episode` method instead for each individual episode."
+      }
+    ],
+    "recall": 1.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 1,
+    "read": 1,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "The bulk\u2010add workflow is the Graphiti.add_episode_bulk method.",
+    "The Graphiti.add_episode_bulk method is defined in graphiti_core/graphiti.py.",
+    "The Graphiti.add_episode_bulk method processes a list of RawEpisode in one batch.",
+    "The Graphiti.add_episode_bulk method does not perform edge invalidation.",
+    "The Graphiti.add_episode_bulk method does not perform date extraction.",
+    "The add_episode method should be used for edge invalidation or date extraction."
+  ]
+}

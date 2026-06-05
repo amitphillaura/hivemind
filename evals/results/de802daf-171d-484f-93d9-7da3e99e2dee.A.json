@@ -1,0 +1,106 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 30076,
+    "duration_api_ms": 29991,
+    "ttft_ms": 2142,
+    "num_turns": 9,
+    "result": "The answer is the **`fact`** attribute.\n\nIn `tests/test_graphiti_int.py`, the `test_graphiti_init` test runs a search and then logs the results:\n\n```python\nresults = await graphiti.search_(query='Who is Tania?', search_filter=search_filter)\npretty_results = search_results_to_context_string(results)\nlogger.info(pretty_results)\n```\n\n`search_results_to_context_string` (in `graphiti_core/search/search_helpers.py:30-37`) iterates over the returned `EntityEdge` objects (`search_results.edges`) and extracts `edge.fact` as the primary content (alongside `valid_at`/`invalid_at` dates):\n\n```python\nfact_json = [\n    {\n        'fact': edge.fact,\n        'valid_at': str(edge.valid_at),\n        'invalid_at': str(edge.invalid_at or 'Present'),\n    }\n    for edge in search_results.edges\n]\n```\n\nSo the EntityEdge attribute extracted for logging is **`fact`**.",
+    "stop_reason": "end_turn",
+    "session_id": "86ac7e2f-5adf-427d-b0af-72baad9843cc",
+    "total_cost_usd": 0.33150099999999993,
+    "usage": {
+      "input_tokens": 7743,
+      "cache_creation_input_tokens": 21578,
+      "cache_read_input_tokens": 223747,
+      "output_tokens": 1842,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 21578,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 461,
+          "cache_read_input_tokens": 37726,
+          "cache_creation_input_tokens": 1336,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1336
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 7743,
+        "outputTokens": 1842,
+        "cacheReadInputTokens": 223747,
+        "cacheCreationInputTokens": 21578,
+        "webSearchRequests": 0,
+        "costUSD": 0.33150099999999993,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "11c30bf7-7041-4587-88d2-c558c1032851"
+  },
+  "answer": "The answer is the **`fact`** attribute.\n\nIn `tests/test_graphiti_int.py`, the `test_graphiti_init` test runs a search and then logs the results:\n\n```python\nresults = await graphiti.search_(query='Who is Tania?', search_filter=search_filter)\npretty_results = search_results_to_context_string(results)\nlogger.info(pretty_results)\n```\n\n`search_results_to_context_string` (in `graphiti_core/search/search_helpers.py:30-37`) iterates over the returned `EntityEdge` objects (`search_results.edges`) and extracts `edge.fact` as the primary content (alongside `valid_at`/`invalid_at` dates):\n\n```python\nfact_json = [\n    {\n        'fact': edge.fact,\n        'valid_at': str(edge.valid_at),\n        'invalid_at': str(edge.invalid_at or 'Present'),\n    }\n    for edge in search_results.edges\n]\n```\n\nSo the EntityEdge attribute extracted for logging is **`fact`**.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "An integration test uses the helper search_results_to_context_string.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "In `tests/test_graphiti_int.py`, the `test_graphiti_init` test runs a search ... `pretty_results = search_results_to_context_string(results)`"
+      },
+      {
+        "fact": "The helper search_results_to_context_string is located in tests/.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "`search_results_to_context_string` (in `graphiti_core/search/search_helpers.py:30-37`)"
+      },
+      {
+        "fact": "The helper search_results_to_context_string pulls out the context attribute of each EntityEdge.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "The helper search_results_to_context_string concatenates the context attributes for logging.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.25,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 5,
+    "read": 3,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "An integration test uses the helper search_results_to_context_string.",
+    "The helper search_results_to_context_string is located in tests/.",
+    "The helper search_results_to_context_string pulls out the context attribute of each EntityEdge.",
+    "The helper search_results_to_context_string concatenates the context attributes for logging."
+  ]
+}

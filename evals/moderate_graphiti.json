@@ -1,0 +1,103 @@
+{
+  "repo": "https://github.com/getzep/graphiti.git",
+  "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+  "selection": "moderate, n_context_files in [1,2], 4<=facts<=8 (headroom band)",
+  "questions": [
+    {
+      "id": "0437055b-d00d-4331-a3c4-3b8ebb813d4e",
+      "question": "How does the bulk ingestion method differ from the single-episode ingestion path regarding edge invalidation and date extraction?",
+      "answer": "In graphiti_core/graphiti.py the two paths diverge precisely on those steps:\n\n\u2022 add_episode (single) runs resolve_extracted_edges, collects its invalidated_edges and invokes extract_attributes_from_nodes (which includes date\u2010field extraction) before writing to Neo4j.  \n\u2022 add_episode_bulk skips both edge invalidation and any date\u2010extraction logic entirely (\u201cImportant: This method does not perform edge invalidation or date extraction steps.\u201d).",
+      "facts": [
+        "In graphiti_core/graphiti.py, the add_episode function runs resolve_extracted_edges.",
+        "In graphiti_core/graphiti.py, the add_episode function collects invalidated edges.",
+        "In graphiti_core/graphiti.py, the add_episode function invokes extract_attributes_from_nodes.",
+        "The extract_attributes_from_nodes function includes date-field extraction.",
+        "In graphiti_core/graphiti.py, the add_episode function writes to Neo4j.",
+        "In graphiti_core/graphiti.py, the add_episode_bulk method does not perform edge invalidation.",
+        "In graphiti_core/graphiti.py, the add_episode_bulk method does not perform date extraction steps."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1
+    },
+    {
+      "id": "cedbe32d-037d-43b5-96b0-b53419ac93c8",
+      "question": "How does the Graphiti.search method choose the edge reranking configuration when a center node identifier is passed?",
+      "answer": "In Graphiti.search (graphiti_core/graphiti.py) you\u2019ll see:  \n```\nsearch_config = (EDGE_HYBRID_SEARCH_RRF \n                   if center_node_uuid is None \n                   else EDGE_HYBRID_SEARCH_NODE_DISTANCE)\n```\nSo as soon as you pass a center_node_uuid, it swaps out the default RRF config for EDGE_HYBRID_SEARCH_NODE_DISTANCE, and then uses that to rerank edges.",
+      "facts": [
+        "Graphiti.search is defined in the file graphiti_core/graphiti.py.",
+        "If center_node_uuid is None then search_config is set to EDGE_HYBRID_SEARCH_RRF.",
+        "If center_node_uuid is not None then search_config is set to EDGE_HYBRID_SEARCH_NODE_DISTANCE.",
+        "The code uses the selected search_config to rerank edges."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1
+    },
+    {
+      "id": "de802daf-171d-484f-93d9-7da3e99e2dee",
+      "question": "Which attribute of the returned EntityEdge objects does the integration test extract for logging?",
+      "answer": "The integration test uses the helper search_results_to_context_string (in tests/) which pulls out each EntityEdge\u2019s context attribute and concatenates those for logging.",
+      "facts": [
+        "An integration test uses the helper search_results_to_context_string.",
+        "The helper search_results_to_context_string is located in tests/.",
+        "The helper search_results_to_context_string pulls out the context attribute of each EntityEdge.",
+        "The helper search_results_to_context_string concatenates the context attributes for logging."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 2
+    },
+    {
+      "id": "304c5481-ebfc-4753-9efb-36fa9f91d69b",
+      "question": "Which episode addition workflow variant processes multiple episodes in one batch without performing edge invalidation or extracting temporal dates?",
+      "answer": "The bulk\u2010add workflow is the `Graphiti.add_episode_bulk` method (graphiti_core/graphiti.py). Per its docstring, it processes a list of `RawEpisode` in one batch and \u201cdoes not perform edge invalidation or date extraction\u201d (use `add_episode` for that).",
+      "facts": [
+        "The bulk\u2010add workflow is the Graphiti.add_episode_bulk method.",
+        "The Graphiti.add_episode_bulk method is defined in graphiti_core/graphiti.py.",
+        "The Graphiti.add_episode_bulk method processes a list of RawEpisode in one batch.",
+        "The Graphiti.add_episode_bulk method does not perform edge invalidation.",
+        "The Graphiti.add_episode_bulk method does not perform date extraction.",
+        "The add_episode method should be used for edge invalidation or date extraction."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1
+    },
+    {
+      "id": "d52a8746-9dca-4d5b-b248-729f3a596428",
+      "question": "How is the group ID parameter incorporated into both the message ingestion and the search/memory retrieval processes?",
+      "answer": "In ingest.py (add_messages_task), the incoming request.group_id is passed straight into graphiti.add_episode(\u2026, group_id=request.group_id, \u2026), so every message is tagged by its group.  \n\nIn retrieve.py both search() and get_memory() scope their calls to graphiti.search by passing either query.group_ids (or in get_memory, a singleton list [request.group_id]) into the group_ids argument, ensuring only that group\u2019s episodes are returned.",
+      "facts": [
+        "ingest.py defines a function named add_messages_task.",
+        "In add_messages_task, request.group_id is passed directly as the group_id argument to graphiti.add_episode.",
+        "Every message processed by add_messages_task is tagged with its group_id.",
+        "retrieve.py defines functions named search() and get_memory().",
+        "Both search() and get_memory() call graphiti.search with a group_ids argument.",
+        "search() passes query.group_ids into the group_ids argument of graphiti.search.",
+        "get_memory() passes a list containing request.group_id into the group_ids argument of graphiti.search.",
+        "These calls to graphiti.search ensure only episodes for the specified group are returned."
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 2
+    },
+    {
+      "id": "598f7bfe-1ad9-405b-b091-2d26e9c0cbb0",
+      "question": "What steps does the graph client's save_entity_node method perform to embed and persist a new entity node?",
+      "answer": "In ZepGraphiti.save_entity_node (server/graph_service/zep_graphiti.py) it:\n\n1. Instantiates an EntityNode(name, uuid, group_id, summary)  \n2. Calls new_node.generate_name_embedding(self.embedder) to compute its embedding  \n3. Calls new_node.save(self.driver) to persist it in Neo4j  \n4. Returns the saved EntityNode instance",
+      "facts": [
+        "ZepGraphiti.save_entity_node is defined in server/graph_service/zep_graphiti.py",
+        "ZepGraphiti.save_entity_node instantiates an EntityNode with name, uuid, group_id, and summary",
+        "ZepGraphiti.save_entity_node calls new_node.generate_name_embedding(self.embedder)",
+        "new_node.generate_name_embedding(self.embedder) computes the EntityNode\u2019s name embedding",
+        "ZepGraphiti.save_entity_node calls new_node.save(self.driver)",
+        "new_node.save(self.driver) persists the EntityNode in Neo4j",
+        "ZepGraphiti.save_entity_node returns the saved EntityNode instance"
+      ],
+      "difficulty": "moderate",
+      "commit": "3200afa363cc71db8533c09040d1d7091c6ad8fe",
+      "n_context_files": 1
+    }
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 88023,
+    "duration_api_ms": 135576,
+    "ttft_ms": 3517,
+    "num_turns": 3,
+    "result": "## How `group_id` works: a graph partition key\n\nIn Graphiti, `group_id` is a **partition key** \u2014 a string property stamped on every node and edge that logically separates one tenant/namespace's graph from another. It flows symmetrically through both ingestion (singular `group_id`) and retrieval (plural `group_ids`).\n\n---\n\n### Ingestion (`add_episode` / `add_episode_bulk`)\n\n**1. Entry & validation.** Both methods default to an empty string and validate immediately:\n- `graphiti.py:355` / `graphiti.py:540`: `group_id: str = ''`\n- `graphiti.py:425` / `graphiti.py:586`: `validate_group_id(group_id)` \u2014 `helpers.py:112-135` permits `''` and rejects anything outside `[a-zA-Z0-9_-]`.\n\n**2. Stamped at the source, then propagated.** It's a first-class field on the base `Node` (`nodes.py:92-93`) and `Edge` (`edges.py:59`) classes, so it persists to the DB in every `save()`. The flow:\n- Stamped onto the `EpisodicNode` from the parameter (`graphiti.py:438-451`).\n- Copied onto every extracted `EntityNode` from `episode.group_id` (`node_operations.py:165-172`).\n- Passed explicitly into `extract_edges` and stamped on every `EntityEdge` (`graphiti.py:475-483` \u2192 `edge_operations.py:226-236`).\n- `EpisodicEdge`s inherit it from the node they connect (`edge_operations.py:51-63`).\n\n**3. It scopes the ingestion side-effects** \u2014 this is the key part:\n- **Context window:** prior episodes are fetched with `group_ids=[group_id]` (`graphiti.py:427-435`), so an episode only sees history from its own partition.\n- **Entity dedup:** candidate lookup in `resolve_extracted_nodes` passes `group_ids=[node.group_id]` to `search()` (`node_operations.py:190-200`) \u2014 a node is only deduplicated against nodes in the same group.\n- **Edge dedup/invalidation:** Cypher matches on `{group_id: edge.group_id}` (`search_utils.py:789`, `:858`), so reconciliation stays within the partition.\n\n---\n\n### Retrieval (`search` / `search_`)\n\n**1. Entry & normalization.** Both methods take `group_ids: list[str] | None` and forward it to the core `search()` (`graphiti.py:750-806`, `:823-847`). `search.py:95-96` collapses empty/`['']` to `None`:\n```python\ngroup_ids = group_ids if group_ids and group_ids != [''] else None\n```\n`None` means **search across all groups**. The normalized value fans out to all four sub-searches (edge/node/episode/community).\n\n**2. How it becomes a query filter** \u2014 mechanism differs by search type:\n- **BM25 fulltext:** `fulltext_query` (`search_utils.py:63-80`) prepends a Lucene clause `group_id:\"g1\" OR group_id:\"g2\" AND (...)`. This works because `group_id` is itself a fulltext-indexed field (`graph_queries.py:77-86`). `None` \u2192 no prefix.\n- **Cosine similarity:** appends `AND n.group_id IN $group_ids` to the WHERE clause (nodes: `search_utils.py:387-390`; edges: `:222-226`; communities: `:561-563`). `None` \u2192 no group filter (just `IS NOT NULL`).\n- **BFS/graph traversal:** does **not** take `group_ids`. `node_bfs_search` instead scopes to the origin node's group via `WHERE n.group_id = origin.group_id` (`search_utils.py:446`); `edge_bfs_search` has no group filter at all \u2014 it relies on traversal starting from already-group-scoped seeds.\n\n---\n\n### Key asymmetry to note\n\nIngestion uses a **single** `group_id` (one partition per episode); retrieval uses a **list** `group_ids` (query across several partitions at once). The empty-string default (`''`) is itself a valid partition \u2014 if you never set `group_id`, everything lands in one unnamed global group.\n\nOne minor inconsistency the trace surfaced: `edge_fulltext_search` applies *both* a Lucene `group_id` filter and a redundant Cypher `WHERE r.group_id IN $group_ids` (`search_utils.py:171`), where the latter receives the un-normalized `group_ids`. The Lucene filter is the operative gate; the Cypher one is belt-and-suspenders.",
+    "stop_reason": "end_turn",
+    "session_id": "f32570ae-5d67-4103-9351-81a9bc758f56",
+    "total_cost_usd": 0.8387067500000001,
+    "usage": {
+      "input_tokens": 9405,
+      "cache_creation_input_tokens": 19861,
+      "cache_read_input_tokens": 43739,
+      "output_tokens": 2649,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 19861,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2240,
+          "output_tokens": 1572,
+          "cache_read_input_tokens": 26255,
+          "cache_creation_input_tokens": 11090,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 11090
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-sonnet-4-6": {
+        "inputTokens": 14,
+        "outputTokens": 5183,
+        "cacheReadInputTokens": 337630,
+        "cacheCreationInputTokens": 106768,
+        "webSearchRequests": 0,
+        "costUSD": 0.579456,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000
+      },
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 9405,
+        "outputTokens": 2649,
+        "cacheReadInputTokens": 43739,
+        "cacheCreationInputTokens": 19861,
+        "webSearchRequests": 0,
+        "costUSD": 0.25925075,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "b18e6b7e-cb37-4366-b430-fc144774ea02"
+  },
+  "answer": "## How `group_id` works: a graph partition key\n\nIn Graphiti, `group_id` is a **partition key** \u2014 a string property stamped on every node and edge that logically separates one tenant/namespace's graph from another. It flows symmetrically through both ingestion (singular `group_id`) and retrieval (plural `group_ids`).\n\n---\n\n### Ingestion (`add_episode` / `add_episode_bulk`)\n\n**1. Entry & validation.** Both methods default to an empty string and validate immediately:\n- `graphiti.py:355` / `graphiti.py:540`: `group_id: str = ''`\n- `graphiti.py:425` / `graphiti.py:586`: `validate_group_id(group_id)` \u2014 `helpers.py:112-135` permits `''` and rejects anything outside `[a-zA-Z0-9_-]`.\n\n**2. Stamped at the source, then propagated.** It's a first-class field on the base `Node` (`nodes.py:92-93`) and `Edge` (`edges.py:59`) classes, so it persists to the DB in every `save()`. The flow:\n- Stamped onto the `EpisodicNode` from the parameter (`graphiti.py:438-451`).\n- Copied onto every extracted `EntityNode` from `episode.group_id` (`node_operations.py:165-172`).\n- Passed explicitly into `extract_edges` and stamped on every `EntityEdge` (`graphiti.py:475-483` \u2192 `edge_operations.py:226-236`).\n- `EpisodicEdge`s inherit it from the node they connect (`edge_operations.py:51-63`).\n\n**3. It scopes the ingestion side-effects** \u2014 this is the key part:\n- **Context window:** prior episodes are fetched with `group_ids=[group_id]` (`graphiti.py:427-435`), so an episode only sees history from its own partition.\n- **Entity dedup:** candidate lookup in `resolve_extracted_nodes` passes `group_ids=[node.group_id]` to `search()` (`node_operations.py:190-200`) \u2014 a node is only deduplicated against nodes in the same group.\n- **Edge dedup/invalidation:** Cypher matches on `{group_id: edge.group_id}` (`search_utils.py:789`, `:858`), so reconciliation stays within the partition.\n\n---\n\n### Retrieval (`search` / `search_`)\n\n**1. Entry & normalization.** Both methods take `group_ids: list[str] | None` and forward it to the core `search()` (`graphiti.py:750-806`, `:823-847`). `search.py:95-96` collapses empty/`['']` to `None`:\n```python\ngroup_ids = group_ids if group_ids and group_ids != [''] else None\n```\n`None` means **search across all groups**. The normalized value fans out to all four sub-searches (edge/node/episode/community).\n\n**2. How it becomes a query filter** \u2014 mechanism differs by search type:\n- **BM25 fulltext:** `fulltext_query` (`search_utils.py:63-80`) prepends a Lucene clause `group_id:\"g1\" OR group_id:\"g2\" AND (...)`. This works because `group_id` is itself a fulltext-indexed field (`graph_queries.py:77-86`). `None` \u2192 no prefix.\n- **Cosine similarity:** appends `AND n.group_id IN $group_ids` to the WHERE clause (nodes: `search_utils.py:387-390`; edges: `:222-226`; communities: `:561-563`). `None` \u2192 no group filter (just `IS NOT NULL`).\n- **BFS/graph traversal:** does **not** take `group_ids`. `node_bfs_search` instead scopes to the origin node's group via `WHERE n.group_id = origin.group_id` (`search_utils.py:446`); `edge_bfs_search` has no group filter at all \u2014 it relies on traversal starting from already-group-scoped seeds.\n\n---\n\n### Key asymmetry to note\n\nIngestion uses a **single** `group_id` (one partition per episode); retrieval uses a **list** `group_ids` (query across several partitions at once). The empty-string default (`''`) is itself a valid partition \u2014 if you never set `group_id`, everything lands in one unnamed global group.\n\nOne minor inconsistency the trace surfaced: `edge_fulltext_search` applies *both* a Lucene `group_id` filter and a redundant Cypher `WHERE r.group_id IN $group_ids` (`search_utils.py:171`), where the latter receives the un-normalized `group_ids`. The Lucene filter is the operative gate; the Cypher one is belt-and-suspenders.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "ingest.py defines a function named add_messages_task.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "In add_messages_task, request.group_id is passed directly as the group_id argument to graphiti.add_episode.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Every message processed by add_messages_task is tagged with its group_id.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "retrieve.py defines functions named search() and get_memory().",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "Both search() and get_memory() call graphiti.search with a group_ids argument.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "search() passes query.group_ids into the group_ids argument of graphiti.search.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "get_memory() passes a list containing request.group_id into the group_ids argument of graphiti.search.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      },
+      {
+        "fact": "These calls to graphiti.search ensure only episodes for the specified group are returned.",
+        "present": false,
+        "votes_present": 0,
+        "evidence": ""
+      }
+    ],
+    "recall": 0.0,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 0,
+    "grep": 0,
+    "read": 0,
+    "glob": 0,
+    "bash": 0
+  },
+  "gold_facts": [
+    "ingest.py defines a function named add_messages_task.",
+    "In add_messages_task, request.group_id is passed directly as the group_id argument to graphiti.add_episode.",
+    "Every message processed by add_messages_task is tagged with its group_id.",
+    "retrieve.py defines functions named search() and get_memory().",
+    "Both search() and get_memory() call graphiti.search with a group_ids argument.",
+    "search() passes query.group_ids into the group_ids argument of graphiti.search.",
+    "get_memory() passes a list containing request.group_id into the group_ids argument of graphiti.search.",
+    "These calls to graphiti.search ensure only episodes for the specified group are returned."
+  ]
+}

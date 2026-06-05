@@ -1,0 +1,120 @@
+{
+  "run": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "api_error_status": null,
+    "duration_ms": 23804,
+    "duration_api_ms": 23101,
+    "ttft_ms": 5256,
+    "num_turns": 4,
+    "result": "**Edge invalidation** (temporal invalidation of existing edges).\n\nThe `add_episode_bulk` docstring states this explicitly at `graphiti_core/graphiti.py:578-580`:\n\n> Important: This method does not perform **edge invalidation** or date extraction steps. If these operations are required, use the `add_episode` method instead for each individual episode.\n\nSo of the two skipped steps, the edge-processing one is **edge invalidation** \u2014 the step where the single-episode `add_episode` path resolves a newly extracted edge against existing graph edges and marks contradicted/superseded edges as invalid (sets their `expired_at`/`invalid_at`). The bulk path stops after in-memory dedup of nodes and edges and saves to the KG (note the `# TODO: Resolve nodes and edges against the existing graph` at line 698), never running invalidation. The other skipped step (date/temporal extraction) is not edge-processing per se but applies to extracting valid/invalid timestamps for edges.",
+    "stop_reason": "end_turn",
+    "session_id": "1012fbf7-a8bf-44e7-a852-d47fab54345f",
+    "total_cost_usd": 0.24999725,
+    "usage": {
+      "input_tokens": 8030,
+      "cache_creation_input_tokens": 20387,
+      "cache_read_input_tokens": 112907,
+      "output_tokens": 1039,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 20387,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 549,
+          "cache_read_input_tokens": 34616,
+          "cache_creation_input_tokens": 3255,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 3255
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "modelUsage": {
+      "claude-opus-4-8[1m]": {
+        "inputTokens": 8030,
+        "outputTokens": 1039,
+        "cacheReadInputTokens": 112907,
+        "cacheCreationInputTokens": 20387,
+        "webSearchRequests": 0,
+        "costUSD": 0.24999725,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "uuid": "3c15c925-55ec-4f3f-b409-8bb85dcb44c5"
+  },
+  "answer": "**Edge invalidation** (temporal invalidation of existing edges).\n\nThe `add_episode_bulk` docstring states this explicitly at `graphiti_core/graphiti.py:578-580`:\n\n> Important: This method does not perform **edge invalidation** or date extraction steps. If these operations are required, use the `add_episode` method instead for each individual episode.\n\nSo of the two skipped steps, the edge-processing one is **edge invalidation** \u2014 the step where the single-episode `add_episode` path resolves a newly extracted edge against existing graph edges and marks contradicted/superseded edges as invalid (sets their `expired_at`/`invalid_at`). The bulk path stops after in-memory dedup of nodes and edges and saves to the KG (note the `# TODO: Resolve nodes and edges against the existing graph` at line 698), never running invalidation. The other skipped step (date/temporal extraction) is not edge-processing per se but applies to extracting valid/invalid timestamps for edges.",
+  "grade": {
+    "facts": [
+      {
+        "fact": "graphiti_core/graphiti.py defines a function named add_episode_bulk.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "The `add_episode_bulk` docstring states this explicitly at `graphiti_core/graphiti.py:578-580`"
+      },
+      {
+        "fact": "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the edge-invalidation step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This method does not perform **edge invalidation** or date extraction steps"
+      },
+      {
+        "fact": "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the associated valid/invalid date extraction step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "This method does not perform edge invalidation or **date extraction** steps"
+      },
+      {
+        "fact": "There is a per-episode flow named add_episode.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "use the `add_episode` method instead for each individual episode"
+      },
+      {
+        "fact": "The per-episode add_episode flow runs the edge-invalidation step.",
+        "present": true,
+        "votes_present": 3,
+        "evidence": "the single-episode `add_episode` path resolves a newly extracted edge against existing graph edges and marks contradicted/superseded edges as invalid"
+      },
+      {
+        "fact": "The per-episode add_episode flow runs the associated valid/invalid date extraction step.",
+        "present": false,
+        "votes_present": 1,
+        "evidence": "The other skipped step (date/temporal extraction) is not edge-processing per se but applies to extracting valid/invalid timestamps for edges."
+      }
+    ],
+    "recall": 0.6666666666666666,
+    "votes": 3
+  },
+  "tool_stats": {
+    "graph_reads": 1,
+    "grep": 1,
+    "read": 1,
+    "glob": 0,
+    "bash": 1
+  },
+  "gold_facts": [
+    "graphiti_core/graphiti.py defines a function named add_episode_bulk.",
+    "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the edge-invalidation step.",
+    "The bulk-load path in graphiti_core/graphiti.py::add_episode_bulk explicitly skips the associated valid/invalid date extraction step.",
+    "There is a per-episode flow named add_episode.",
+    "The per-episode add_episode flow runs the edge-invalidation step.",
+    "The per-episode add_episode flow runs the associated valid/invalid date extraction step."
+  ]
+}
