@@ -24,6 +24,7 @@ import {
 } from "./summary-state.js";
 import { bundleDirFromImportMeta, spawnWikiWorker, wikiLog } from "./spawn-wiki-worker.js";
 import { tryStopCounterTrigger } from "../skillify/triggers.js";
+import { runEventTrigger } from "../skillify/skillopt-trigger.js";
 import { EmbedClient } from "../embeddings/client.js";
 import { embeddingSqlLiteral } from "../embeddings/sql.js";
 import { embeddingsDisabled } from "../embeddings/disable.js";
@@ -188,6 +189,14 @@ async function main(): Promise<void> {
   // by restoring the import + try block here.
 
   maybeTriggerPeriodicSummary(input.session_id, input.cwd ?? "", config);
+
+  // SkillOpt: a user prompt IS the reaction to a skill. If this session has an org skill
+  // awaiting judgment (PreToolUse opened a window), spawn the worker to judge it against
+  // this prompt and improve it if it failed. No-op unless a window is open. Swallowed.
+  if (input.prompt !== undefined && process.env.HIVEMIND_WIKI_WORKER !== "1") {
+    try { runEventTrigger(input.session_id, input.prompt, { agent: "claude_code" }); }
+    catch (e: any) { log(`skillopt trigger (UserPromptSubmit) failed (swallowed): ${e?.message ?? e}`); }
+  }
 
   if (input.hook_event_name === "Stop") {
     if (process.env.HIVEMIND_WIKI_WORKER === "1") return;

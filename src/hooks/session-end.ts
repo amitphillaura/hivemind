@@ -73,6 +73,9 @@ async function main(): Promise<void> {
   // not summaries).
   recordSessionUsage(input.transcript_path, sessionId);
 
+  // (SkillOpt is NOT fired from SessionEnd — it fires immediately on the user's reaction
+  // via UserPromptSubmit, so there's nothing to do at session end.)
+
   // Coordinate with the periodic worker: if one is already running for this
   // session, skip. Two workers writing the same summary row trip the
   // Deeplake UPDATE-coalescing quirk (see CLAUDE.md) and drop one write.
