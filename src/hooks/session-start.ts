@@ -212,6 +212,18 @@ async function main(): Promise<void> {
   // regardless; the rules table it queries is lazy-created by the
   // CLI write path (`hivemind rules add`).
   const captureEnabled = process.env.HIVEMIND_CAPTURE !== "false" && entrypointPassesOnlyCliGate();
+
+  // Auto-pull skills from all org users into ~/.claude/skills/ on every
+  // SessionStart. File writes inside runPull are idempotent (skipped
+  // when local version is at-or-newer than remote), so re-running each
+  // session is cheap on disk; the only per-call cost is the SQL
+  // round-trip. Bounded by a 5s timeout so a slow Deeplake never
+  // freezes SessionStart. Hard opt-out via HIVEMIND_AUTOPULL_DISABLED=1.
+  // All failures swallowed inside autoPullSkills (documented as
+  // never-rejecting), so no try/catch needed here.
+  const pullResult = await autoPullSkills();
+  log(`autopull: pulled=${pullResult.pulled} skipped=${pullResult.skipped}`);
+
   let rulesBlock = "";
   if (input.session_id && creds?.token) {
     try {
@@ -256,16 +268,9 @@ async function main(): Promise<void> {
     }
   }
 
-  // Auto-pull skills from all org users into ~/.claude/skills/ on every
-  // SessionStart. File writes inside runPull are idempotent (skipped
-  // when local version is at-or-newer than remote), so re-running each
-  // session is cheap on disk; the only per-call cost is the SQL
-  // round-trip. Bounded by a 5s timeout so a slow Deeplake never
-  // freezes SessionStart. Hard opt-out via HIVEMIND_AUTOPULL_DISABLED=1.
-  // All failures swallowed inside autoPullSkills (documented as
-  // never-rejecting), so no try/catch needed here.
-  const pullResult = await autoPullSkills();
-  log(`autopull: pulled=${pullResult.pulled} skipped=${pullResult.skipped}`);
+  // SkillOpt is no longer fired from SessionStart — it's event-driven now (a skill
+  // invocation arms the session via PreToolUse, then UserPromptSubmit/SessionEnd tick
+  // the per-skill counter and fire only on accumulated pushback). See skillopt-trigger.
 
   // Version notice in additionalContext — informational only; the
   // upgrade-applied signal goes to stderr from inside autoUpdate (which

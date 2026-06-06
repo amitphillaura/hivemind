@@ -6,6 +6,7 @@ import { join, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readStdin } from "../utils/stdin.js";
 import { loadConfig } from "../config.js";
+import { armSkillOptOnSkillUse } from "./shared/skillopt-hook.js";
 import { DeeplakeApi } from "../deeplake-api.js";
 import { sqlLike } from "../utils/sql.js";
 import { log as _log } from "../utils/debug.js";
@@ -277,6 +278,9 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
     writeReadCacheFileFn = writeReadCacheFile,
     logFn = log,
   } = deps;
+
+  // SkillOpt: arm this session if it invoked an ORG skill (swallowed; never blocks tools).
+  armSkillOptOnSkillUse(input.session_id, input.tool_name, input.tool_input, input.tool_use_id);
 
   const cmd = (input.tool_input.command as string) ?? "";
   const shellCmd = getShellCommand(input.tool_name, input.tool_input);

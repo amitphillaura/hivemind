@@ -24,6 +24,7 @@ import {
 } from "./summary-state.js";
 import { bundleDirFromImportMeta, spawnWikiWorker, wikiLog } from "./spawn-wiki-worker.js";
 import { tryStopCounterTrigger } from "../skillify/triggers.js";
+import { reactSkillOpt } from "./shared/skillopt-hook.js";
 import { EmbedClient } from "../embeddings/client.js";
 import { embeddingSqlLiteral } from "../embeddings/sql.js";
 import { embeddingsDisabled } from "../embeddings/disable.js";
@@ -188,6 +189,9 @@ async function main(): Promise<void> {
   // by restoring the import + try block here.
 
   maybeTriggerPeriodicSummary(input.session_id, input.cwd ?? "", config);
+
+  // SkillOpt: the user prompt is the reaction to a recently-used org skill. Swallowed.
+  reactSkillOpt(input.session_id, input.prompt, "claude_code");
 
   if (input.hook_event_name === "Stop") {
     if (process.env.HIVEMIND_WIKI_WORKER === "1") return;

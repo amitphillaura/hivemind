@@ -43,6 +43,8 @@ vi.mock("../../src/deeplake-api.js", () => ({
     async knownTablesOrNull() { return knownTablesMock(); }
   },
 }));
+// (SkillOpt is no longer invoked from SessionStart — it's event-driven via
+// PreToolUse/UserPromptSubmit — so skillopt-trigger is not mocked here anymore.)
 // autoUpdate mocked at the boundary (CLAUDE.md rule 5) — the helper
 // itself is exhaustively tested in autoupdate.test.ts. Here we only
 // assert the hook *called* it with the right agent id and *didn't*
@@ -289,6 +291,8 @@ describe("session-start hook — placeholder branching", () => {
     // SELECT. Only the placeholder SELECT + INSERT run.
     knownTablesMock.mockResolvedValue([]);
     await runHook();
+    // placeholder SELECT + placeholder INSERT = 2 (renderer fires no SELECT
+    // when no tables are trusted).
     expect(queryMock).toHaveBeenCalledTimes(2);
     expect(queryMock.mock.calls[0][0]).toMatch(/^SELECT path FROM/);
     expect(queryMock.mock.calls[1][0]).toMatch(/^INSERT INTO/);
@@ -311,6 +315,9 @@ describe("session-start hook — placeholder branching", () => {
       "placeholder + schema ensure skipped (HIVEMIND_CAPTURE=false)",
     );
   });
+
+  // (SkillOpt is no longer fired from SessionStart — it's event-driven now via
+  // PreToolUse/UserPromptSubmit — so the old weekly-trigger branch tests were removed.)
 
   it("swallows placeholder errors and logs via both loggers", async () => {
     ensureTableMock.mockRejectedValue(new Error("table boom"));
