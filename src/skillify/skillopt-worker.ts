@@ -11,6 +11,7 @@
  * HIVEMIND_SKILLOPT_WORKER=1 is set by the trigger as a recursion guard.
  */
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { log as _log } from "../utils/debug.js";
 import { loadConfig } from "../config.js";
 import { DeeplakeApi } from "../deeplake-api.js";
@@ -21,6 +22,21 @@ import { readCurrentSkillRow, publishImprovedSkill } from "./skill-org-publish.j
 import { loadMeta, appendMeta, priorEditSummaries, alreadyProposed, metaEntryFor } from "./skillopt-meta.js";
 
 const log = (m: string) => _log("skillopt-worker", m);
+
+/**
+ * Resolve an agent's CLI via `command -v` — finds nvm/volta/fnm installs that
+ * gate-runner's static-path findAgentBin misses (it deliberately avoids PATH for
+ * the openclaw bundle). undefined → agentModel falls back to findAgentBin. Mirrors
+ * the wiki spawn helpers' findXBin pattern (this worker is a standalone detached
+ * process, not the openclaw-scanned skillify-worker, so `command -v` is fine here).
+ */
+const AGENT_CMD: Record<string, string> = { claude_code: "claude", codex: "codex", cursor: "cursor-agent", hermes: "hermes", pi: "pi" };
+function resolveAgentBin(agent: string): string | undefined {
+  try {
+    const p = execSync(`command -v ${AGENT_CMD[agent] ?? agent}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return p || undefined;
+  } catch { return undefined; }
+}
 
 async function main(): Promise<void> {
   log("skillopt worker started (detached, weekly)");
@@ -38,7 +54,8 @@ async function main(): Promise<void> {
   // codex/hermes/cursor/pi user with no local `claude` still gets SkillOpt. The
   // judge/proposer run no-tools (untrusted transcript text in the prompt).
   const agent = detectScorerAgent();
-  log(`scoring on agent: ${agent}`);
+  const agentBin = resolveAgentBin(agent);
+  log(`scoring on agent: ${agent}${agentBin ? ` (${agentBin})` : ""}`);
   const metaFile = path.join(getStateDir(), "skillopt", "meta.jsonl");
   const metaCache = loadMeta(metaFile);
   // Lookback + thresholds are env-tunable (defaults: 30-day window, the detector's
@@ -71,9 +88,9 @@ async function main(): Promise<void> {
       sinceIso, limit: 5000,
       minInvocations: envNum("HIVEMIND_SKILLOPT_MIN_INVOCATIONS"),
       failureRateThreshold: envNum("HIVEMIND_SKILLOPT_FAILURE_RATE"),
-      judge: agentModel({ agent, role: "judge" }),
+      judge: agentModel({ agent, role: "judge", bin: agentBin }),
     },
-    proposer: { model: agentModel({ agent, role: "proposer" }) },
+    proposer: { model: agentModel({ agent, role: "proposer", bin: agentBin }) },
     fireThreshold: envNum("HIVEMIND_SKILLOPT_FIRE_THRESHOLD"),
     now,
   });

@@ -81,6 +81,13 @@ describe("agentModel — per-agent no-tools dispatch", () => {
     expect(argVal(calls[0].args, "--model")).toBe("opus");
   });
 
+  it("env provider override (e.g. AWS Bedrock instead of openrouter) is applied", async () => {
+    const { spawnImpl, calls } = fakeSpawn("x");
+    const env = { HIVEMIND_SKILLOPT_HERMES_PROVIDER: "bedrock" } as unknown as NodeJS.ProcessEnv;
+    await agentModel({ agent: "hermes", role: "judge", bin: "/x/hermes", spawnImpl, env })("S", "U");
+    expect(argVal(calls[0].args, "--provider")).toBe("bedrock");
+  });
+
   it("rejects on non-zero exit (caller swallows → no-change)", async () => {
     const { spawnImpl } = fakeSpawn("boom", 1);
     await expect(agentModel({ agent: "claude_code", role: "judge", bin: "/x/claude", spawnImpl })("S", "U"))

@@ -94,6 +94,13 @@ function envModel(agent: Agent, role: ScorerRole, env: NodeJS.ProcessEnv): strin
   return env[`HIVEMIND_SKILLOPT_${A}_${role.toUpperCase()}_MODEL`] ?? env[`HIVEMIND_SKILLOPT_${A}_MODEL`];
 }
 
+/** Per-agent provider override (hermes/pi): HIVEMIND_SKILLOPT_<AGENT>_PROVIDER. The
+ *  openrouter default is wrong for a user on a different provider (e.g. AWS Bedrock),
+ *  so the provider must be overridable per install. */
+function envProvider(agent: Agent, env: NodeJS.ProcessEnv): string | undefined {
+  return env[`HIVEMIND_SKILLOPT_${agent.toUpperCase()}_PROVIDER`];
+}
+
 export function agentModel(opts: {
   agent: Agent;
   role: ScorerRole;
@@ -107,7 +114,7 @@ export function agentModel(opts: {
   const env = opts.env ?? process.env;
   const d = DISPATCH[opts.agent];
   const model = opts.model ?? envModel(opts.agent, opts.role, env) ?? d.model(opts.role);
-  const provider = opts.provider ?? d.provider;
+  const provider = opts.provider ?? envProvider(opts.agent, env) ?? d.provider;
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const spawnFn = opts.spawnImpl ?? (nodeSpawn as unknown as SpawnFn);
   const bin = opts.bin ?? findAgentBin(opts.agent);
