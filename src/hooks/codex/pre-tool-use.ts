@@ -34,6 +34,7 @@ import {
 import { log as _log } from "../../utils/debug.js";
 import { isDirectRun } from "../../utils/direct-run.js";
 import { isSafe, touchesMemory, rewritePaths } from "../memory-path-utils.js";
+import { armSkillOptOnSkillUse } from "../shared/skillopt-hook.js";
 
 export { isSafe, touchesMemory, rewritePaths };
 
@@ -368,6 +369,9 @@ export async function processCodexPreToolUse(
 /* c8 ignore start */
 async function main(): Promise<void> {
   const input = await readStdin<CodexPreToolUseInput>();
+  // SkillOpt: codex USES an org skill by shelling a read of its SKILL.md — arm the judgment
+  // window on that command. Fully swallowed; never affects the tool decision below.
+  armSkillOptOnSkillUse(input.session_id, input.tool_name, input.tool_input, input.tool_use_id);
   const decision = await processCodexPreToolUse(input);
 
   if (decision.action === "pass") return;

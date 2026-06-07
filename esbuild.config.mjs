@@ -89,6 +89,9 @@ const codexHooks = [
   { entry: "dist/src/hooks/codex/stop.js", out: "stop" },
   { entry: "dist/src/hooks/codex/wiki-worker.js", out: "wiki-worker" },
   { entry: "dist/src/skillify/skillify-worker.js", out: "skillify-worker" },
+  // SkillOpt worker — codex's capture spawns it on a user reaction to judge + improve a
+  // recently-used org skill (judging runs on the codex CLI). Same shared module CC uses.
+  { entry: "dist/src/skillify/skillopt-worker.js", out: "skillopt-worker" },
   { entry: "dist/src/hooks/graph-pull-worker.js", out: "graph-pull-worker" },
   // G3: code-graph auto-build parity for Codex (same shared hook as CC/Cursor).
   { entry: "dist/src/hooks/graph-on-stop.js", out: "graph-on-stop" },

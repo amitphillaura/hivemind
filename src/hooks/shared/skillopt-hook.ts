@@ -5,22 +5,21 @@
  * whether a tool runs or a prompt is captured.
  */
 import { markSkillPending, runEventTrigger } from "../../skillify/skillopt-trigger.js";
+import { pathToSkillRef } from "../../skillify/skill-invocations.js";
 import { SKILLOPT_ENV } from "../../skillify/skillopt-env.js";
 
 /**
- * Recover an org-skill ref from a tool call that LOADS a skill's SKILL.md by file path —
- * how agents without a first-class `Skill` tool use skills (pi reads `.../skills/<dir>/SKILL.md`
- * via its `read` tool; codex shells to read it). The `<dir>` segment is the skill ref
- * (`name--author` for org skills). Restricted to read tools so EDITING a SKILL.md doesn't
- * arm. Returns null when it isn't a SKILL.md read. markSkillPending still gates the ref
+ * Recover an org-skill ref from a tool call that LOADS a skill's SKILL.md — how agents without
+ * a first-class `Skill` tool use skills: pi `read`s `.../skills/<dir>/SKILL.md` (structured
+ * `path`), codex/hermes SHELL a read of it (path inside `command`). The `<dir>` segment is the
+ * ref. Returns null when it isn't a SKILL.md load. markSkillPending still gates the ref
  * (org-shape + manifest), so a bare/non-org dir is rejected there.
  */
 export function skillRefFromSkillFileRead(toolName: string, toolInput: unknown): string | null {
-  if (!/^read$/i.test(toolName)) return null;
-  const p = (toolInput as { path?: unknown })?.path;
-  if (typeof p !== "string") return null;
-  const m = p.match(/\/skills\/([^/]+)\/SKILL\.md$/);
-  return m ? m[1] : null;
+  // read tool with a structured path (pi)
+  if (/^read$/i.test(toolName)) return pathToSkillRef((toolInput as { path?: unknown })?.path);
+  // shell tool with the path inside the command (codex Bash, hermes terminal)
+  return pathToSkillRef((toolInput as { command?: unknown })?.command);
 }
 
 /**

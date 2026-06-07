@@ -44,13 +44,32 @@ export function parseMessage(m: unknown): ParsedMsg | null {
   return null;
 }
 
-/** The skill ref invoked by a tool_call message (e.g. "name--author"), else null. */
+/** Match a path that loads a skill's SKILL.md anywhere in `s` → the `<dir>` ref (name--author),
+ *  else null. Works on a bare path (pi `read` tool_input.path) or inside a shell command string
+ *  (codex/hermes `cat …/SKILL.md`). The dir class excludes whitespace/quotes so a command's
+ *  trailing args don't get swallowed into the ref. */
+export function pathToSkillRef(s: unknown): string | null {
+  if (typeof s !== "string") return null;
+  const m = s.match(/\/skills\/([^/\s"'`]+)\/SKILL\.md/);
+  return m ? m[1] : null;
+}
+
+/**
+ * The skill ref invoked by a tool_call message (e.g. "name--author"), else null. Recognises:
+ *   - claude's first-class `Skill` tool (tool_input.skill)
+ *   - pi/codex/hermes loading a skill by reading its SKILL.md — a `read` tool_input.path, or a
+ *     shell tool_input.command that cats it (the worker windows around whichever it finds).
+ */
 export function invokedSkillRef(msg: ParsedMsg): string | null {
-  if (msg.type !== "tool_call" || msg.tool_name !== "Skill") return null;
+  if (msg.type !== "tool_call") return null;
   let input: unknown = msg.tool_input;
-  if (typeof input === "string") { try { input = JSON.parse(input); } catch { return null; } }
-  const skill = (input as { skill?: unknown })?.skill;
-  return typeof skill === "string" && skill.length > 0 ? skill : null;
+  if (typeof input === "string") { try { input = JSON.parse(input); } catch { input = msg.tool_input; } }
+  if (msg.tool_name === "Skill") {
+    const skill = (input as { skill?: unknown })?.skill;
+    return typeof skill === "string" && skill.length > 0 ? skill : null;
+  }
+  const io = input as { path?: unknown; command?: unknown } | undefined;
+  return pathToSkillRef(io?.path) ?? pathToSkillRef(io?.command);
 }
 
 /** Split "<name>--<author>" → parts. null for plugin-namespaced / bare / malformed refs. */

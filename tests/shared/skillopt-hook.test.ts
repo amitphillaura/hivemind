@@ -27,9 +27,14 @@ describe("armSkillOptOnSkillUse", () => {
     expect(markSkillPending).not.toHaveBeenCalled();
   });
 
-  it("arms on a SKILL.md read (pi/codex style), recovering the ref from the path", () => {
+  it("arms on a SKILL.md read (pi style), recovering the ref from the path", () => {
     armSkillOptOnSkillUse("s1", "read", { path: "/home/u/.pi/agent/skills/posthog--kamo/SKILL.md" }, "tu2");
     expect(markSkillPending).toHaveBeenCalledWith("s1", "posthog--kamo", "tu2");
+  });
+
+  it("arms on a SHELL command that reads SKILL.md (codex/hermes style — path in the command)", () => {
+    armSkillOptOnSkillUse("s1", "Bash", { command: 'cat "/home/u/.agents/skills/posthog--kamo/SKILL.md"' }, "tu3");
+    expect(markSkillPending).toHaveBeenCalledWith("s1", "posthog--kamo", "tu3");
   });
 
   it("does not arm on a non-SKILL.md read, nor on an EDIT of a SKILL.md (use, not edit)", () => {

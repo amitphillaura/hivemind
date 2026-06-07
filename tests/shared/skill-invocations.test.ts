@@ -27,6 +27,11 @@ describe("invokedSkillRef", () => {
     expect(invokedSkillRef({ type: "assistant_message", content: "use the Skill tool" })).toBeNull();
     expect(invokedSkillRef({ type: "tool_call", tool_name: "Skill", tool_input: "not json" })).toBeNull();
   });
+  it("recognizes a SKILL.md load via a read path or a shell command (pi/codex/hermes)", () => {
+    expect(invokedSkillRef({ type: "tool_call", tool_name: "read", tool_input: { path: "/x/skills/a--b/SKILL.md" } as unknown })).toBe("a--b");
+    expect(invokedSkillRef({ type: "tool_call", tool_name: "Bash", tool_input: JSON.stringify({ command: "sed -n '1,5p' /x/.agents/skills/a--b/SKILL.md" }) })).toBe("a--b");
+    expect(invokedSkillRef({ type: "tool_call", tool_name: "Bash", tool_input: JSON.stringify({ command: "ls /tmp" }) })).toBeNull();
+  });
 });
 
 describe("splitOrgSkill", () => {
