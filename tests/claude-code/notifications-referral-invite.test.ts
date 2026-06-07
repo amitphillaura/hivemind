@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { referralInviteRule } from "../../src/notifications/rules/referral-invite.js";
-import { bumpSessionCount, readState } from "../../src/notifications/state.js";
-import type { NotificationContext } from "../../src/notifications/types.js";
+import { bumpSessionCount, readState, writeState, markShown } from "../../src/notifications/state.js";
+import type { NotificationContext, Notification } from "../../src/notifications/types.js";
 import type { Credentials } from "../../src/commands/auth-creds.js";
 
 const signedIn = { token: "tok" } as unknown as Credentials;
@@ -32,8 +32,10 @@ describe("referralInviteRule", () => {
     const n = referralInviteRule.evaluate(ctx({ creds: signedIn, sessionCount: 3 }));
     expect(n).not.toBeNull();
     expect(n!.id).toBe("referral-invite");
-    expect(n!.title).toContain("$20");
-    expect(n!.body).toContain("hivemind invite");
+    expect(n!.title).toBe("💸 Invite a teammate — your org earns $20");
+    expect(n!.body).toBe(
+      "Run `hivemind invite <email> <ADMIN|WRITE|READ>` — your org gets $20 in credit when they sign up (up to $100).",
+    );
     expect(n!.dedupKey).toEqual({ v: 1 }); // stable → shown once
   });
 
@@ -74,5 +76,26 @@ describe("bumpSessionCount", () => {
     expect(bumpSessionCount("s1")).toBe(1);
     expect(bumpSessionCount(undefined)).toBe(1);
     expect(readState().sessionCount).toBe(1);
+  });
+
+  it("survives a round-trip through writeState/readState", () => {
+    writeState({ shown: {}, sessionCount: 5, lastCountedSessionId: "s5" });
+    const s = readState();
+    expect(s.sessionCount).toBe(5);
+    expect(s.lastCountedSessionId).toBe("s5");
+  });
+
+  it("treats a legacy state file (no counter) as count 0", () => {
+    writeState({ shown: {} });
+    expect(readState().sessionCount).toBeUndefined();
+    expect(bumpSessionCount("first")).toBe(1);
+  });
+
+  it("markShown preserves the session counter fields", () => {
+    const n: Notification = { id: "x", title: "t", body: "b", dedupKey: { v: 1 } };
+    const next = markShown({ shown: {}, sessionCount: 3, lastCountedSessionId: "s3" }, n);
+    expect(next.sessionCount).toBe(3);
+    expect(next.lastCountedSessionId).toBe("s3");
+    expect(next.shown["x"]).toBeDefined();
   });
 });

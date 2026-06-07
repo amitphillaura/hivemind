@@ -7,10 +7,9 @@
  * so brand-new users aren't nudged before they've used the product. The stable
  * dedupKey makes it show exactly once ever; bump the version to re-nudge.
  *
- * Suppression:
- *   - not signed in (no creds): the user has no org to invite into, so silent.
- *   - REFERRAL_NUDGE_ENABLED=false: kill switch for dark-shipping. Referral is
- *     live (enabled in the credit_programs registry), so it's on.
+ * Suppression: silent when not signed in (no org to invite into). To dark-ship
+ * or kill the nudge, stop registering it in the SessionStart hook entry — the
+ * rule only runs when registered.
  *
  * Client-only by design: it does not check the per-org referral cap (that's
  * server state). Worst case it nudges an already-capped referrer once — fine
@@ -19,9 +18,6 @@
 
 import type { Rule } from "../types.js";
 
-/** Kill switch for dark-shipping the nudge. */
-const REFERRAL_NUDGE_ENABLED = true;
-
 /** Fire on the 3rd session onward — not the first two. */
 const MIN_SESSIONS = 3;
 
@@ -29,7 +25,6 @@ export const referralInviteRule: Rule = {
   id: "referral-invite",
   trigger: "session_start",
   evaluate({ creds, sessionCount }) {
-    if (!REFERRAL_NUDGE_ENABLED) return null;
     if (!creds?.token) return null; // need an org to invite into
     if ((sessionCount ?? 0) < MIN_SESSIONS) return null;
     return {

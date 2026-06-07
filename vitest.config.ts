@@ -366,6 +366,7 @@ export default defineConfig({
         "src/notifications/state.ts":             { statements: 90, branches: 75, functions: 90, lines: 90 },
         "src/notifications/rules/registry.ts":    { statements: 90, branches: 90, functions: 90, lines: 90 },
         "src/notifications/rules/welcome.ts":     { statements: 90, branches: 90, functions: 90, lines: 90 },
+        "src/notifications/rules/referral-invite.ts": { statements: 90, branches: 90, functions: 90, lines: 90 },
         "src/notifications/sources/backend.ts":   { statements: 90, branches: 90, functions: 80, lines: 90 },
         // feat/resume-next-steps — resume-brief windowing (skip placeholders +
         // dedup) and the goal capture/get CLI. pickResumeBrief is exercised via
