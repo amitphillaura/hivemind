@@ -477,7 +477,13 @@ function runAutopullWorker(): void {
 // handler's captureEnabled check, so the worker's own pi-judge subprocess (HIVEMIND_CAPTURE=false)
 // can't re-arm/re-react — that's the recursion guard.
 const PI_SKILLOPT_WORKER_PATH = join(homedir(), ".pi", "agent", "hivemind", "skillopt-worker.js");
-const SKILLOPT_PENDING_DIR = join(homedir(), ".deeplake", "state", "skillify", "skillopt", "pending");
+// Mirror getStateDir()'s contract: a non-empty (trimmed) HIVEMIND_STATE_DIR overrides the default
+// ~/.deeplake/state/skillify root, so pi's pending state co-locates with the rest of Skillify
+// (and test-isolation overrides apply here too, not just in the shared trigger).
+const SKILLOPT_STATE_ROOT = (typeof process.env.HIVEMIND_STATE_DIR === "string" && process.env.HIVEMIND_STATE_DIR.trim())
+  ? process.env.HIVEMIND_STATE_DIR.trim()
+  : join(homedir(), ".deeplake", "state", "skillify");
+const SKILLOPT_PENDING_DIR = join(SKILLOPT_STATE_ROOT, "skillopt", "pending");
 const SKILLOPT_JUDGE_WINDOW = 3; // K reactions to keep judging after a skill use (DEFAULT_JUDGE_WINDOW)
 
 /** Recover an org-skill ref (name--author) from a path that loads a skill's SKILL.md, else null. */
@@ -498,9 +504,12 @@ function skilloptPendingFile(sessionId: string): string {
 }
 
 /** tool_result: pi read an org skill's SKILL.md → open a K-message judgment window. */
-function skilloptArm(sessionId: string, toolInput: any, toolCallId: unknown): void {
+function skilloptArm(sessionId: string, toolName: unknown, toolInput: any, toolCallId: unknown): void {
   try {
     if (process.env.HIVEMIND_SKILLOPT_DISABLED === "1") return;
+    // Arm only on a READ of the SKILL.md — USING a skill is reading it. An edit/write of a
+    // SKILL.md (even one whose input carries a matching path) must NOT open a judgment window.
+    if (!/^read/i.test(String(toolName ?? ""))) return;
     const ref = skilloptRefFromPath(toolInput?.path ?? toolInput?.file ?? toolInput?.filePath);
     if (!ref) return;
     mkdirSync(SKILLOPT_PENDING_DIR, { recursive: true });
@@ -1369,7 +1378,7 @@ export default function hivemindExtension(pi: ExtensionAPI): void {
     }
     // SkillOpt: pi USES an org skill by reading its SKILL.md — arm the judgment window on
     // a successful such read (skip errored reads). Swallowed.
-    if (event.isError !== true) skilloptArm(sessionId, event.input, event.toolCallId);
+    if (event.isError !== true) skilloptArm(sessionId, event.toolName, event.input, event.toolCallId);
     maybeTriggerPeriodicSummary(creds, sessionId, cwd);
   });
 

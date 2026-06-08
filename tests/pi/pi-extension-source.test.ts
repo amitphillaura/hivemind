@@ -194,13 +194,14 @@ describe("pi extension — embedding wiring", () => {
 });
 
 describe("pi extension — SkillOpt wiring", () => {
-  it("arms on a SKILL.md read in the tool_result handler (non-error reads only)", () => {
-    // pi has no first-class Skill tool — it USES a skill by reading its SKILL.md, so arming
-    // hangs off tool_result, gated on a successful read.
-    expect(PI_SRC).toContain("skilloptArm(sessionId, event.input, event.toolCallId)");
+  it("arms on a SKILL.md READ in the tool_result handler (non-error reads only, read tools only)", () => {
+    // pi has no first-class Skill tool — it USES a skill by reading its SKILL.md, so arming hangs
+    // off tool_result, gated on a successful read. The toolName is passed so arming is restricted
+    // to read tools (an edit/write of a SKILL.md must not arm).
+    expect(PI_SRC).toContain("skilloptArm(sessionId, event.toolName, event.input, event.toolCallId)");
     expect(PI_SRC).toContain("event.isError !== true");
+    expect(PI_SRC).toMatch(/\/\^read\/i\.test/); // arm restricted to read tools
     expect(PI_SRC).toContain("/skills/"); // the ref-from-path matcher targets …/skills/<ref>/SKILL.md
-    expect(PI_SRC).toContain("SKILL");
   });
 
   it("reacts on the user prompt in the input handler", () => {
