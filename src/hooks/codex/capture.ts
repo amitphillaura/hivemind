@@ -34,6 +34,7 @@ import {
 } from "../summary-state.js";
 import { bundleDirFromImportMeta, spawnCodexWikiWorker, wikiLog } from "./spawn-wiki-worker.js";
 import { getInstalledVersion } from "../../utils/version-check.js";
+import { isHivemindPluginEnabled } from "../../utils/plugin-state.js";
 const log = (msg: string) => _log("codex-capture", msg);
 
 function resolveEmbedDaemonPath(): string {
@@ -71,6 +72,7 @@ const CAPTURE = process.env.HIVEMIND_CAPTURE !== "false";
 
 async function main(): Promise<void> {
   if (!CAPTURE) return;
+  if (!isHivemindPluginEnabled()) { log("plugin disabled, skipping capture"); return; }
   const input = await readStdin<CodexHookInput>();
   const config = loadConfig();
   if (!config) { log("no config"); return; }

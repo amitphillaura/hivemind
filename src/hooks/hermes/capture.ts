@@ -38,6 +38,7 @@ import { bundleDirFromImportMeta, spawnHermesWikiWorker, wikiLog } from "./spawn
 import { tryStopCounterTrigger } from "../../skillify/triggers.js";
 import type { Config } from "../../config.js";
 import { getInstalledVersion } from "../../utils/version-check.js";
+import { isHivemindPluginEnabled } from "../../utils/plugin-state.js";
 const log = (msg: string) => _log("hermes-capture", msg);
 
 function resolveEmbedDaemonPath(): string {
@@ -75,6 +76,7 @@ function pickString(...candidates: unknown[]): string | undefined {
 
 async function main(): Promise<void> {
   if (!CAPTURE) return;
+  if (!isHivemindPluginEnabled()) { log("plugin disabled, skipping capture"); return; }
   const input = await readStdin<HermesCaptureInput>();
   const config = loadConfig();
   if (!config) { log("no config"); return; }
