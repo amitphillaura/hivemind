@@ -1,5 +1,5 @@
-import { appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 const LOG = join(homedir(), ".deeplake", "hook-debug.log");
@@ -21,5 +21,6 @@ export function utcTimestamp(d: Date = new Date()): string {
 
 export function log(tag: string, msg: string) {
   if (!isDebug()) return;
+  mkdirSync(dirname(LOG), { recursive: true });
   appendFileSync(LOG, `${new Date().toISOString()} [${tag}] ${msg}\n`);
 }
