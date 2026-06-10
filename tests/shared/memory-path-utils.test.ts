@@ -123,7 +123,7 @@ describe("bashTouchesMemory", () => {
     expect(bashTouchesMemory(`cat "${MEM}/index.md"`)).toBe(true);
   });
 
-  it("intercepts an interpreter on a memory path", () => {
+  it("intercepts an interpreter with a memory-path prefix even when traversal targets elsewhere", () => {
     expect(bashTouchesMemory(`python3 ${MEM}/../../etc/passwd`)).toBe(true);
   });
 

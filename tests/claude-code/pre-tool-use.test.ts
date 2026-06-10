@@ -544,15 +544,27 @@ describe("pre-tool-use: incidental memory mentions pass through", () => {
     // would swallow it into the echo passthrough.
     const r = runPreToolUse("Bash", { command: "echo 'a\\' ; cat ~/.deeplake/memory/index.md" });
     expect(r.empty).toBe(false);
+    if (!r.empty) {
+      expect(r.decision).toBe("allow");
+      expect(r.updatedCommand).toContain("RETRY REQUIRED");
+    }
   });
 
   it("still intercepts `claude` reading memory via input redirect", () => {
     const r = runPreToolUse("Bash", { command: "claude -p 'summarize this' < ~/.deeplake/memory/index.md" });
     expect(r.empty).toBe(false);
+    if (!r.empty) {
+      expect(r.decision).toBe("allow");
+      expect(r.updatedCommand).toContain("RETRY REQUIRED");
+    }
   });
 
   it("still intercepts `printf` reading memory via input redirect", () => {
     const r = runPreToolUse("Bash", { command: "printf '%s' < ~/.deeplake/memory/index.md" });
     expect(r.empty).toBe(false);
+    if (!r.empty) {
+      expect(r.decision).toBe("allow");
+      expect(r.updatedCommand).toContain("RETRY REQUIRED");
+    }
   });
 });
