@@ -24,7 +24,7 @@ import {
   readCachedIndexContent,
   writeCachedIndexContent,
 } from "./query-cache.js";
-import { isSafe, touchesMemory, rewritePaths } from "./memory-path-utils.js";
+import { isSafe, touchesMemory, rewritePaths, bashTouchesMemory } from "./memory-path-utils.js";
 import { capOutputForClaude } from "../utils/output-cap.js";
 import { ensureSessionOwner } from "./summary-state.js";
 
@@ -174,7 +174,7 @@ export function getShellCommand(toolName: string, toolInput: Record<string, unkn
     }
     case "Bash": {
       const cmd = toolInput.command as string | undefined;
-      if (!cmd || !touchesMemory(cmd)) break;
+      if (!cmd || !bashTouchesMemory(cmd)) break;
       const rewritten = rewritePaths(cmd);
       if (!isSafe(rewritten)) {
         log(`unsafe command blocked: ${rewritten}`);
@@ -297,7 +297,7 @@ export async function processPreToolUse(input: PreToolUseInput, deps: ClaudePreT
     return buildDenyDecision(WRITE_EDIT_DENY_REASON, `[DeepLake] ${input.tool_name} denied on memory path`);
   }
 
-  if (!shellCmd && (touchesMemory(cmd) || touchesMemory(toolPath))) {
+  if (!shellCmd && (bashTouchesMemory(cmd) || touchesMemory(toolPath))) {
     // Unsupported/unsafe command targeting memory (interpreter, $(), pipes,
     // chains, …). Do NOT rewrite it to a host `cat`: that decision runs on the
     // real filesystem, not the VFS, so `python3 ~/.deeplake/memory/../../etc/passwd`

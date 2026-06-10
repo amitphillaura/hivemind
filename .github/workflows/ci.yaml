@@ -266,7 +266,11 @@ jobs:
           echo "body-file=/tmp/pr-coverage.md" >> "$GITHUB_OUTPUT"
 
       - name: Post coverage comment on PR
-        if: github.event_name == 'pull_request' && always() && steps.pr-coverage.outputs.body-file != ''
+        # Fork PRs get a read-only GITHUB_TOKEN: the comment API returns
+        # "Resource not accessible by integration", failing the job and
+        # skipping the bundle build/smoke steps below. Skip the comment
+        # there — the coverage gate itself already ran above.
+        if: github.event_name == 'pull_request' && always() && steps.pr-coverage.outputs.body-file != '' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v3.0.4
         with:
           header: pr-coverage-report
