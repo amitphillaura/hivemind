@@ -200,6 +200,15 @@ describe("hivemind_read", () => {
     expect(JSON.stringify(out)).toContain("Read failed: conn refused");
   });
 
+  it("a row with SQL NULL content renders as empty, not as the string 'null'", async () => {
+    // message is a nullable JSONB column, so message::text can be NULL on
+    // real session rows. String(null) would hand the agent a literal "null".
+    queryMock.mockResolvedValue([{ path: "/sessions/alice/s.jsonl", content: null }]);
+    await importServer();
+    const out = await registeredTools.get("hivemind_read")!.handler({ path: "/sessions/alice/s.jsonl" }) as { content: { text: string }[] };
+    expect(out.content[0].text).toBe("");
+  });
+
   it("not authenticated → auth-error short-circuits before any query", async () => {
     loadCredentialsMock.mockReturnValue(null);
     await importServer();
@@ -261,6 +270,18 @@ describe("hivemind_index", () => {
     await importServer();
     const out = await registeredTools.get("hivemind_index")!.handler({}) as { content: { text: string }[] };
     expect(out.content[0].text).toContain("/summaries/alice/a.md\t2026-04-01\tml\tAlice's first session");
+  });
+
+  it("incomplete legacy rows render placeholders, never the strings 'null'/'undefined'", async () => {
+    // Rows from orgs predating a schema-heal can come back with missing
+    // keys or SQL NULLs. The agent reads this output verbatim — feeding it
+    // "undefined\tnull\t..." would poison the recall context.
+    queryMock.mockResolvedValue([
+      { description: null, project: null, last_update_date: null },
+    ]);
+    await importServer();
+    const out = await registeredTools.get("hivemind_index")!.handler({}) as { content: { text: string }[] };
+    expect(out.content[0].text).toBe("path\tlast_updated\tproject\tdescription\n?\t\t\t");
   });
 });
 
